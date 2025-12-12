@@ -54,6 +54,7 @@ interface ReviewsMapProps {
   userId: number;
   profileId: number | null;
   userName: string;
+  avatarUrl?: string;
 }
 
 interface Node extends d3.SimulationNodeDatum {
@@ -80,7 +81,7 @@ const MAX_LEVEL_2_PROFILES_TO_FETCH_REVIEWS = 10;
 const MAX_LEVEL_2_NODES_PER_PROFILE_REVIEWS = 20;
 const MAX_TOTAL_NODES_REVIEWS = 200;
 
-export function ReviewsMap({ userId, profileId, userName }: ReviewsMapProps) {
+export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: ReviewsMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [allReviews, setAllReviews] = useState<ReviewActivityWithLevel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -367,7 +368,7 @@ export function ReviewsMap({ userId, profileId, userName }: ReviewsMapProps) {
       profileId: profileId,
       name: userName,
       username: null,
-      avatarUrl: "",
+      avatarUrl: avatarUrl || "",
       score: 0,
       isRoot: true,
       reviewType: "root",
@@ -661,6 +662,19 @@ export function ReviewsMap({ userId, profileId, userName }: ReviewsMapProps) {
         .attr("r", radius);
     });
 
+    // Get theme-aware colors from CSS variables
+    const getTextColor = () => {
+      const root = document.documentElement;
+      const isDark = root.classList.contains("dark");
+      return isDark ? "hsl(0, 0%, 98%)" : "hsl(0, 0%, 25%)";
+    };
+
+    const getMutedColor = () => {
+      const root = document.documentElement;
+      const isDark = root.classList.contains("dark");
+      return isDark ? "hsl(0, 0%, 63.9%)" : "hsl(0, 0%, 55%)";
+    };
+
     // Add labels with level-based positioning
     nodeGroups
       .append("text")
@@ -670,7 +684,7 @@ export function ReviewsMap({ userId, profileId, userName }: ReviewsMapProps) {
         return 35 + radius;
       })
       .attr("text-anchor", "middle")
-      .attr("fill", "#1e293b")
+      .attr("fill", getTextColor())
       .attr("font-size", (d) => {
         if (d.isRoot) return "14px";
         return `${Math.max(10, 12 - d.level * 0.5)}px`;
@@ -687,7 +701,7 @@ export function ReviewsMap({ userId, profileId, userName }: ReviewsMapProps) {
         return 50 + radius;
       })
       .attr("text-anchor", "middle")
-      .attr("fill", "#64748b")
+      .attr("fill", getMutedColor())
       .attr("font-size", (d) => `${Math.max(8, 10 - d.level * 0.3)}px`)
       .text((d) => (d.score > 0 ? `Score: ${d.score}` : ""));
 

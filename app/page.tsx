@@ -501,6 +501,7 @@ export default function Home() {
                   userId={profile.id}
                   profileId={profile.profileId}
                   userName={profile.displayName}
+                  avatarUrl={profile.avatarUrl}
                 />
               </div>
 
@@ -510,6 +511,7 @@ export default function Home() {
                   userId={profile.id}
                   profileId={profile.profileId}
                   userName={profile.displayName}
+                  avatarUrl={profile.avatarUrl}
                 />
               </div>
 

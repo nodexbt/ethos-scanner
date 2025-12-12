@@ -33,6 +33,7 @@ interface VouchesMapProps {
   userId: number;
   profileId: number | null;
   userName: string;
+  avatarUrl?: string;
 }
 
 interface Node extends d3.SimulationNodeDatum {
@@ -63,7 +64,7 @@ const MAX_LEVEL_2_PROFILES_TO_FETCH = 10;
 const MAX_LEVEL_2_NODES_PER_PROFILE = 20;
 const MAX_TOTAL_NODES = 200;
 
-export function VouchesMap({ userId, profileId, userName }: VouchesMapProps) {
+export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: VouchesMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [allVouches, setAllVouches] = useState<VouchWithLevel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -321,7 +322,7 @@ export function VouchesMap({ userId, profileId, userName }: VouchesMapProps) {
       profileId: profileId,
       name: userName,
       username: null,
-      avatarUrl: "",
+      avatarUrl: avatarUrl || "",
       score: 0,
       isRoot: true,
       vouchType: "root",
@@ -608,6 +609,19 @@ export function VouchesMap({ userId, profileId, userName }: VouchesMapProps) {
         .attr("r", radius);
     });
 
+    // Get theme-aware colors from CSS variables
+    const getTextColor = () => {
+      const root = document.documentElement;
+      const isDark = root.classList.contains("dark");
+      return isDark ? "hsl(0, 0%, 98%)" : "hsl(0, 0%, 25%)";
+    };
+
+    const getMutedColor = () => {
+      const root = document.documentElement;
+      const isDark = root.classList.contains("dark");
+      return isDark ? "hsl(0, 0%, 63.9%)" : "hsl(0, 0%, 55%)";
+    };
+
     // Add labels with level-based positioning
     nodeGroups
       .append("text")
@@ -617,7 +631,7 @@ export function VouchesMap({ userId, profileId, userName }: VouchesMapProps) {
         return 35 + radius;
       })
       .attr("text-anchor", "middle")
-      .attr("fill", "#1e293b")
+      .attr("fill", getTextColor())
       .attr("font-size", (d) => {
         if (d.isRoot) return "14px";
         return `${Math.max(10, 12 - d.level * 0.5)}px`;
@@ -634,7 +648,7 @@ export function VouchesMap({ userId, profileId, userName }: VouchesMapProps) {
         return 50 + radius;
       })
       .attr("text-anchor", "middle")
-      .attr("fill", "#64748b")
+      .attr("fill", getMutedColor())
       .attr("font-size", (d) => `${Math.max(8, 10 - d.level * 0.3)}px`)
       .text((d) => (d.score > 0 ? `Score: ${d.score}` : ""));
 
