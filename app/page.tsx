@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -10,8 +10,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Search, Loader2, User, ExternalLink } from "lucide-react";
+import { Search, Loader2, User, ExternalLink, X } from "lucide-react";
 import { InvitationMap } from "@/components/invitation-map";
+import { VouchesMap } from "@/components/vouches-map";
+import { ReviewsMap } from "@/components/reviews-map";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 interface EthosProfile {
@@ -54,11 +56,105 @@ interface EthosProfile {
   };
 }
 
+interface RecentSearch {
+  query: string;
+  displayName: string;
+  username: string | null;
+  avatarUrl: string;
+  timestamp: number;
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<EthosProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+
+  // Load recent searches from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("ethos-recent-searches");
+    if (stored) {
+      try {
+        setRecentSearches(JSON.parse(stored));
+      } catch (e) {
+        // Invalid JSON, ignore
+      }
+    }
+  }, []);
+
+  // Save recent searches to localStorage
+  const saveRecentSearch = (profile: EthosProfile, query: string) => {
+    const newSearch: RecentSearch = {
+      query,
+      displayName: profile.displayName,
+      username: profile.username,
+      avatarUrl: profile.avatarUrl,
+      timestamp: Date.now(),
+    };
+
+    setRecentSearches((prev) => {
+      // Remove duplicates and limit to 10 most recent
+      const filtered = prev.filter((s) => s.query.toLowerCase() !== query.toLowerCase());
+      const updated = [newSearch, ...filtered].slice(0, 10);
+      localStorage.setItem("ethos-recent-searches", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Remove a recent search
+  const removeRecentSearch = (query: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRecentSearches((prev) => {
+      const updated = prev.filter((s) => s.query.toLowerCase() !== query.toLowerCase());
+      localStorage.setItem("ethos-recent-searches", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Search using a recent search query
+  const searchRecent = async (query: string) => {
+    setInput(query);
+    setLoading(true);
+    setError(null);
+    setProfile(null);
+
+    try {
+      const trimmedInput = query.trim();
+      let url: string;
+
+      if (isEthereumAddress(trimmedInput)) {
+        url = `https://api.ethos.network/api/v2/user/by/address/${trimmedInput}`;
+      } else {
+        url = `https://api.ethos.network/api/v2/user/by/x/${trimmedInput}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          "X-Ethos-Client": "ethos-scanner@0.1.0",
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setError("Profile not found. Please check the username or address.");
+        } else {
+          setError(`Failed to fetch profile: ${response.statusText}`);
+        }
+        return;
+      }
+
+      const data = await response.json();
+      setProfile(data);
+      saveRecentSearch(data, query);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "An unexpected error occurred"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
@@ -103,6 +199,7 @@ export default function Home() {
 
       const data = await response.json();
       setProfile(data);
+      saveRecentSearch(data, trimmedInput);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "An unexpected error occurred"
@@ -169,6 +266,57 @@ export default function Home() {
             {error && (
               <div className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
+              </div>
+            )}
+
+            {recentSearches.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-medium text-muted-foreground">
+                  Recent Searches
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {recentSearches.map((search, index) => (
+                    <button
+                      key={index}
+                      onClick={() => searchRecent(search.query)}
+                      disabled={loading}
+                      className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {search.avatarUrl && (
+                        <img
+                          src={search.avatarUrl}
+                          alt={search.displayName}
+                          className="h-6 w-6 shrink-0 rounded-full"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1 text-left">
+                        <div className="truncate font-medium">
+                          {search.displayName}
+                        </div>
+                        {search.username && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            @{search.username}
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        onClick={(e) => removeRecentSearch(search.query, e)}
+                        className="shrink-0 cursor-pointer rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
+                        aria-label="Remove from recent searches"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            removeRecentSearch(search.query, e as any);
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>
@@ -344,6 +492,24 @@ export default function Home() {
                   profileId={profile.profileId}
                   userName={profile.displayName}
                   avatarUrl={profile.avatarUrl}
+                />
+              </div>
+
+              <div className="border-t pt-6">
+                <h3 className="mb-4 text-lg font-semibold">Reviews Network</h3>
+                <ReviewsMap
+                  userId={profile.id}
+                  profileId={profile.profileId}
+                  userName={profile.displayName}
+                />
+              </div>
+
+              <div className="border-t pt-6">
+                <h3 className="mb-4 text-lg font-semibold">Vouches Network</h3>
+                <VouchesMap
+                  userId={profile.id}
+                  profileId={profile.profileId}
+                  userName={profile.displayName}
                 />
               </div>
 

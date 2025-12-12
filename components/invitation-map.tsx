@@ -93,8 +93,10 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         const json: InvitationResponse = await response.json();
         
         // Store full invitation data with level information
+        // Limit total nodes for performance (max 200 nodes total)
         if (json.values && Array.isArray(json.values)) {
-          setInvitations(json.values);
+          const limitedInvitations = json.values.slice(0, 200);
+          setInvitations(limitedInvitations);
         } else {
           setError("Invalid response format");
         }
@@ -181,10 +183,36 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     const nodeMap = new Map<string, Node>();
     nodeMap.set(rootId, rootNode);
 
+    // First pass: track minimum level for each user
+    const userMinLevels = new Map<string, number>();
+    
+    invitations.forEach((invitation) => {
+      const nodeId = invitation.user.profileId?.toString() || invitation.user.id.toString();
+      const currentMin = userMinLevels.get(nodeId);
+      if (currentMin === undefined || invitation.level < currentMin) {
+        userMinLevels.set(nodeId, invitation.level);
+      }
+      
+      // Also track sender levels
+      const senderId = invitation.senderProfileId.toString();
+      if (senderId !== rootId) {
+        const senderInvitation = invitations.find(
+          (inv) => (inv.user.profileId?.toString() || inv.user.id.toString()) === senderId
+        );
+        const senderLevel = senderInvitation ? senderInvitation.level - 1 : invitation.level - 1;
+        const senderCurrentMin = userMinLevels.get(senderId);
+        if (senderCurrentMin === undefined || senderLevel < senderCurrentMin) {
+          userMinLevels.set(senderId, senderLevel);
+        }
+      }
+    });
+
+    // Second pass: create nodes with minimum level (ensures each user appears only once)
     invitations.forEach((invitation) => {
       // Add the invitee node
       const nodeId = invitation.user.profileId?.toString() || invitation.user.id.toString();
       if (!nodeMap.has(nodeId)) {
+        const minLevel = userMinLevels.get(nodeId) || invitation.level;
         nodeMap.set(nodeId, {
           id: nodeId,
           profileId: invitation.user.profileId,
@@ -193,8 +221,15 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
           avatarUrl: invitation.user.avatarUrl,
           score: invitation.user.score,
           isRoot: false,
-          level: invitation.level,
+          level: minLevel,
         });
+      } else {
+        // Update to minimum level if this connection has a lower level
+        const node = nodeMap.get(nodeId)!;
+        const minLevel = userMinLevels.get(nodeId) || node.level;
+        if (minLevel < node.level) {
+          node.level = minLevel;
+        }
       }
       
       // Ensure sender node exists (might be root or another invitee)
@@ -204,30 +239,44 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         const senderInvitation = invitations.find(
           (inv) => (inv.user.profileId?.toString() || inv.user.id.toString()) === senderId
         );
-        const senderLevel = senderInvitation ? senderInvitation.level - 1 : 0;
-        // Create a placeholder node for the sender if not found
+        const senderLevel = senderInvitation ? senderInvitation.level - 1 : invitation.level - 1;
+        const minLevel = userMinLevels.get(senderId) || senderLevel;
+        
+        // Try to get user info from the invitation if available
+        const senderUserInfo = senderInvitation?.user;
         nodeMap.set(senderId, {
           id: senderId,
           profileId: invitation.senderProfileId,
-          name: `User ${senderId}`,
-          username: null,
-          avatarUrl: "",
-          score: 0,
+          name: senderUserInfo?.displayName || `User ${senderId}`,
+          username: senderUserInfo?.username || null,
+          avatarUrl: senderUserInfo?.avatarUrl || "",
+          score: senderUserInfo?.score || 0,
           isRoot: false,
-          level: senderLevel,
+          level: minLevel,
         });
+      } else if (nodeMap.has(senderId) && senderId !== rootId) {
+        // Update sender node to minimum level if needed
+        const node = nodeMap.get(senderId)!;
+        const minLevel = userMinLevels.get(senderId);
+        if (minLevel !== undefined && minLevel < node.level) {
+          node.level = minLevel;
+        }
       }
     });
 
-    const nodes: Node[] = Array.from(nodeMap.values());
+    // Limit nodes for performance (safety check)
+    const allNodes = Array.from(nodeMap.values());
+    const nodes: Node[] = allNodes.slice(0, 200);
+    const nodeIds = new Set(nodes.map(n => n.id));
 
     // Create links based on sender -> accepted relationships
+    // Only include links between nodes that are actually rendered
     const links: Link[] = invitations
       .map((invitation) => {
         const sourceId = invitation.senderProfileId.toString();
         const targetId = invitation.user.profileId?.toString() || invitation.user.id.toString();
-        // Only create link if both nodes exist
-        if (nodeMap.has(sourceId) && nodeMap.has(targetId)) {
+        // Only create link if both nodes exist and are in the rendered set
+        if (nodeIds.has(sourceId) && nodeIds.has(targetId)) {
           return {
             source: sourceId,
             target: targetId,
@@ -278,28 +327,29 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
             const source = d.source as Node;
             const target = d.target as Node;
             const levelDiff = Math.abs(target.level - source.level);
-            // Increase distance for higher levels
-            return 100 + levelDiff * 50;
+            // Increase distance for higher levels with more breathing room
+            return 150 + levelDiff * 80;
           })
       )
       .force("charge", d3.forceManyBody().strength((d) => {
         const node = d as Node;
-        // Reduce charge strength for higher levels to create rings
-        return node.isRoot ? -500 : -200 / (node.level + 1);
+        // Increase charge strength to push nodes apart more
+        return node.isRoot ? -800 : -400 / (node.level + 1);
       }))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
         d3.forceCollide().radius((d) => {
           const node = d as Node;
-          return node.isRoot ? 40 : Math.max(20, 25 - node.level * 3);
+          // Increase collision radius for more breathing room
+          return node.isRoot ? 60 : Math.max(35, 40 - node.level * 3);
         })
       )
       .force("radial", d3.forceRadial((d) => {
         const node = d as Node;
-        // Create concentric rings based on level
-        const baseRadius = 80;
-        return baseRadius + node.level * 120;
+        // Create concentric rings with more spacing
+        const baseRadius = 120;
+        return baseRadius + node.level * 180;
       }, width / 2, height / 2).strength(0.8));
 
     // Create links with different styles based on level
@@ -528,6 +578,9 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       <div className="text-sm text-muted-foreground mb-2 space-y-1">
         <div>
           Showing {invitations.length} invitee{invitations.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+          {invitations.length >= 200 && (
+            <span className="text-xs ml-2">(limited for performance)</span>
+          )}
         </div>
         <div className="flex gap-4 flex-wrap">
           {Object.entries(levelCounts).map(([level, count]) => (
