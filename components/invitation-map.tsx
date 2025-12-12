@@ -318,6 +318,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     // Create force simulation with radial positioning for levels
     const simulation = d3
       .forceSimulation(nodes)
+      .alphaDecay(0.1) // Faster convergence
+      .velocityDecay(0.4) // More damping for stability
       .force(
         "link",
         d3

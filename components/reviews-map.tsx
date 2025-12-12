@@ -175,57 +175,15 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           }
         });
 
-        // Fetch connections BETWEEN level 1 users (e.g., if you reviewed A and B, and A reviewed B)
-        const level1ProfileIds = Array.from(processedProfileIds).filter(
-          (pid) => pid !== profileId
-        );
-        for (let i = 0; i < Math.min(level1ProfileIds.length, 15); i++) {
-          try {
-            const userIKey = `profileId:${level1ProfileIds[i]}`;
-            const reviewCheck = await fetch(
-              "https://api.ethos.network/api/v2/activities/profile/given",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Ethos-Client": "ethos-scanner@0.1.0",
-                },
-                body: JSON.stringify({
-                  userkey: userIKey,
-                  filter: ["review"],
-                  limit: 20,
-                }),
-              }
-            );
-            if (reviewCheck.ok) {
-              const data: ReviewsResponse = await reviewCheck.json();
-              (data.values || []).forEach((activity) => {
-                // Only include if the subject is also a level 1 user
-                if (
-                  activity.subject.profileId &&
-                  processedProfileIds.has(activity.subject.profileId) &&
-                  activity.subject.profileId !== profileId
-                ) {
-                  // Check if we already have this review
-                  const existingReview = allReviewsWithLevels.find(
-                    (r) =>
-                      r.author.profileId === activity.author.profileId &&
-                      r.subject.profileId === activity.subject.profileId
-                  );
-                  if (!existingReview) {
-                    allReviewsWithLevels.push({ ...activity, level: 1 });
-                  }
-                }
-              });
-            }
-          } catch (e) {
-            continue;
-          }
-        }
+        // Set level 1 data first for immediate display
+        setAllReviews(allReviewsWithLevels);
+        setLoading(false);
 
-        // Fetch level 2 reviews (limit profiles)
+        // Fetch level 2 reviews in background (progressive loading)
         const level2ProfileIds = profileIdsToProcess.slice(1, MAX_LEVEL_2_PROFILES_TO_FETCH_REVIEWS + 1);
-        for (const pid of level2ProfileIds) {
+        
+        // Parallelize all level 2 API calls
+        const level2Promises = level2ProfileIds.map(async (pid) => {
           try {
             const level2Userkey = `profileId:${pid}`;
             const [level2Given, level2Received] = await Promise.all([
@@ -255,18 +213,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               }),
             ]);
 
+            const results: ReviewActivityWithLevel[] = [];
+
             if (level2Given.ok) {
               const data: ReviewsResponse = await level2Given.json();
               const level2Reviews = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE_REVIEWS);
               level2Reviews.forEach((activity) => {
-                if (allReviewsWithLevels.length >= MAX_TOTAL_NODES_REVIEWS) return;
-                // Include ALL reviews, even if both users are already in the network
-                // This shows connections between users in the network
                 if (activity.subject.profileId) {
-                  allReviewsWithLevels.push({ ...activity, level: 2 });
-                  if (!processedProfileIds.has(activity.subject.profileId)) {
-                    processedProfileIds.add(activity.subject.profileId);
-                  }
+                  results.push({ ...activity, level: 2 });
                 }
               });
             }
@@ -275,23 +229,24 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               const data: ReviewsResponse = await level2Received.json();
               const level2Reviews = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE_REVIEWS);
               level2Reviews.forEach((activity) => {
-                if (allReviewsWithLevels.length >= MAX_TOTAL_NODES_REVIEWS) return;
-                // Include ALL reviews, even if both users are already in the network
-                // This shows connections between users in the network
                 if (activity.author.profileId) {
-                  allReviewsWithLevels.push({ ...activity, level: 2 });
-                  if (!processedProfileIds.has(activity.author.profileId)) {
-                    processedProfileIds.add(activity.author.profileId);
-                  }
+                  results.push({ ...activity, level: 2 });
                 }
               });
             }
-          } catch (e) {
-            continue;
-          }
-        }
 
-        setAllReviews(allReviewsWithLevels);
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        // Wait for all level 2 calls and update
+        const level2Results = await Promise.all(level2Promises);
+        const level2Reviews = level2Results.flat().slice(0, MAX_TOTAL_NODES_REVIEWS - allReviewsWithLevels.length);
+        
+        // Update with combined data
+        setAllReviews([...allReviewsWithLevels, ...level2Reviews]);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch reviews"
@@ -534,6 +489,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     // Create force simulation with radial positioning for levels
     const simulation = d3
       .forceSimulation(nodes)
+      .alphaDecay(0.1) // Faster convergence
+      .velocityDecay(0.4) // More damping for stability
       .force(
         "link",
         d3

@@ -154,40 +154,15 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
           }
         });
 
-        // Fetch level 2 vouches AND connections between level 1 users
-        // First, fetch connections between level 1 users (to show their relationships)
-        const level1ProfileIds = profileIdsToProcess.slice(1, MAX_LEVEL_1_NODES + 1);
-        for (let i = 0; i < Math.min(level1ProfileIds.length, 10); i++) {
-          for (let j = i + 1; j < Math.min(level1ProfileIds.length, 10); j++) {
-            try {
-              // Check if user i vouched for user j
-              const vouchCheck = await fetch("https://api.ethos.network/api/v2/vouches", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Ethos-Client": "ethos-scanner@0.1.0",
-                },
-                body: JSON.stringify({
-                  authorProfileIds: [level1ProfileIds[i]],
-                  subjectProfileIds: [level1ProfileIds[j]],
-                  limit: 1,
-                }),
-              });
-              if (vouchCheck.ok) {
-                const data: VouchesResponse = await vouchCheck.json();
-                if (data.values && data.values.length > 0) {
-                  allVouchesWithLevels.push({ ...data.values[0], level: 1 });
-                }
-              }
-            } catch (e) {
-              continue;
-            }
-          }
-        }
+        // Set level 1 data first for immediate display
+        setAllVouches(allVouchesWithLevels);
+        setLoading(false);
 
-        // Then fetch level 2 vouches (limit profiles and nodes per profile)
+        // Fetch level 2 data in background (progressive loading)
         const level2ProfileIds = profileIdsToProcess.slice(1, MAX_LEVEL_2_PROFILES_TO_FETCH + 1);
-        for (const pid of level2ProfileIds) {
+        
+        // Parallelize all level 2 API calls
+        const level2Promises = level2ProfileIds.map(async (pid) => {
           try {
             const [level2Given, level2Received] = await Promise.all([
               fetch("https://api.ethos.network/api/v2/vouches", {
@@ -214,16 +189,13 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
               }),
             ]);
 
+            const results: VouchWithLevel[] = [];
+
             if (level2Given.ok) {
               const data: VouchesResponse = await level2Given.json();
               const level2Vouches = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE);
               level2Vouches.forEach((vouch) => {
-                if (allVouchesWithLevels.length >= MAX_TOTAL_NODES) return;
-                // Include all vouches, even if both users are already in the network
-                allVouchesWithLevels.push({ ...vouch, level: 2 });
-                if (!processedProfileIds.has(vouch.subjectProfileId)) {
-                  processedProfileIds.add(vouch.subjectProfileId);
-                }
+                results.push({ ...vouch, level: 2 });
               });
             }
 
@@ -231,21 +203,22 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
               const data: VouchesResponse = await level2Received.json();
               const level2Vouches = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE);
               level2Vouches.forEach((vouch) => {
-                if (allVouchesWithLevels.length >= MAX_TOTAL_NODES) return;
-                // Include all vouches, even if both users are already in the network
-                allVouchesWithLevels.push({ ...vouch, level: 2 });
-                if (!processedProfileIds.has(vouch.authorProfileId)) {
-                  processedProfileIds.add(vouch.authorProfileId);
-                }
+                results.push({ ...vouch, level: 2 });
               });
             }
-          } catch (e) {
-            // Continue with next profile if one fails
-            continue;
-          }
-        }
 
-        setAllVouches(allVouchesWithLevels);
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        // Wait for all level 2 calls and update
+        const level2Results = await Promise.all(level2Promises);
+        const level2Vouches = level2Results.flat().slice(0, MAX_TOTAL_NODES - allVouchesWithLevels.length);
+        
+        // Update with combined data
+        setAllVouches([...allVouchesWithLevels, ...level2Vouches]);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch vouches"
@@ -475,6 +448,8 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     // Create force simulation with radial positioning for levels
     const simulation = d3
       .forceSimulation(nodes)
+      .alphaDecay(0.1) // Faster convergence
+      .velocityDecay(0.4) // More damping for stability
       .force(
         "link",
         d3
