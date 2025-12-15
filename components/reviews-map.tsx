@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface User {
@@ -84,15 +84,45 @@ const MAX_TOTAL_NODES_REVIEWS = 200;
 
 export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: ReviewsMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [allReviews, setAllReviews] = useState<ReviewActivityWithLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Prevent body scroll when in fullscreen mode
+  useEffect(() => {
+    if (isFullscreen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isFullscreen]);
+
+  // Handle resize events to update SVG dimensions
+  useEffect(() => {
+    const handleResize = () => {
+      // Trigger re-render when window is resized
+      if (isFullscreen) {
+        // Force a state update to trigger SVG resize
+        setIsFullscreen((prev) => prev);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isFullscreen]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -278,8 +308,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     }
 
     const container = svgRef.current.parentElement;
-    const width = container ? Math.min(container.clientWidth - 32, 1000) : 1000;
-    const height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
+    let width: number;
+    let height: number;
+    
+    if (isFullscreen) {
+      // Use viewport dimensions in fullscreen mode
+      width = window.innerWidth - 64; // Account for padding (32px * 2)
+      height = window.innerHeight - 200; // Account for header and padding
+    } else {
+      width = container ? Math.min(container.clientWidth - 32, 1000) : 1000;
+      height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
+    }
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
 
     // Create a container group for pan/zoom
@@ -702,6 +741,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     userName,
     avatarUrl,
     mounted,
+    isFullscreen,
   ]);
 
   if (!mounted) {
@@ -772,59 +812,149 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     }
   };
 
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+  };
+
   return (
-    <div className="w-full overflow-auto rounded-lg border bg-background p-4">
-      <div className="flex items-start justify-between mb-2">
-        <div className="text-sm text-muted-foreground space-y-1 flex-1">
-          <div>
-            Showing {allReviews.length} review{allReviews.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
-            {allReviews.length >= MAX_TOTAL_NODES_REVIEWS && (
-              <span className="text-xs ml-2">(limited for performance)</span>
-            )}
-          </div>
-          <div className="flex gap-4 flex-wrap">
-            {Object.entries(levelCounts).map(([level, count]) => (
-              <span key={level} className="inline-flex items-center gap-1">
-                <span 
-                  className="inline-block w-3 h-3 rounded-full" 
-                  style={{ 
-                    backgroundColor: level === "0" ? "#3b82f6" : 
-                                    level === "1" ? "#10b981" : 
-                                    level === "2" ? "#f59e0b" : "#ef4444" 
-                  }}
-                />
-                {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-4 flex-wrap mt-2">
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-3 h-1 bg-[#10b981]" />
-              Positive
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
-              Neutral
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-3 h-1 bg-[#ef4444]" />
-              Negative
-            </span>
+    <>
+      {isFullscreen && (
+        <div 
+          className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={toggleFullscreen}
+        >
+          <div 
+            className="w-full h-full overflow-hidden rounded-lg border bg-background p-4 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-2">
+              <div className="text-sm text-muted-foreground space-y-1 flex-1">
+                <div>
+                  Showing {allReviews.length} review{allReviews.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+                  {allReviews.length >= MAX_TOTAL_NODES_REVIEWS && (
+                    <span className="text-xs ml-2">(limited for performance)</span>
+                  )}
+                </div>
+                <div className="flex gap-4 flex-wrap">
+                  {Object.entries(levelCounts).map(([level, count]) => (
+                    <span key={level} className="inline-flex items-center gap-1">
+                      <span 
+                        className="inline-block w-3 h-3 rounded-full" 
+                        style={{ 
+                          backgroundColor: level === "0" ? "#3b82f6" : 
+                                          level === "1" ? "#10b981" : 
+                                          level === "2" ? "#f59e0b" : "#ef4444" 
+                        }}
+                      />
+                      {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-4 flex-wrap mt-2">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block w-3 h-1 bg-[#10b981]" />
+                    Positive
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
+                    Neutral
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block w-3 h-1 bg-[#ef4444]" />
+                    Negative
+                  </span>
+                </div>
+              </div>
+              <div className="flex gap-2 ml-4 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleFullscreen}
+                  title="Exit fullscreen"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetView}
+                  title="Reset view to initial position"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Reset View
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+            </div>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={resetView}
-          className="ml-4 shrink-0"
-          title="Reset view to initial position"
-        >
-          <RotateCcw className="h-4 w-4" />
-          Reset View
-        </Button>
-      </div>
-      <svg ref={svgRef} className="w-full h-auto" style={{ shapeRendering: "geometricPrecision" }}></svg>
-    </div>
+      )}
+      {!isFullscreen && (
+        <div ref={containerRef} className="w-full overflow-auto rounded-lg border bg-background p-4">
+          <div className="flex items-start justify-between mb-2">
+            <div className="text-sm text-muted-foreground space-y-1 flex-1">
+              <div>
+                Showing {allReviews.length} review{allReviews.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+                {allReviews.length >= MAX_TOTAL_NODES_REVIEWS && (
+                  <span className="text-xs ml-2">(limited for performance)</span>
+                )}
+              </div>
+              <div className="flex gap-4 flex-wrap">
+                {Object.entries(levelCounts).map(([level, count]) => (
+                  <span key={level} className="inline-flex items-center gap-1">
+                    <span 
+                      className="inline-block w-3 h-3 rounded-full" 
+                      style={{ 
+                        backgroundColor: level === "0" ? "#3b82f6" : 
+                                        level === "1" ? "#10b981" : 
+                                        level === "2" ? "#f59e0b" : "#ef4444" 
+                      }}
+                    />
+                    {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-4 flex-wrap mt-2">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-3 h-1 bg-[#10b981]" />
+                  Positive
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
+                  Neutral
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-3 h-1 bg-[#ef4444]" />
+                  Negative
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2 ml-4 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleFullscreen}
+                title="Open in fullscreen"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetView}
+                title="Reset view to initial position"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset View
+              </Button>
+            </div>
+          </div>
+          <svg ref={svgRef} className="w-full h-auto" style={{ shapeRendering: "geometricPrecision" }}></svg>
+        </div>
+      )}
+    </>
   );
 }
 
