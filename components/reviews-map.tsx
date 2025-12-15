@@ -277,7 +277,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
     const container = svgRef.current.parentElement;
     const width = container ? Math.min(container.clientWidth - 32, 1000) : 1000;
-    const maxLevel = Math.max(...allReviews.map((r) => r.level), 1);
     const height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
 
@@ -424,23 +423,23 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
     // Create links with level information
     // Include ALL connections between any nodes in the network (not just root connections)
-    const links = allReviews
-      .filter((activity) => activity.author.profileId && activity.subject.profileId)
+    const links: Link[] = allReviews
+      .filter((activity) => {
+        if (!activity.author.profileId || !activity.subject.profileId) return false;
+        const sourceId = activity.author.profileId.toString();
+        const targetId = activity.subject.profileId.toString();
+        // Include link if both nodes are in the rendered set
+        return nodeIds.has(sourceId) && nodeIds.has(targetId);
+      })
       .map((activity) => {
         const sourceId = activity.author.profileId!.toString();
         const targetId = activity.subject.profileId!.toString();
-        
-        // Include link if both nodes are in the rendered set
-        if (nodeIds.has(sourceId) && nodeIds.has(targetId)) {
-          return {
-            source: sourceId,
-            target: targetId,
-            sentiment: activity.data.score as "positive" | "neutral" | "negative",
-          };
-        }
-        return null;
-      })
-      .filter((link): link is Link => link !== null);
+        return {
+          source: sourceId,
+          target: targetId,
+          sentiment: activity.data.score as "positive" | "neutral" | "negative",
+        };
+      });
 
     // Color scheme by level
     const levelColors: Record<number, string> = {
@@ -677,12 +676,12 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       });
     });
 
-    function dragged(event: d3.D3DragEvent<SVGGElement, Node, unknown>) {
+    function dragged(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
       event.subject.fx = event.x;
       event.subject.fy = event.y;
     }
 
-    function dragended(event: d3.D3DragEvent<SVGGElement, Node, unknown>) {
+    function dragended(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
       if (!event.active) simulation.alphaTarget(0);
       event.subject.fx = null;
       event.subject.fy = null;
@@ -697,6 +696,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     userId,
     profileId,
     userName,
+    avatarUrl,
     mounted,
   ]);
 
