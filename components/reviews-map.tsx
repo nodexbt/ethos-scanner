@@ -424,7 +424,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
     // Create links with level information
     // Include ALL connections between any nodes in the network (not just root connections)
-    const links: Link[] = allReviews
+    const links = allReviews
       .filter((activity) => activity.author.profileId && activity.subject.profileId)
       .map((activity) => {
         const sourceId = activity.author.profileId!.toString();
