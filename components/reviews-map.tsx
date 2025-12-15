@@ -1210,10 +1210,10 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                       return (
                         <span 
                           key={level} 
-                          className="inline-flex items-center gap-0.5 md:gap-1"
+                          className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
                         >
                           <span 
-                            className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full" 
+                            className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
                             style={{ 
                               backgroundColor: level === "1" ? "#10b981" : 
                                               level === "2" ? "#f59e0b" : "#ef4444",
@@ -1343,10 +1343,10 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     return (
                       <span 
                         key={level} 
-                        className="inline-flex items-center gap-0.5 md:gap-1"
+                        className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
                       >
                         <span 
-                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full" 
+                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
                           style={{ 
                             backgroundColor: level === "1" ? "#10b981" : 
                                             level === "2" ? "#f59e0b" : "#ef4444",
