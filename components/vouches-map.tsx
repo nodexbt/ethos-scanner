@@ -876,36 +876,59 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     <>
       {isFullscreen && (
         <div 
-          className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-4"
           onClick={toggleFullscreen}
         >
           <div 
-            className="w-full h-full overflow-hidden rounded-lg border bg-background p-4 flex flex-col"
+            className="w-full h-full overflow-hidden rounded-lg border bg-background p-2 md:p-4 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between mb-2">
-              <div className="text-sm text-muted-foreground space-y-1 flex-1">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
+              <div className="text-xs md:text-sm text-muted-foreground space-y-0.5 md:space-y-1 flex-1">
                 <div>
                   Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
                   {allVouches.length >= MAX_TOTAL_NODES && (
-                    <span className="text-xs ml-2">(limited for performance)</span>
+                    <span className="text-xs ml-1 md:ml-2">(limited)</span>
                   )}
                 </div>
-                <div className="flex gap-4 flex-wrap">
+                <div className="flex gap-2 md:gap-4 flex-wrap">
                   {Object.entries(levelCounts).map(([level, count]) => {
                     const levelNum = parseInt(level);
                     const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
                     const isClickable = levelNum !== 1;
                     
+                    if (isClickable) {
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                          onClick={() => toggleRing(levelNum)}
+                          title={`Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}`}
+                        >
+                          <span 
+                            className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                            style={{ 
+                              backgroundColor: level === "0" ? "#3b82f6" : 
+                                              level === "1" ? "#10b981" : 
+                                              level === "2" ? "#f59e0b" : "#ef4444",
+                              opacity: isVisible ? 1 : 0.3
+                            }}
+                          />
+                          <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                            {levelLabels[levelNum] || `Level ${level}`}: {count}
+                          </span>
+                        </button>
+                      );
+                    }
+                    
                     return (
                       <span 
                         key={level} 
-                        className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                        onClick={isClickable ? () => toggleRing(levelNum) : undefined}
-                        title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                        className="inline-flex items-center gap-0.5 md:gap-1"
                       >
                         <span 
-                          className="inline-block w-3 h-3 rounded-full" 
+                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full" 
                           style={{ 
                             backgroundColor: level === "0" ? "#3b82f6" : 
                                             level === "1" ? "#10b981" : 
@@ -913,7 +936,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                             opacity: isVisible ? 1 : 0.3
                           }}
                         />
-                        <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                        <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                           {levelLabels[levelNum] || `Level ${level}`}: {count}
                         </span>
                       </span>
@@ -921,7 +944,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                   })}
                 </div>
               </div>
-              <div className="flex gap-2 ml-4 shrink-0">
+              <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
@@ -948,30 +971,53 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
         </div>
       )}
       {!isFullscreen && (
-        <div ref={containerRef} className="w-full overflow-auto rounded-lg border bg-background p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="text-sm text-muted-foreground space-y-1 flex-1">
+        <div ref={containerRef} className="w-full overflow-auto rounded-lg border bg-background p-2 md:p-4">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
+            <div className="text-xs md:text-sm text-muted-foreground space-y-0.5 md:space-y-1 flex-1">
               <div>
                 Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
                 {allVouches.length >= MAX_TOTAL_NODES && (
-                  <span className="text-xs ml-2">(limited for performance)</span>
+                  <span className="text-xs ml-1 md:ml-2">(limited)</span>
                 )}
               </div>
-              <div className="flex gap-4 flex-wrap">
+              <div className="flex gap-2 md:gap-4 flex-wrap">
                 {Object.entries(levelCounts).map(([level, count]) => {
                   const levelNum = parseInt(level);
                   const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
                   const isClickable = levelNum !== 1;
                   
+                  if (isClickable) {
+                    return (
+                      <button
+                        key={level}
+                        type="button"
+                        className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                        onClick={() => toggleRing(levelNum)}
+                        title={`Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}`}
+                      >
+                        <span 
+                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                          style={{ 
+                            backgroundColor: level === "0" ? "#3b82f6" : 
+                                            level === "1" ? "#10b981" : 
+                                            level === "2" ? "#f59e0b" : "#ef4444",
+                            opacity: isVisible ? 1 : 0.3
+                          }}
+                        />
+                        <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                          {levelLabels[levelNum] || `Level ${level}`}: {count}
+                        </span>
+                      </button>
+                    );
+                  }
+                  
                   return (
                     <span 
                       key={level} 
-                      className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                      onClick={isClickable ? () => toggleRing(levelNum) : undefined}
-                      title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                      className="inline-flex items-center gap-0.5 md:gap-1"
                     >
                       <span 
-                        className="inline-block w-3 h-3 rounded-full" 
+                        className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full" 
                         style={{ 
                           backgroundColor: level === "0" ? "#3b82f6" : 
                                           level === "1" ? "#10b981" : 
@@ -979,7 +1025,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                           opacity: isVisible ? 1 : 0.3
                         }}
                       />
-                      <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                      <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                         {levelLabels[levelNum] || `Level ${level}`}: {count}
                       </span>
                     </span>
@@ -987,7 +1033,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                 })}
               </div>
             </div>
-            <div className="flex gap-2 ml-4 shrink-0">
+            <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
               <Button
                 variant="outline"
                 size="sm"
