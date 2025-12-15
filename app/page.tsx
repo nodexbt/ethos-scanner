@@ -81,7 +81,7 @@ export default function Home() {
             <ThemeToggle />
           </div>
           <div className="text-center space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight">📟 Ethos Scanner</h1>
+            <h1 className="text-4xl font-bold tracking-tight">Ethos Scanner</h1>
             <p className="text-muted-foreground">
               Look up Ethos Network profiles by X username or EVM address
             </p>
