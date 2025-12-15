@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/components/theme-provider";
 
 interface User {
   id: number;
@@ -91,6 +92,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const { theme } = useTheme();
 
   useEffect(() => {
     setMounted(true);
@@ -326,8 +328,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
     // Create dot grid pattern for background
     const defs = svg.append("defs");
-    const isDark = document.documentElement.classList.contains("dark");
-    const dotColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)";
+    const isDark = theme === "dark";
+    const dotColor = isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)";
     const dotSize = 2;
     const dotSpacing = 20;
 
@@ -661,17 +663,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         .attr("r", radius);
     });
 
-    // Get theme-aware colors from CSS variables
+    // Get theme-aware colors
+    const isDarkTheme = theme === "dark";
     const getTextColor = () => {
-      const root = document.documentElement;
-      const isDark = root.classList.contains("dark");
-      return isDark ? "hsl(0, 0%, 98%)" : "hsl(0, 0%, 25%)";
+      return isDarkTheme ? "hsl(0, 0%, 98%)" : "hsl(0, 0%, 15%)";
     };
 
     const getMutedColor = () => {
-      const root = document.documentElement;
-      const isDark = root.classList.contains("dark");
-      return isDark ? "hsl(0, 0%, 63.9%)" : "hsl(0, 0%, 55%)";
+      return isDarkTheme ? "hsl(0, 0%, 70%)" : "hsl(0, 0%, 45%)";
     };
 
     // Add labels with level-based positioning
@@ -734,7 +733,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       simulation.stop();
     };
   }, [
-    allReviews,
+    allReviews.length,
     loading,
     userId,
     profileId,
@@ -742,6 +741,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     avatarUrl,
     mounted,
     isFullscreen,
+    theme,
   ]);
 
   if (!mounted) {
