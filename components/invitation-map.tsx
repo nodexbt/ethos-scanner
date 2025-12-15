@@ -271,7 +271,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
 
     // Create links based on sender -> accepted relationships
     // Only include links between nodes that are actually rendered
-    const links: Link[] = invitations
+    const links = invitations
       .map((invitation) => {
         const sourceId = invitation.senderProfileId.toString();
         const targetId = invitation.user.profileId?.toString() || invitation.user.id.toString();
@@ -282,9 +282,9 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
             target: targetId,
           };
         }
-        return null;
+        return undefined;
       })
-      .filter((link): link is Link => link !== null);
+      .filter((link): link is { source: string; target: string } => !!link);
 
     // Color scheme for different levels
     const levelColors: Record<number, string> = {
@@ -295,6 +295,14 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     };
 
     const getLevelColor = (level: number) => levelColors[level] || "#64748b";
+
+    // Create a helper to safely get Node from Link source/target
+    const getNode = (nodeOrId: string | Node): Node => {
+      if (typeof nodeOrId === 'string') {
+        return nodeMap.get(nodeOrId)!;
+      }
+      return nodeOrId;
+    };
 
     // Set up zoom behavior with limited zoom out to prevent map from disappearing
     const zoom = d3
@@ -326,8 +334,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
           .forceLink<Node, Link>(links)
           .id((d) => d.id)
           .distance((d) => {
-            const source = d.source as Node;
-            const target = d.target as Node;
+            const source = getNode(d.source);
+            const target = getNode(d.target);
             const levelDiff = Math.abs(target.level - source.level);
             // Increase distance for higher levels with more breathing room
             return 150 + levelDiff * 80;
@@ -363,17 +371,17 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       .enter()
       .append("line")
       .attr("stroke", (d) => {
-        const target = d.target as Node;
+        const target = getNode(d.target);
         const color = getLevelColor(target.level);
         return color;
       })
       .attr("stroke-opacity", (d) => {
-        const target = d.target as Node;
+        const target = getNode(d.target);
         // Fade links for higher levels
         return 0.4 + (1 - target.level * 0.1);
       })
       .attr("stroke-width", (d) => {
-        const target = d.target as Node;
+        const target = getNode(d.target);
         // Thinner lines for higher levels
         return Math.max(1, 2 - target.level * 0.3);
       });
@@ -513,10 +521,10 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     // Update positions on simulation tick
     simulation.on("tick", () => {
       link
-        .attr("x1", (d) => (d.source as Node).x ?? 0)
-        .attr("y1", (d) => (d.source as Node).y ?? 0)
-        .attr("x2", (d) => (d.target as Node).x ?? 0)
-        .attr("y2", (d) => (d.target as Node).y ?? 0);
+        .attr("x1", (d) => getNode(d.source).x ?? 0)
+        .attr("y1", (d) => getNode(d.source).y ?? 0)
+        .attr("x2", (d) => getNode(d.target).x ?? 0)
+        .attr("y2", (d) => getNode(d.target).y ?? 0);
 
       nodeGroups.attr("transform", (d) => {
         const x = d.x ?? width / 2;
