@@ -485,35 +485,48 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="border-t pt-6">
-                <h3 className="mb-4 text-lg font-semibold">Invitation Network</h3>
-                <InvitationMap
-                  userId={profile.id}
-                  profileId={profile.profileId}
-                  userName={profile.displayName}
-                  avatarUrl={profile.avatarUrl}
-                />
-              </div>
+              {/* Show network sections only if user has authored activity */}
+              {(profile.profileId !== null && profile.stats.vouch.given.count > 0) ? (
+                <>
+                  <div className="border-t pt-6">
+                    <h3 className="mb-4 text-lg font-semibold">Invitation Network</h3>
+                    <InvitationMap
+                      userId={profile.id}
+                      profileId={profile.profileId}
+                      userName={profile.displayName}
+                      avatarUrl={profile.avatarUrl}
+                    />
+                  </div>
 
-              <div className="border-t pt-6">
-                <h3 className="mb-4 text-lg font-semibold">Reviews Network</h3>
-                <ReviewsMap
-                  userId={profile.id}
-                  profileId={profile.profileId}
-                  userName={profile.displayName}
-                  avatarUrl={profile.avatarUrl}
-                />
-              </div>
+                  <div className="border-t pt-6">
+                    <h3 className="mb-4 text-lg font-semibold">Reviews Network</h3>
+                    <ReviewsMap
+                      userId={profile.id}
+                      profileId={profile.profileId}
+                      userName={profile.displayName}
+                      avatarUrl={profile.avatarUrl}
+                    />
+                  </div>
 
-              <div className="border-t pt-6">
-                <h3 className="mb-4 text-lg font-semibold">Vouches Network</h3>
-                <VouchesMap
-                  userId={profile.id}
-                  profileId={profile.profileId}
-                  userName={profile.displayName}
-                  avatarUrl={profile.avatarUrl}
-                />
-              </div>
+                  <div className="border-t pt-6">
+                    <h3 className="mb-4 text-lg font-semibold">Vouches Network</h3>
+                    <VouchesMap
+                      userId={profile.id}
+                      profileId={profile.profileId}
+                      userName={profile.displayName}
+                      avatarUrl={profile.avatarUrl}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="border-t pt-6">
+                  <div className="rounded-md bg-muted p-6 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      Network maps not available for uninitialized profiles
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2 pt-4">
                 <a
