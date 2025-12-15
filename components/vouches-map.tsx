@@ -75,6 +75,11 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [visibleRings, setVisibleRings] = useState<Record<number, boolean>>({
+    1: true, // Ring 1 always visible
+    2: true,
+    3: true,
+  });
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -265,6 +270,23 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     fetchVouches();
   }, [profileId, mounted]);
 
+  // Toggle ring visibility with auto-enable logic
+  const toggleRing = (ring: number) => {
+    if (ring === 1) return; // Ring 1 cannot be toggled
+    
+    setVisibleRings((prev) => {
+      const newState = { ...prev };
+      
+      // If enabling ring 3 and ring 2 is not enabled, auto-enable ring 2
+      if (ring === 3 && !prev[2]) {
+        newState[2] = true;
+      }
+      
+      newState[ring] = !prev[ring];
+      return newState;
+    });
+  };
+
   useEffect(() => {
     if (
       !mounted ||
@@ -432,9 +454,52 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       }
     });
 
-    // Limit nodes for performance (safety check)
+    // Filter nodes and links based on visible rings
+    // A node is visible if its level is visible OR if it's needed to connect visible nodes
     const allNodes = Array.from(nodeMap.values());
-    const nodes: Node[] = allNodes.slice(0, MAX_TOTAL_NODES);
+    
+    // First, filter nodes by visible rings (but keep root and level 1 always)
+    const filteredNodesByRing = allNodes.filter((node) => {
+      if (node.isRoot || node.level === 0) return true; // Root always visible
+      if (node.level === 1) return visibleRings[1] ?? true; // Level 1 always visible (but check anyway)
+      return visibleRings[node.level] ?? false;
+    });
+    
+    // Get all node IDs that should be visible (including intermediate nodes needed for connections)
+    const visibleNodeIds = new Set(filteredNodesByRing.map(n => n.id));
+    
+    // Find all nodes that are needed to connect visible nodes
+    // If a link connects two visible nodes, both endpoints must be visible
+    const neededNodeIds = new Set<string>();
+    allVouches.forEach((vouch) => {
+      const sourceId = vouch.authorProfileId.toString();
+      const targetId = vouch.subjectProfileId.toString();
+      
+      // Check if this link should be visible based on ring visibility
+      const sourceNode = nodeMap.get(sourceId);
+      const targetNode = nodeMap.get(targetId);
+      
+      if (!sourceNode || !targetNode) return;
+      
+      // Link is visible if target level is visible (or source is root/level 1)
+      const linkVisible = sourceNode.isRoot || sourceNode.level === 0 || 
+                         (sourceNode.level === 1 && (visibleRings[1] ?? true)) ||
+                         (visibleRings[sourceNode.level] ?? false);
+      const targetVisible = targetNode.isRoot || targetNode.level === 0 ||
+                           (targetNode.level === 1 && (visibleRings[1] ?? true)) ||
+                           (visibleRings[targetNode.level] ?? false);
+      
+      if (linkVisible && targetVisible) {
+        neededNodeIds.add(sourceId);
+        neededNodeIds.add(targetId);
+      }
+    });
+    
+    // Combine filtered nodes with needed nodes
+    const finalNodeIds = new Set([...visibleNodeIds, ...neededNodeIds]);
+    const nodes: Node[] = allNodes
+      .filter((node) => finalNodeIds.has(node.id))
+      .slice(0, MAX_TOTAL_NODES);
     const nodeIds = new Set(nodes.map(n => n.id));
 
     const links: Link[] = allVouches.flatMap((vouch) => {
@@ -443,6 +508,22 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     
       // Only include if both endpoints are in the rendered set
       if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) return [];
+      
+      // Check if this link should be visible based on ring visibility
+      const sourceNode = nodeMap.get(sourceId);
+      const targetNode = nodeMap.get(targetId);
+      
+      if (!sourceNode || !targetNode) return [];
+      
+      // Link is visible if target level is visible (or source is root/level 1)
+      const sourceVisible = sourceNode.isRoot || sourceNode.level === 0 ||
+                           (sourceNode.level === 1 && (visibleRings[1] ?? true)) ||
+                           (visibleRings[sourceNode.level] ?? false);
+      const targetVisible = targetNode.isRoot || targetNode.level === 0 ||
+                           (targetNode.level === 1 && (visibleRings[1] ?? true)) ||
+                           (visibleRings[targetNode.level] ?? false);
+      
+      if (!sourceVisible || !targetVisible) return [];
     
       const amount = vouch.balance ? Number.parseFloat(vouch.balance) / 1e18 : undefined;
     
@@ -706,6 +787,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     mounted,
     isFullscreen,
     theme,
+    visibleRings,
   ]);
 
   if (!mounted) {
@@ -784,19 +866,33 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                   )}
                 </div>
                 <div className="flex gap-4 flex-wrap">
-                  {Object.entries(levelCounts).map(([level, count]) => (
-                    <span key={level} className="inline-flex items-center gap-1">
+                  {Object.entries(levelCounts).map(([level, count]) => {
+                    const levelNum = parseInt(level);
+                    const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
+                    const isClickable = levelNum !== 1;
+                    
+                    return (
                       <span 
-                        className="inline-block w-3 h-3 rounded-full" 
-                        style={{ 
-                          backgroundColor: level === "0" ? "#3b82f6" : 
-                                          level === "1" ? "#10b981" : 
-                                          level === "2" ? "#f59e0b" : "#ef4444" 
-                        }}
-                      />
-                      {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
-                    </span>
-                  ))}
+                        key={level} 
+                        className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                        onClick={isClickable ? () => toggleRing(levelNum) : undefined}
+                        title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                      >
+                        <span 
+                          className="inline-block w-3 h-3 rounded-full" 
+                          style={{ 
+                            backgroundColor: level === "0" ? "#3b82f6" : 
+                                            level === "1" ? "#10b981" : 
+                                            level === "2" ? "#f59e0b" : "#ef4444",
+                            opacity: isVisible ? 1 : 0.3
+                          }}
+                        />
+                        <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                          {levelLabels[levelNum] || `Level ${level}`}: {count}
+                        </span>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex gap-2 ml-4 shrink-0">
@@ -836,19 +932,33 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                 )}
               </div>
               <div className="flex gap-4 flex-wrap">
-                {Object.entries(levelCounts).map(([level, count]) => (
-                  <span key={level} className="inline-flex items-center gap-1">
+                {Object.entries(levelCounts).map(([level, count]) => {
+                  const levelNum = parseInt(level);
+                  const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
+                  const isClickable = levelNum !== 1;
+                  
+                  return (
                     <span 
-                      className="inline-block w-3 h-3 rounded-full" 
-                      style={{ 
-                        backgroundColor: level === "0" ? "#3b82f6" : 
-                                        level === "1" ? "#10b981" : 
-                                        level === "2" ? "#f59e0b" : "#ef4444" 
-                      }}
-                    />
-                    {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
-                  </span>
-                ))}
+                      key={level} 
+                      className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                      onClick={isClickable ? () => toggleRing(levelNum) : undefined}
+                      title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                    >
+                      <span 
+                        className="inline-block w-3 h-3 rounded-full" 
+                        style={{ 
+                          backgroundColor: level === "0" ? "#3b82f6" : 
+                                          level === "1" ? "#10b981" : 
+                                          level === "2" ? "#f59e0b" : "#ef4444",
+                          opacity: isVisible ? 1 : 0.3
+                        }}
+                      />
+                      <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                        {levelLabels[levelNum] || `Level ${level}`}: {count}
+                      </span>
+                    </span>
+                  );
+                })}
               </div>
             </div>
             <div className="flex gap-2 ml-4 shrink-0">
