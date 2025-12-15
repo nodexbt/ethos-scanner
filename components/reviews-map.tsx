@@ -97,6 +97,11 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     2: true,
     3: true,
   });
+  const [visibleSentiments, setVisibleSentiments] = useState<Record<string, boolean>>({
+    positive: true,
+    neutral: true,
+    negative: true,
+  });
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -315,6 +320,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     });
   };
 
+  // Toggle sentiment visibility
+  const toggleSentiment = (sentiment: "positive" | "neutral" | "negative") => {
+    setVisibleSentiments((prev) => ({
+      ...prev,
+      [sentiment]: !prev[sentiment],
+    }));
+  };
+
   useEffect(() => {
     if (
       !mounted ||
@@ -378,6 +391,52 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .attr("x", -bgSize / 2 + width / 2)
       .attr("y", -bgSize / 2 + height / 2);
 
+    // Create arrow markers for directional links (one for each sentiment type)
+    const arrowMarkerPositive = defs
+      .append("marker")
+      .attr("id", "arrow-positive")
+      .attr("markerWidth", 10)
+      .attr("markerHeight", 10)
+      .attr("refX", 9)
+      .attr("refY", 3)
+      .attr("orient", "auto")
+      .attr("markerUnits", "strokeWidth");
+    
+    arrowMarkerPositive
+      .append("path")
+      .attr("d", "M0,0 L0,6 L9,3 z")
+      .attr("fill", "#10b981");
+
+    const arrowMarkerNeutral = defs
+      .append("marker")
+      .attr("id", "arrow-neutral")
+      .attr("markerWidth", 10)
+      .attr("markerHeight", 10)
+      .attr("refX", 9)
+      .attr("refY", 3)
+      .attr("orient", "auto")
+      .attr("markerUnits", "strokeWidth");
+    
+    arrowMarkerNeutral
+      .append("path")
+      .attr("d", "M0,0 L0,6 L9,3 z")
+      .attr("fill", "#94a3b8");
+
+    const arrowMarkerNegative = defs
+      .append("marker")
+      .attr("id", "arrow-negative")
+      .attr("markerWidth", 10)
+      .attr("markerHeight", 10)
+      .attr("refX", 9)
+      .attr("refY", 3)
+      .attr("orient", "auto")
+      .attr("markerUnits", "strokeWidth");
+    
+    arrowMarkerNegative
+      .append("path")
+      .attr("d", "M0,0 L0,6 L9,3 z")
+      .attr("fill", "#ef4444");
+
     const rootProfileId = profileId || userId;
     const rootId = rootProfileId.toString();
 
@@ -421,12 +480,18 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     });
 
     // Create nodes with minimum level (ensures each user appears only once)
+    // IMPORTANT: Only the root node should have level 0 - ensure no other nodes get level 0
     allReviews.forEach((activity) => {
       // Process subject
       if (activity.subject.profileId) {
         const subjectId = activity.subject.profileId.toString();
+        // Skip if this is the root node (already created)
+        if (subjectId === rootId) return;
+        
         if (!nodeMap.has(subjectId)) {
           const minLevel = userMinLevels.get(subjectId) || activity.level;
+          // Ensure level is never 0 for non-root nodes
+          const nodeLevel = minLevel === 0 ? activity.level : minLevel;
           nodeMap.set(subjectId, {
             id: subjectId,
             profileId: activity.subject.profileId,
@@ -436,14 +501,16 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             score: activity.subjectUser.score,
             isRoot: false,
             reviewType: activity.author.profileId === profileId ? "received" : "given",
-            level: minLevel,
+            level: nodeLevel,
           });
         } else {
           const node = nodeMap.get(subjectId)!;
           // Update to minimum level if this connection has a lower level
           const minLevel = userMinLevels.get(subjectId) || node.level;
-          if (minLevel < node.level) {
-            node.level = minLevel;
+          // Ensure level is never 0 for non-root nodes
+          const nodeLevel = minLevel === 0 ? node.level : Math.min(minLevel, node.level);
+          if (nodeLevel < node.level) {
+            node.level = nodeLevel;
           }
           if (node.reviewType !== "both") {
             node.reviewType = "both";
@@ -454,8 +521,13 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       // Process author
       if (activity.author.profileId && activity.author.profileId !== profileId) {
         const authorId = activity.author.profileId.toString();
+        // Skip if this is the root node (already created)
+        if (authorId === rootId) return;
+        
         if (!nodeMap.has(authorId)) {
           const minLevel = userMinLevels.get(authorId) || activity.level;
+          // Ensure level is never 0 for non-root nodes
+          const nodeLevel = minLevel === 0 ? activity.level : minLevel;
           nodeMap.set(authorId, {
             id: authorId,
             profileId: activity.author.profileId,
@@ -465,14 +537,16 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             score: activity.authorUser.score,
             isRoot: false,
             reviewType: activity.subject.profileId === profileId ? "given" : "received",
-            level: minLevel,
+            level: nodeLevel,
           });
         } else {
           const node = nodeMap.get(authorId)!;
           // Update to minimum level if this connection has a lower level
           const minLevel = userMinLevels.get(authorId) || node.level;
-          if (minLevel < node.level) {
-            node.level = minLevel;
+          // Ensure level is never 0 for non-root nodes
+          const nodeLevel = minLevel === 0 ? node.level : Math.min(minLevel, node.level);
+          if (nodeLevel < node.level) {
+            node.level = nodeLevel;
           }
           if (node.reviewType !== "both") {
             node.reviewType = "both";
@@ -495,14 +569,21 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     // Get all node IDs that should be visible (including intermediate nodes needed for connections)
     const visibleNodeIds = new Set(filteredNodesByRing.map(n => n.id));
     
-    // Find all nodes that are needed to connect visible nodes
-    // If a link connects two visible nodes, both endpoints must be visible
-    const neededNodeIds = new Set<string>();
+    // Find all nodes that are reachable through visible links
+    // A node is only included if it's connected via visible sentiments and visible rings
+    // This ensures nodes connected only by hidden sentiments are not shown
+    const nodesWithVisibleLinks = new Set<string>();
+    const visibleLinksMap = new Map<string, Set<string>>(); // source -> set of targets
+    
     allReviews.forEach((activity) => {
       if (!activity.author.profileId || !activity.subject.profileId) return;
       
       const sourceId = activity.author.profileId.toString();
       const targetId = activity.subject.profileId.toString();
+      
+      // Check if sentiment is visible FIRST
+      const sentiment = activity.data.score as "positive" | "neutral" | "negative";
+      if (!visibleSentiments[sentiment]) return;
       
       // Check if this link should be visible based on ring visibility
       const sourceNode = nodeMap.get(sourceId);
@@ -510,22 +591,60 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       
       if (!sourceNode || !targetNode) return;
       
-      // Link is visible if target level is visible (or source is root/level 1)
-      const linkVisible = sourceNode.isRoot || sourceNode.level === 0 || 
-                         (sourceNode.level === 1 && (visibleRings[1] ?? true)) ||
-                         (visibleRings[sourceNode.level] ?? false);
+      // Link is visible if both source and target levels are visible
+      const sourceVisible = sourceNode.isRoot || sourceNode.level === 0 || 
+                           (sourceNode.level === 1 && (visibleRings[1] ?? true)) ||
+                           (visibleRings[sourceNode.level] ?? false);
       const targetVisible = targetNode.isRoot || targetNode.level === 0 ||
                            (targetNode.level === 1 && (visibleRings[1] ?? true)) ||
                            (visibleRings[targetNode.level] ?? false);
       
-      if (linkVisible && targetVisible) {
-        neededNodeIds.add(sourceId);
-        neededNodeIds.add(targetId);
+      if (sourceVisible && targetVisible) {
+        // This link is visible
+        if (!visibleLinksMap.has(sourceId)) {
+          visibleLinksMap.set(sourceId, new Set());
+        }
+        visibleLinksMap.get(sourceId)!.add(targetId);
+        nodesWithVisibleLinks.add(sourceId);
+        nodesWithVisibleLinks.add(targetId);
       }
     });
     
-    // Combine filtered nodes with needed nodes
-    const finalNodeIds = new Set([...visibleNodeIds, ...neededNodeIds]);
+    // Build reachable nodes starting from root (only through visible links)
+    // This ensures nodes only connected via hidden sentiments are excluded
+    const reachableNodes = new Set<string>();
+    const hasAnyVisibleSentiment = Object.values(visibleSentiments).some(v => v);
+    
+    if (hasAnyVisibleSentiment && nodesWithVisibleLinks.has(rootId)) {
+      // Start BFS from root to find all reachable nodes through visible links
+      const queue = [rootId];
+      reachableNodes.add(rootId);
+      
+      while (queue.length > 0) {
+        const currentNode = queue.shift()!;
+        const targets = visibleLinksMap.get(currentNode);
+        if (targets) {
+          targets.forEach(targetId => {
+            if (!reachableNodes.has(targetId) && nodesWithVisibleLinks.has(targetId)) {
+              reachableNodes.add(targetId);
+              queue.push(targetId);
+            }
+          });
+        }
+      }
+    }
+    
+    // Only include nodes that are reachable from root through visible links
+    const finalNodeIds = new Set<string>();
+    if (hasAnyVisibleSentiment) {
+      reachableNodes.forEach(id => {
+        if (visibleNodeIds.has(id) || id === rootId) {
+          finalNodeIds.add(id);
+        }
+      });
+    }
+    // If all sentiments are off, don't add any nodes (empty set)
+    
     const nodes: Node[] = allNodes
       .filter((node) => finalNodeIds.has(node.id))
       .slice(0, MAX_TOTAL_NODES_REVIEWS);
@@ -555,7 +674,13 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                              (targetNode.level === 1 && (visibleRings[1] ?? true)) ||
                              (visibleRings[targetNode.level] ?? false);
         
-        return sourceVisible && targetVisible;
+        if (!sourceVisible || !targetVisible) return false;
+        
+        // Check if sentiment is visible
+        const sentiment = activity.data.score as "positive" | "neutral" | "negative";
+        if (!visibleSentiments[sentiment]) return false;
+        
+        return true;
       })
       .map((activity) => {
         const sourceId = activity.author.profileId!.toString();
@@ -580,6 +705,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       return levelColors[node.level] || "#64748b";
     };
 
+    // Link color based on sentiment (review type)
     const getLinkColor = (sentiment?: string) => {
       switch (sentiment) {
         case "positive":
@@ -589,6 +715,20 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         case "neutral":
         default:
           return "#94a3b8"; // Gray
+      }
+    };
+    
+    // Sentiment shown via line style (solid for positive, dotted for neutral, dashed for negative)
+    const getLinkStyle = (sentiment?: string) => {
+      switch (sentiment) {
+        case "positive":
+          return "solid";
+        case "neutral":
+          return "dotted";
+        case "negative":
+          return "dashed";
+        default:
+          return "solid";
       }
     };
 
@@ -652,7 +792,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         return baseRadius + node.level * 180;
       }, width / 2, height / 2).strength(0.8));
 
-    // Create links
+    // Create links colored by sentiment
     const link = g
       .append("g")
       .attr("class", "links")
@@ -660,14 +800,36 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .data(links)
       .enter()
       .append("line")
-      .attr("stroke", (d) => getLinkColor(d.sentiment))
+      .attr("stroke", (d) => getLinkColor(d.sentiment)) // Color by sentiment
       .attr("stroke-opacity", (d) => {
         const target = d.target as Node;
-        return 0.4 + (1 - target.level * 0.1);
+        return 0.6 + (1 - target.level * 0.1);
       })
       .attr("stroke-width", (d) => {
         const target = d.target as Node;
-        return Math.max(1, 2 - target.level * 0.3);
+        return Math.max(1.5, 2.5 - target.level * 0.3);
+      })
+      .attr("stroke-dasharray", (d) => {
+        const style = getLinkStyle(d.sentiment);
+        if (style === "dashed") return "5,5";
+        if (style === "dotted") return "2,3";
+        return "none";
+      });
+
+    // Create arrow markers at the midpoint of each line
+    // Arrow path: tip at (0,0) pointing right, so when rotated it aligns with the line
+    const arrowMarkers = g
+      .append("g")
+      .attr("class", "arrow-markers")
+      .selectAll("path")
+      .data(links)
+      .enter()
+      .append("path")
+      .attr("d", "M0,0 L-8,4 L-8,-4 z") // Arrow tip at origin (0,0), pointing right
+      .attr("fill", (d) => getLinkColor(d.sentiment))
+      .attr("opacity", (d) => {
+        const target = d.target as Node;
+        return 0.6 + (1 - target.level * 0.1);
       });
 
     // Create node groups
@@ -701,7 +863,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         return Math.max(18, 25 - d.level * 2);
       })
       .attr("fill", (d) => getNodeColor(d))
-      .attr("stroke", "#fff")
+      .attr("stroke", (d) => getNodeColor(d)) // Border colored by ring level
       .attr("stroke-width", (d) => (d.isRoot ? 3 : 2))
       .attr("opacity", (d) => (d.isRoot ? 1 : 0.9 - d.level * 0.1));
 
@@ -794,6 +956,54 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         .attr("x2", (d) => (d.target as Node).x ?? 0)
         .attr("y2", (d) => (d.target as Node).y ?? 0);
 
+      // Check for bidirectional connections (both A->B and B->A exist)
+      const linkKeySet = new Set<string>();
+      links.forEach((link) => {
+        const source = link.source as Node;
+        const target = link.target as Node;
+        const sourceId = source.id;
+        const targetId = target.id;
+        linkKeySet.add(`${sourceId}-${targetId}`);
+      });
+
+      // Update arrow markers at midpoint of each line
+      arrowMarkers.attr("transform", (d) => {
+        const source = d.source as Node;
+        const target = d.target as Node;
+        const sourceId = source.id;
+        const targetId = target.id;
+        const linkKey = `${sourceId}-${targetId}`;
+        const reverseKey = `${targetId}-${sourceId}`;
+        const isBidirectional = linkKeySet.has(reverseKey);
+        
+        const x1 = source.x ?? 0;
+        const y1 = source.y ?? 0;
+        const x2 = target.x ?? 0;
+        const y2 = target.y ?? 0;
+        
+        // Calculate midpoint
+        let midX = (x1 + x2) / 2;
+        let midY = (y1 + y2) / 2;
+        
+        // If bidirectional, offset arrow slightly towards target to create space between arrows
+        if (isBidirectional) {
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0) {
+            const offset = 12; // Offset distance in pixels
+            // Normalize direction vector and offset towards target
+            midX += (dx / length) * offset;
+            midY += (dy / length) * offset;
+          }
+        }
+        
+        // Calculate angle for rotation
+        const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+        
+        return `translate(${midX},${midY}) rotate(${angle})`;
+      });
+
       nodeGroups.attr("transform", (d) => {
         const x = d.x ?? width / 2;
         const y = d.y ?? height / 2;
@@ -826,6 +1036,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     isFullscreen,
     theme,
     visibleRings,
+    visibleSentiments,
   ]);
 
   if (!mounted) {
@@ -863,16 +1074,35 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     );
   }
 
-  // Count reviews by level
+  // Count reviews by level (for legend display)
   const levelCounts = allReviews.reduce((acc, review) => {
     acc[review.level] = (acc[review.level] || 0) + 1;
     return acc;
   }, {} as Record<number, number>);
 
+  // Count reviews by sentiment
+  const sentimentCounts = allReviews.reduce((acc, review) => {
+    const sentiment = review.data.score as "positive" | "neutral" | "negative";
+    acc[sentiment] = (acc[sentiment] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   const levelLabels: Record<number, string> = {
     1: "1st ring",
     2: "2nd ring",
     3: "3rd ring",
+  };
+
+  const sentimentLabels: Record<string, string> = {
+    positive: "Positive",
+    neutral: "Neutral",
+    negative: "Negative",
+  };
+
+  const sentimentStyles: Record<string, { pattern: string; color: string }> = {
+    positive: { pattern: "solid", color: "#10b981" },
+    neutral: { pattern: "dotted", color: "#94a3b8" },
+    negative: { pattern: "dashed", color: "#ef4444" },
   };
 
   const resetView = () => {
@@ -920,47 +1150,68 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                   )}
                 </div>
                 <div className="flex gap-4 flex-wrap">
-                  {Object.entries(levelCounts).map(([level, count]) => {
-                    const levelNum = parseInt(level);
-                    const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
-                    const isClickable = levelNum !== 1;
+                  {Object.entries(levelCounts)
+                    .filter(([level]) => parseInt(level) !== 0) // Exclude root (level 0)
+                    .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                    .map(([level, count]) => {
+                      const levelNum = parseInt(level);
+                      const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
+                      const isClickable = levelNum !== 1;
+                      
+                      return (
+                        <span 
+                          key={level} 
+                          className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                          onClick={isClickable ? () => toggleRing(levelNum) : undefined}
+                          title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                        >
+                          <span 
+                            className="inline-block w-3 h-3 rounded-full" 
+                            style={{ 
+                              backgroundColor: level === "1" ? "#10b981" : 
+                                              level === "2" ? "#f59e0b" : "#ef4444",
+                              opacity: isVisible ? 1 : 0.3
+                            }}
+                          />
+                          <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                            {levelLabels[levelNum] || `Level ${level}`}: {count}
+                          </span>
+                        </span>
+                      );
+                    })}
+                </div>
+                <div className="flex gap-4 flex-wrap mt-2">
+                  {(["positive", "neutral", "negative"] as const).map((sentiment) => {
+                    const isVisible = visibleSentiments[sentiment] ?? true;
+                    const count = sentimentCounts[sentiment] || 0;
+                    const style = sentimentStyles[sentiment];
                     
                     return (
-                      <span 
-                        key={level} 
-                        className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                        onClick={isClickable ? () => toggleRing(levelNum) : undefined}
-                        title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                      <span
+                        key={sentiment}
+                        className="inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => toggleSentiment(sentiment)}
+                        title={`Click to ${isVisible ? 'hide' : 'show'} ${sentimentLabels[sentiment]} reviews`}
                       >
-                        <span 
-                          className="inline-block w-3 h-3 rounded-full" 
-                          style={{ 
-                            backgroundColor: level === "0" ? "#3b82f6" : 
-                                            level === "1" ? "#10b981" : 
-                                            level === "2" ? "#f59e0b" : "#ef4444",
-                            opacity: isVisible ? 1 : 0.3
+                        <span
+                          className="inline-block w-3 h-1"
+                          style={{
+                            backgroundColor: style.color,
+                            opacity: isVisible ? 1 : 0.3,
+                            borderTop: style.pattern === "dashed" ? `2px dashed ${style.color}` : 
+                                      style.pattern === "dotted" ? `2px dotted ${style.color}` : 
+                                      `2px solid ${style.color}`,
+                            borderBottom: "none",
+                            borderLeft: "none",
+                            borderRight: "none",
                           }}
                         />
                         <span style={{ opacity: isVisible ? 1 : 0.5 }}>
-                          {levelLabels[levelNum] || `Level ${level}`}: {count}
+                          {sentimentLabels[sentiment]}: {count}
                         </span>
                       </span>
                     );
                   })}
-                </div>
-                <div className="flex gap-4 flex-wrap mt-2">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-block w-3 h-1 bg-[#10b981]" />
-                    Positive
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
-                    Neutral
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-block w-3 h-1 bg-[#ef4444]" />
-                    Negative
-                  </span>
                 </div>
               </div>
               <div className="flex gap-2 ml-4 shrink-0">
@@ -1000,47 +1251,74 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                 )}
               </div>
               <div className="flex gap-4 flex-wrap">
-                {Object.entries(levelCounts).map(([level, count]) => {
-                  const levelNum = parseInt(level);
-                  const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
-                  const isClickable = levelNum !== 1;
+                {Object.entries(levelCounts)
+                  .filter(([level]) => parseInt(level) !== 0) // Exclude root (level 0)
+                  .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                  .map(([level, count]) => {
+                    const levelNum = parseInt(level);
+                    const isVisible = levelNum === 1 ? true : visibleRings[levelNum] ?? false;
+                    const isClickable = levelNum !== 1;
+                    
+                    return (
+                      <span 
+                        key={level} 
+                        className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                        onClick={isClickable ? () => toggleRing(levelNum) : undefined}
+                        title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                      >
+                        <span 
+                          className="inline-block w-3 h-3 rounded-full" 
+                          style={{ 
+                            backgroundColor: level === "1" ? "#10b981" : 
+                                            level === "2" ? "#f59e0b" : "#ef4444",
+                            opacity: isVisible ? 1 : 0.3
+                          }}
+                        />
+                        <span style={{ opacity: isVisible ? 1 : 0.5 }}>
+                          {levelLabels[levelNum] || `Level ${level}`}: {count}
+                        </span>
+                      </span>
+                    );
+                  })}
+              </div>
+              <div className="flex gap-4 flex-wrap mt-2">
+                {(["positive", "neutral", "negative"] as const).map((sentiment) => {
+                  const isVisible = visibleSentiments[sentiment] ?? true;
+                  const count = sentimentCounts[sentiment] || 0;
+                  const style = sentimentStyles[sentiment];
                   
                   return (
-                    <span 
-                      key={level} 
-                      className={`inline-flex items-center gap-1 ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                      onClick={isClickable ? () => toggleRing(levelNum) : undefined}
-                      title={isClickable ? `Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}` : undefined}
+                    <span
+                      key={sentiment}
+                      className="inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => toggleSentiment(sentiment)}
+                      title={`Click to ${isVisible ? 'hide' : 'show'} ${sentimentLabels[sentiment]} reviews`}
                     >
-                      <span 
-                        className="inline-block w-3 h-3 rounded-full" 
-                        style={{ 
-                          backgroundColor: level === "0" ? "#3b82f6" : 
-                                          level === "1" ? "#10b981" : 
-                                          level === "2" ? "#f59e0b" : "#ef4444",
-                          opacity: isVisible ? 1 : 0.3
-                        }}
-                      />
+                      <svg
+                        width="16"
+                        height="4"
+                        className="inline-block"
+                        style={{ opacity: isVisible ? 1 : 0.3 }}
+                      >
+                        <line
+                          x1="0"
+                          y1="2"
+                          x2="16"
+                          y2="2"
+                          stroke={style.color}
+                          strokeWidth="2"
+                          strokeDasharray={
+                            style.pattern === "dashed" ? "4,2" :
+                            style.pattern === "dotted" ? "2,2" : "none"
+                          }
+                        />
+                      </svg>
                       <span style={{ opacity: isVisible ? 1 : 0.5 }}>
-                        {levelLabels[levelNum] || `Level ${level}`}: {count}
+                        {sentimentLabels[sentiment]}: {count}
                       </span>
                     </span>
                   );
                 })}
-              </div>
-              <div className="flex gap-4 flex-wrap mt-2">
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block w-3 h-1 bg-[#10b981]" />
-                  Positive
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
-                  Neutral
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block w-3 h-1 bg-[#ef4444]" />
-                  Negative
-                </span>
               </div>
             </div>
             <div className="flex gap-2 ml-4 shrink-0">
