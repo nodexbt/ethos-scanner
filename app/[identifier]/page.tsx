@@ -142,9 +142,9 @@ export default function ProfilePage() {
       loadRecentSearches(); // Refresh recent searches after saving
       
       // Update URL if different from current identifier
-      const encodedIdentifier = encodeURIComponent(trimmedInput);
-      if (encodedIdentifier !== identifier) {
-        router.replace(`/${encodedIdentifier}`);
+      // Note: Next.js automatically decodes URL params, so identifier is already decoded
+      if (trimmedInput !== identifier) {
+        router.replace(`/${encodeURIComponent(trimmedInput)}`);
       }
     } catch (err) {
       setError(
@@ -188,9 +188,9 @@ export default function ProfilePage() {
   // Load profile when identifier changes
   useEffect(() => {
     if (identifier) {
-      const decodedIdentifier = decodeURIComponent(identifier);
-      setInput(decodedIdentifier);
-      fetchProfile(decodedIdentifier);
+      // Note: Next.js automatically decodes URL params, so identifier is already decoded
+      setInput(identifier);
+      fetchProfile(identifier);
     }
     loadRecentSearches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
