@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -24,11 +24,12 @@ interface RecentSearch {
 
 export default function Home() {
   const router = useRouter();
+  const pathname = usePathname();
   const [input, setInput] = useState("");
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
-  // Load recent searches from localStorage on mount
-  useEffect(() => {
+  // Load recent searches from localStorage
+  const loadRecentSearches = () => {
     const stored = localStorage.getItem("ethos-recent-searches");
     if (stored) {
       try {
@@ -37,7 +38,12 @@ export default function Home() {
         // Invalid JSON, ignore
       }
     }
-  }, []);
+  };
+
+  // Load recent searches on mount and when pathname changes to home
+  useEffect(() => {
+    loadRecentSearches();
+  }, [pathname]);
 
   // Remove a recent search
   const removeRecentSearch = (query: string, e: React.MouseEvent) => {
@@ -114,7 +120,7 @@ export default function Home() {
                   Recent Searches
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-2">
-                  {recentSearches.map((search, index) => (
+                  {recentSearches.slice(0, 5).map((search, index) => (
                     <button
                       key={index}
                       onClick={() => searchRecent(search.query)}

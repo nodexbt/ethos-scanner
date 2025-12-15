@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Search, Loader2, ExternalLink } from "lucide-react";
+import { Search, Loader2, ExternalLink, X } from "lucide-react";
 import { InvitationMap } from "@/components/invitation-map";
 import { VouchesMap } from "@/components/vouches-map";
 import { ReviewsMap } from "@/components/reviews-map";
@@ -74,6 +74,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<EthosProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
@@ -138,6 +139,7 @@ export default function ProfilePage() {
       const data = await response.json();
       setProfile(data);
       saveRecentSearch(data, trimmedInput);
+      loadRecentSearches(); // Refresh recent searches after saving
       
       // Update URL if different from current identifier
       const encodedIdentifier = encodeURIComponent(trimmedInput);
@@ -153,6 +155,36 @@ export default function ProfilePage() {
     }
   };
 
+  // Load recent searches from localStorage
+  const loadRecentSearches = () => {
+    const stored = localStorage.getItem("ethos-recent-searches");
+    if (stored) {
+      try {
+        setRecentSearches(JSON.parse(stored));
+      } catch (e) {
+        // Invalid JSON, ignore
+      }
+    }
+  };
+
+  // Remove a recent search
+  const removeRecentSearch = (query: string, e?: React.MouseEvent | React.KeyboardEvent) => {
+    e?.stopPropagation();
+    setRecentSearches((prev) => {
+      const updated = prev.filter((s) => s.query.toLowerCase() !== query.toLowerCase());
+      localStorage.setItem("ethos-recent-searches", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Search using a recent search query
+  const searchRecent = (query: string) => {
+    const trimmedInput = query.trim();
+    if (trimmedInput) {
+      router.push(`/${encodeURIComponent(trimmedInput)}`);
+    }
+  };
+
   // Load profile when identifier changes
   useEffect(() => {
     if (identifier) {
@@ -160,6 +192,7 @@ export default function ProfilePage() {
       setInput(decodedIdentifier);
       fetchProfile(decodedIdentifier);
     }
+    loadRecentSearches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifier]);
 
@@ -223,6 +256,56 @@ export default function ProfilePage() {
             {error && (
               <div className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
+              </div>
+            )}
+
+            {recentSearches.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-medium text-muted-foreground">
+                  Recent Searches
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {recentSearches.slice(0, 5).map((search, index) => (
+                    <button
+                      key={index}
+                      onClick={() => searchRecent(search.query)}
+                      className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted cursor-pointer"
+                    >
+                      {search.avatarUrl && (
+                        <img
+                          src={search.avatarUrl}
+                          alt={search.displayName}
+                          className="h-6 w-6 shrink-0 rounded-full"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1 text-left">
+                        <div className="truncate font-medium">
+                          {search.displayName}
+                        </div>
+                        {search.username && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            @{search.username}
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        onClick={(e) => removeRecentSearch(search.query, e)}
+                        className="shrink-0 cursor-pointer rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
+                        aria-label="Remove from recent searches"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            removeRecentSearch(search.query, e);
+                          }
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>
