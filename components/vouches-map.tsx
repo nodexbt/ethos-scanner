@@ -77,8 +77,8 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [visibleRings, setVisibleRings] = useState<Record<number, boolean>>({
     1: true, // Ring 1 always visible
-    2: true,
-    3: true,
+    2: false, // Only enable first ring initially
+    3: false,
   });
   const { theme } = useTheme();
 

@@ -94,8 +94,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [visibleRings, setVisibleRings] = useState<Record<number, boolean>>({
     1: true, // Ring 1 always visible
-    2: true,
-    3: true,
+    2: false, // Only enable first ring initially
+    3: false,
   });
   const [visibleSentiments, setVisibleSentiments] = useState<Record<string, boolean>>({
     positive: true,
