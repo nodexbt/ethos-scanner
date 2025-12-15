@@ -205,7 +205,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8">
       <div className="mx-auto max-w-4xl space-y-8">
         <div className="relative">
           <div className="absolute top-0 right-0">

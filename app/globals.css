@@ -45,6 +45,9 @@
   --border: 0 0% 89.8%;
   --input: 0 0% 89.8%;
   --ring: 0 0% 3.9%;
+  --dot-color: rgba(0, 0, 0, 0.1);
+  --dot-size: 1px;
+  --dot-spacing: 20px;
 }
 
 .dark {
@@ -67,14 +70,30 @@
   --border: 0 0% 20%;
   --input: 0 0% 20%;
   --ring: 0 0% 83.1%;
+  --dot-color: rgba(255, 255, 255, 0.05);
+  --dot-size: 1px;
+  --dot-spacing: 20px;
+}
+
+html {
+  background-color: hsl(var(--background));
+  background-image: radial-gradient(circle, var(--dot-color) 0px, var(--dot-color) 1px, transparent 1px);
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: calc(var(--dot-spacing) / 2) calc(var(--dot-spacing) / 2);
+  min-height: 100%;
 }
 
 body {
-  background: hsl(var(--background));
+  position: relative;
   color: hsl(var(--foreground));
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: transparent;
+  background-image: inherit;
+  background-size: inherit;
+  background-position: inherit;
+  min-height: 100vh;
 }
 
 svg {
