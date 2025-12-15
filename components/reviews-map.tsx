@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface User {
   id: number;
@@ -83,6 +84,7 @@ const MAX_TOTAL_NODES_REVIEWS = 200;
 
 export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: ReviewsMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [allReviews, setAllReviews] = useState<ReviewActivityWithLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -480,6 +482,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         svg.style("cursor", "grab");
       });
 
+    zoomRef.current = zoom;
+
     svg
       .call(zoom)
       .style("cursor", "grab")
@@ -500,7 +504,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             const target = d.target as Node;
             const levelDiff = Math.abs(target.level - source.level);
             // Increase distance for more breathing room
-            return 150 + levelDiff * 80;
+            return 180 + levelDiff * 100;
           })
       )
       .force("charge", d3.forceManyBody().strength((d) => {
@@ -514,7 +518,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         d3.forceCollide().radius((d) => {
           const node = d as Node;
           // Increase collision radius for more breathing room
-          return node.isRoot ? 60 : Math.max(35, 40 - node.level * 2);
+          return node.isRoot ? 70 : Math.max(40, 50 - node.level * 2);
         })
       )
       .force("radial", d3.forceRadial((d) => {
@@ -747,46 +751,79 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     3: "3rd ring",
   };
 
+  const resetView = () => {
+    if (!svgRef.current) return;
+    
+    const svg = d3.select(svgRef.current);
+    const initialTransform = d3.zoomIdentity;
+    
+    // If zoomRef is available, use it; otherwise get zoom from SVG
+    if (zoomRef.current) {
+      svg
+        .transition()
+        .duration(750)
+        .call(zoomRef.current.transform, initialTransform);
+    } else {
+      // Fallback: directly set transform on the group
+      const g = svg.select<SVGGElement>(".zoom-container");
+      g.transition()
+        .duration(750)
+        .attr("transform", initialTransform.toString());
+    }
+  };
+
   return (
     <div className="w-full overflow-auto rounded-lg border bg-background p-4">
-      <div className="text-sm text-muted-foreground mb-2 space-y-1">
-        <div>
-          Showing {allReviews.length} review{allReviews.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
-          {allReviews.length >= MAX_TOTAL_NODES_REVIEWS && (
-            <span className="text-xs ml-2">(limited for performance)</span>
-          )}
-        </div>
-        <div className="flex gap-4 flex-wrap">
-          {Object.entries(levelCounts).map(([level, count]) => (
-            <span key={level} className="inline-flex items-center gap-1">
-              <span 
-                className="inline-block w-3 h-3 rounded-full" 
-                style={{ 
-                  backgroundColor: level === "0" ? "#3b82f6" : 
-                                  level === "1" ? "#10b981" : 
-                                  level === "2" ? "#f59e0b" : "#ef4444" 
-                }}
-              />
-              {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
+      <div className="flex items-start justify-between mb-2">
+        <div className="text-sm text-muted-foreground space-y-1 flex-1">
+          <div>
+            Showing {allReviews.length} review{allReviews.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+            {allReviews.length >= MAX_TOTAL_NODES_REVIEWS && (
+              <span className="text-xs ml-2">(limited for performance)</span>
+            )}
+          </div>
+          <div className="flex gap-4 flex-wrap">
+            {Object.entries(levelCounts).map(([level, count]) => (
+              <span key={level} className="inline-flex items-center gap-1">
+                <span 
+                  className="inline-block w-3 h-3 rounded-full" 
+                  style={{ 
+                    backgroundColor: level === "0" ? "#3b82f6" : 
+                                    level === "1" ? "#10b981" : 
+                                    level === "2" ? "#f59e0b" : "#ef4444" 
+                  }}
+                />
+                {levelLabels[parseInt(level)] || `Level ${level}`}: {count}
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-4 flex-wrap mt-2">
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block w-3 h-1 bg-[#10b981]" />
+              Positive
             </span>
-          ))}
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
+              Neutral
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block w-3 h-1 bg-[#ef4444]" />
+              Negative
+            </span>
+          </div>
         </div>
-        <div className="flex gap-4 flex-wrap mt-2">
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-3 h-1 bg-[#10b981]" />
-            Positive
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-3 h-1 bg-[#94a3b8]" />
-            Neutral
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-3 h-1 bg-[#ef4444]" />
-            Negative
-          </span>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={resetView}
+          className="ml-4 shrink-0"
+          title="Reset view to initial position"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Reset View
+        </Button>
       </div>
-      <svg ref={svgRef} className="w-full h-auto"></svg>
+      <svg ref={svgRef} className="w-full h-auto" style={{ shapeRendering: "geometricPrecision" }}></svg>
     </div>
   );
 }

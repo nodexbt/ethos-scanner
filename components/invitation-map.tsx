@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface Invitee {
   id: number;
@@ -50,6 +51,7 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 
 export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: InvitationMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     const container = svgRef.current.parentElement;
     const width = container ? Math.min(container.clientWidth - 32, 1000) : 1000;
     const maxLevel = Math.max(...invitations.map((inv) => inv.level), 1);
-    const height = Math.max(600, Math.min(invitations.length * 40 + 300, 800));
+    const height = Math.max(600, Math.min(invitations.length * 15 + 300, 800));
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
 
     // Create a container group for pan/zoom
@@ -318,6 +320,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         svg.style("cursor", "grab");
       });
 
+    zoomRef.current = zoom;
+
     svg
       .call(zoom)
       .style("cursor", "grab")
@@ -338,7 +342,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
             const target = getNode(d.target);
             const levelDiff = Math.abs(target.level - source.level);
             // Increase distance for higher levels with more breathing room
-            return 150 + levelDiff * 80;
+            return 180 + levelDiff * 100;
           })
       )
       .force("charge", d3.forceManyBody().strength((d) => {
@@ -352,7 +356,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         d3.forceCollide().radius((d) => {
           const node = d as Node;
           // Increase collision radius for more breathing room
-          return node.isRoot ? 60 : Math.max(35, 40 - node.level * 3);
+          return node.isRoot ? 70 : Math.max(40, 50 - node.level * 2);
         })
       )
       .force("radial", d3.forceRadial((d) => {
@@ -405,15 +409,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
             event.subject.fy = event.subject.y;
             d3.select(this).raise();
           })
-          .on("drag", function(event) {
-            event.subject.fx = event.x;
-            event.subject.fy = event.y;
-          })
-          .on("end", function(event) {
-            if (!event.active) simulation.alphaTarget(0);
-            event.subject.fx = null;
-            event.subject.fy = null;
-          })
+          .on("drag", dragged)
+          .on("end", dragended)
       );
 
     // Add circles for nodes with level-based colors and sizes
@@ -491,9 +488,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       .append("text")
       .attr("dy", (d) => {
         if (d.isRoot) return 50;
-        const baseOffset = 35;
         const radius = Math.max(18, 25 - d.level * 2);
-        return baseOffset + radius;
+        return 35 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getTextColor())
@@ -509,9 +505,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       .append("text")
       .attr("dy", (d) => {
         if (d.isRoot) return 65;
-        const baseOffset = 50;
         const radius = Math.max(18, 25 - d.level * 2);
-        return baseOffset + radius;
+        return 50 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getMutedColor())
@@ -532,6 +527,17 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         return `translate(${x},${y})`;
       });
     });
+
+    function dragged(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
+      event.subject.fx = event.x;
+      event.subject.fy = event.y;
+    }
+
+    function dragended(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
+      if (!event.active) simulation.alphaTarget(0);
+      event.subject.fx = null;
+      event.subject.fy = null;
+    }
 
     return () => {
       simulation.stop();
@@ -583,9 +589,31 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     3: "3rd ring",
   };
 
+  const resetView = () => {
+    if (!svgRef.current) return;
+    
+    const svg = d3.select(svgRef.current);
+    const initialTransform = d3.zoomIdentity;
+    
+    // If zoomRef is available, use it; otherwise get zoom from SVG
+    if (zoomRef.current) {
+      svg
+        .transition()
+        .duration(750)
+        .call(zoomRef.current.transform, initialTransform);
+    } else {
+      // Fallback: directly set transform on the group
+      const g = svg.select<SVGGElement>(".zoom-container");
+      g.transition()
+        .duration(750)
+        .attr("transform", initialTransform.toString());
+    }
+  };
+
   return (
     <div className="w-full overflow-auto rounded-lg border bg-background p-4">
-      <div className="text-sm text-muted-foreground mb-2 space-y-1">
+      <div className="flex items-start justify-between mb-2">
+        <div className="text-sm text-muted-foreground space-y-1 flex-1">
         <div>
           Showing {invitations.length} invitee{invitations.length !== 1 ? "s" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
           {invitations.length >= 200 && (
@@ -607,6 +635,17 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
             </span>
           ))}
         </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={resetView}
+          className="ml-4 shrink-0"
+          title="Reset view to initial position"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Reset View
+        </Button>
       </div>
       <svg ref={svgRef} className="w-full h-auto" style={{ shapeRendering: "geometricPrecision" }}></svg>
     </div>
