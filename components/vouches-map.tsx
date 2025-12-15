@@ -884,7 +884,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
-              <div className="text-xs md:text-sm text-muted-foreground space-y-0.5 md:space-y-1 flex-1">
+              <div className="text-xs md:text-sm text-muted-foreground space-y-1.5 md:space-y-2 flex-1">
                 <div>
                   Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
                   {allVouches.length >= MAX_TOTAL_NODES && (
@@ -902,12 +902,12 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                         <button
                           key={level}
                           type="button"
-                          className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-[3px] h-9 px-3 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
                           onClick={() => toggleRing(levelNum)}
                           title={`Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}`}
                         >
                           <span 
-                            className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                            className="inline-block w-[11px] h-[11px] rounded-full shrink-0" 
                             style={{ 
                               backgroundColor: level === "0" ? "#3b82f6" : 
                                               level === "1" ? "#10b981" : 
@@ -915,7 +915,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                               opacity: isVisible ? 1 : 0.3
                             }}
                           />
-                          <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                          <span className="text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                             {levelLabels[levelNum] || `Level ${level}`}: {count}
                           </span>
                         </button>
@@ -925,10 +925,10 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                     return (
                       <span 
                         key={level} 
-                        className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
+                        className="inline-flex items-center gap-[3px] h-9 px-3 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
                       >
                         <span 
-                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                          className="inline-block w-[11px] h-[11px] rounded-full shrink-0" 
                           style={{ 
                             backgroundColor: level === "0" ? "#3b82f6" : 
                                             level === "1" ? "#10b981" : 
@@ -936,7 +936,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                             opacity: isVisible ? 1 : 0.3
                           }}
                         />
-                        <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                        <span className="text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                           {levelLabels[levelNum] || `Level ${level}`}: {count}
                         </span>
                       </span>
@@ -973,7 +973,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       {!isFullscreen && (
         <div ref={containerRef} className="w-full overflow-auto rounded-lg border bg-background p-2 md:p-4">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
-            <div className="text-xs md:text-sm text-muted-foreground space-y-0.5 md:space-y-1 flex-1">
+            <div className="text-xs md:text-sm text-muted-foreground space-y-1.5 md:space-y-2 flex-1">
               <div>
                 Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
                 {allVouches.length >= MAX_TOTAL_NODES && (
@@ -991,12 +991,12 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                       <button
                         key={level}
                         type="button"
-                        className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-[3px] h-9 px-3 rounded-full border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
                         onClick={() => toggleRing(levelNum)}
                         title={`Click to ${isVisible ? 'hide' : 'show'} ${levelLabels[levelNum] || `Level ${level}`}`}
                       >
                         <span 
-                          className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                          className="inline-block w-[11px] h-[11px] rounded-full shrink-0" 
                           style={{ 
                             backgroundColor: level === "0" ? "#3b82f6" : 
                                             level === "1" ? "#10b981" : 
@@ -1004,7 +1004,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                             opacity: isVisible ? 1 : 0.3
                           }}
                         />
-                        <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                        <span className="text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                           {levelLabels[levelNum] || `Level ${level}`}: {count}
                         </span>
                       </button>
@@ -1014,10 +1014,10 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                   return (
                     <span 
                       key={level} 
-                      className="inline-flex items-center gap-0.5 md:gap-1 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
+                      className="inline-flex items-center gap-[3px] h-9 px-3 rounded-full border border-border/50 bg-background opacity-75 cursor-not-allowed"
                     >
                       <span 
-                        className="inline-block w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0" 
+                        className="inline-block w-3 h-3 rounded-full shrink-0" 
                         style={{ 
                           backgroundColor: level === "0" ? "#3b82f6" : 
                                           level === "1" ? "#10b981" : 
@@ -1025,7 +1025,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
                           opacity: isVisible ? 1 : 0.3
                         }}
                       />
-                      <span className="text-xs md:text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
+                      <span className="text-sm" style={{ opacity: isVisible ? 1 : 0.5 }}>
                         {levelLabels[levelNum] || `Level ${level}`}: {count}
                       </span>
                     </span>
