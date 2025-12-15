@@ -354,7 +354,12 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       height = window.innerHeight - 200; // Account for header and padding
     } else {
       width = container ? Math.min(container.clientWidth - 32, 1000) : 1000;
-      height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
+      // On small screens (below md breakpoint), make it square
+      if (window.innerWidth < 768) {
+        height = width;
+      } else {
+        height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
+      }
     }
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
 
@@ -753,6 +758,16 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .style("cursor", "grab")
       .on("dblclick.zoom", null);
 
+    // Apply initial zoom out on small screens
+    if (window.innerWidth < 768) {
+      const initialScale = 0.6; // Zoom out to 60% on small screens
+      // Center the zoomed-out view
+      const tx = (width - width * initialScale) / (2 * initialScale);
+      const ty = (height - height * initialScale) / (2 * initialScale);
+      const initialTransform = d3.zoomIdentity.scale(initialScale).translate(tx, ty);
+      svg.call(zoom.transform, initialTransform);
+    }
+
     // Create force simulation with radial positioning for levels
     const simulation = d3
       .forceSimulation(nodes)
@@ -1109,7 +1124,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     if (!svgRef.current) return;
     
     const svg = d3.select(svgRef.current);
-    const initialTransform = d3.zoomIdentity;
+    let initialTransform = d3.zoomIdentity;
+    
+    // Apply zoom out on small screens
+    if (window.innerWidth < 768) {
+      const width = svgRef.current.clientWidth || 1000;
+      const height = svgRef.current.clientHeight || 600;
+      const initialScale = 0.6;
+      const tx = (width - width * initialScale) / (2 * initialScale);
+      const ty = (height - height * initialScale) / (2 * initialScale);
+      initialTransform = d3.zoomIdentity.scale(initialScale).translate(tx, ty);
+    }
     
     // If zoomRef is available, use it; otherwise get zoom from SVG
     if (zoomRef.current) {
@@ -1341,7 +1366,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               </Button>
             </div>
           </div>
-          <svg ref={svgRef} className="w-full h-auto" style={{ shapeRendering: "geometricPrecision" }}></svg>
+          <div className="w-full aspect-square md:aspect-auto">
+            <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+          </div>
         </div>
       )}
     </>

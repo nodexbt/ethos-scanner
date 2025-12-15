@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Search, Loader2, ExternalLink, X } from "lucide-react";
+import { Search, Loader2, ExternalLink, X, Copy, Check } from "lucide-react";
 import { InvitationMap } from "@/components/invitation-map";
 import { VouchesMap } from "@/components/vouches-map";
 import { ReviewsMap } from "@/components/reviews-map";
@@ -75,6 +75,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<EthosProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
@@ -201,6 +202,30 @@ export default function ProfilePage() {
     const trimmedInput = input.trim();
     if (trimmedInput) {
       router.push(`/${encodeURIComponent(trimmedInput)}`);
+    }
+  };
+
+  const copyToClipboard = async (key: string) => {
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = key;
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey(null), 2000);
+      } catch (fallbackErr) {
+        // Ignore errors
+      }
+      document.body.removeChild(textArea);
     }
   };
 
@@ -463,12 +488,19 @@ export default function ProfilePage() {
                   <h3 className="mb-4 text-lg font-semibold">User Keys</h3>
                   <div className="flex flex-wrap gap-2">
                     {profile.userkeys.map((key, index) => (
-                      <span
+                      <button
                         key={index}
-                        className="rounded-md bg-muted px-2 py-1 text-xs font-mono"
+                        onClick={() => copyToClipboard(key)}
+                        className="group relative flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-mono transition-colors hover:bg-muted/80 cursor-pointer"
+                        title="Click to copy"
                       >
-                        {key}
-                      </span>
+                        <span className="truncate">{key}</span>
+                        {copiedKey === key ? (
+                          <Check className="h-3 w-3 shrink-0 text-green-600" />
+                        ) : (
+                          <Copy className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-50" />
+                        )}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -517,7 +549,7 @@ export default function ProfilePage() {
                 </div>
               )}
 
-              <div className="flex gap-2 pt-4">
+              <div className="flex flex-col gap-2 pt-4">
                 <a
                   href={profile.links.profile}
                   target="_blank"
