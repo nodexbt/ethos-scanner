@@ -394,24 +394,23 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     const nodes: Node[] = allNodes.slice(0, MAX_TOTAL_NODES);
     const nodeIds = new Set(nodes.map(n => n.id));
 
-    // Create links with level information
-    // Include ALL connections between any nodes in the network (not just root connections)
-    const links: Link[] = allVouches
-      .map((vouch) => {
-        const sourceId = vouch.authorProfileId.toString();
-        const targetId = vouch.subjectProfileId.toString();
-        
-        // Include link if both nodes are in the rendered set
-        if (nodeIds.has(sourceId) && nodeIds.has(targetId)) {
-          return {
-            source: sourceId,
-            target: targetId,
-            amount: vouch.balance ? parseFloat(vouch.balance) / 1e18 : undefined,
-          };
-        }
-        return null;
-      })
-      .filter((link): link is Link => link !== null);
+    const links: Link[] = allVouches.flatMap((vouch) => {
+      const sourceId = vouch.authorProfileId.toString();
+      const targetId = vouch.subjectProfileId.toString();
+    
+      // Only include if both endpoints are in the rendered set
+      if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) return [];
+    
+      const amount = vouch.balance ? Number.parseFloat(vouch.balance) / 1e18 : undefined;
+    
+      return [
+        {
+          source: sourceId,
+          target: targetId,
+          amount,
+        },
+      ];
+    });
 
     // Color scheme by level
     const levelColors: Record<number, string> = {
@@ -642,12 +641,12 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       });
     });
 
-    function dragged(event: d3.D3DragEvent<SVGGElement, Node, unknown>) {
+    function dragged(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
       event.subject.fx = event.x;
       event.subject.fy = event.y;
     }
 
-    function dragended(event: d3.D3DragEvent<SVGGElement, Node, unknown>) {
+    function dragended(event: d3.D3DragEvent<SVGGElement, Node, Node>) {
       if (!event.active) simulation.alphaTarget(0);
       event.subject.fx = null;
       event.subject.fy = null;
