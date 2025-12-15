@@ -280,7 +280,7 @@ export default function Home() {
                       key={index}
                       onClick={() => searchRecent(search.query)}
                       disabled={loading}
-                      className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {search.avatarUrl && (
                         <img
