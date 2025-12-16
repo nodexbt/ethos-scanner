@@ -75,6 +75,12 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   source: string | Node;
   target: string | Node;
   sentiment?: "positive" | "neutral" | "negative";
+  isPartOfTriangle?: boolean;
+}
+
+interface Triangle {
+  nodeIds: [string, string, string];
+  nodes: [Node, Node, Node];
 }
 
 // Performance limits
@@ -103,6 +109,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     negative: true,
   });
   const [hideIsolatedNodes, setHideIsolatedNodes] = useState(false);
+  const [showTriangles, setShowTriangles] = useState(true);
+  const [detectedTriangles, setDetectedTriangles] = useState<Triangle[]>([]);
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -855,8 +863,103 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           source: sourceId,
           target: targetId,
           sentiment: activity.data.score as "positive" | "neutral" | "negative",
+          isPartOfTriangle: false,
         };
       });
+
+    // Detect triangular cycles (A→B→C→A) - only positive reviews
+    // Build a map of positive review connections only
+    const linkMap = new Map<string, Set<string>>();
+    const linkSentimentMap = new Map<string, "positive" | "neutral" | "negative">();
+    
+    links.forEach((link) => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+      const edgeKey = `${sourceId}-${targetId}`;
+      
+      // Store sentiment for this edge
+      if (link.sentiment) {
+        linkSentimentMap.set(edgeKey, link.sentiment);
+      }
+      
+      // Only add to link map if it's a positive review
+      if (link.sentiment === 'positive') {
+        if (!linkMap.has(sourceId)) {
+          linkMap.set(sourceId, new Set());
+        }
+        linkMap.get(sourceId)!.add(targetId);
+      }
+    });
+
+    const triangles: Triangle[] = [];
+    const triangleEdges = new Set<string>();
+    
+    // Find all triangular cycles (only with positive reviews)
+    nodes.forEach(nodeA => {
+      const neighborsA = linkMap.get(nodeA.id);
+      if (!neighborsA) return;
+      
+      neighborsA.forEach(nodeBId => {
+        const neighborsB = linkMap.get(nodeBId);
+        if (!neighborsB) return;
+        
+        neighborsB.forEach(nodeCId => {
+          const neighborsC = linkMap.get(nodeCId);
+          if (!neighborsC) return;
+          
+          // Check if C points back to A (completing the triangle)
+          if (neighborsC.has(nodeA.id)) {
+            // Verify all three edges are positive reviews
+            const edge1Key = `${nodeA.id}-${nodeBId}`;
+            const edge2Key = `${nodeBId}-${nodeCId}`;
+            const edge3Key = `${nodeCId}-${nodeA.id}`;
+            
+            const sentiment1 = linkSentimentMap.get(edge1Key);
+            const sentiment2 = linkSentimentMap.get(edge2Key);
+            const sentiment3 = linkSentimentMap.get(edge3Key);
+            
+            // Only count as triangle if all three reviews are positive
+            if (sentiment1 === 'positive' && sentiment2 === 'positive' && sentiment3 === 'positive') {
+              // Found a triangle: A→B→C→A (all positive)
+              const sortedIds = [nodeA.id, nodeBId, nodeCId].sort();
+              const triangleKey = sortedIds.join('-');
+              
+              // Avoid duplicates by checking if we've already recorded this triangle
+              if (!triangleEdges.has(triangleKey)) {
+                triangleEdges.add(triangleKey);
+                
+                const nodeB = nodeMap.get(nodeBId);
+                const nodeC = nodeMap.get(nodeCId);
+                if (nodeB && nodeC) {
+                  triangles.push({
+                    nodeIds: [nodeA.id, nodeBId, nodeCId],
+                    nodes: [nodeA, nodeB, nodeC],
+                  });
+                  
+                  // Mark edges as part of triangle
+                  triangleEdges.add(edge1Key);
+                  triangleEdges.add(edge2Key);
+                  triangleEdges.add(edge3Key);
+                }
+              }
+            }
+          }
+        });
+      });
+    });
+
+    // Mark links that are part of triangles
+    links.forEach((link) => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+      const edgeKey = `${sourceId}-${targetId}`;
+      if (triangleEdges.has(edgeKey)) {
+        link.isPartOfTriangle = true;
+      }
+    });
+
+    // Store detected triangles in state
+    setDetectedTriangles(triangles);
 
     // Color scheme by level
     const levelColors: Record<number, string> = {
@@ -928,6 +1031,12 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       const initialTransform = d3.zoomIdentity.scale(initialScale).translate(tx, ty);
       svg.call(zoom.transform, initialTransform);
     }
+
+    // Draw subtle triangle shapes for detected cycles (behind everything else)
+    const triangleGroup = g
+      .append("g")
+      .attr("class", "triangles")
+      .lower(); // Place behind links and nodes
 
     // Create force simulation with radial positioning for levels
     const simulation = d3
@@ -1007,6 +1116,34 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         const target = d.target as Node;
         return 0.6 + (1 - target.level * 0.1);
       });
+
+    // Create warning badges for triangle edges
+    const triangleBadges = g
+      .append("g")
+      .attr("class", "triangle-badges")
+      .selectAll("g")
+      .data(links.filter(d => d.isPartOfTriangle))
+      .enter()
+      .append("g")
+      .attr("class", "triangle-badge");
+
+    // Add triangle background
+    triangleBadges
+      .append("polygon")
+      .attr("points", "-8,6 0,-6 8,6")
+      .attr("fill", "#fbbf24") // Yellow
+      .attr("stroke", "#f59e0b")
+      .attr("stroke-width", 1);
+
+    // Add exclamation mark
+    triangleBadges
+      .append("text")
+      .attr("text-anchor", "middle")
+      .attr("dy", "3")
+      .attr("font-size", "10px")
+      .attr("font-weight", "bold")
+      .attr("fill", "#78350f")
+      .text("!");
 
     // Create node groups
     const nodeGroups = g
@@ -1126,6 +1263,32 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
     // Update positions
     simulation.on("tick", () => {
+      // Update triangle shapes (only if showTriangles is enabled)
+      if (showTriangles) {
+        triangleGroup
+          .selectAll("polygon")
+          .data(triangles)
+          .join("polygon")
+          .attr("points", (t) => {
+            const [n1, n2, n3] = t.nodes;
+            const x1 = n1.x ?? 0;
+            const y1 = n1.y ?? 0;
+            const x2 = n2.x ?? 0;
+            const y2 = n2.y ?? 0;
+            const x3 = n3.x ?? 0;
+            const y3 = n3.y ?? 0;
+            return `${x1},${y1} ${x2},${y2} ${x3},${y3}`;
+          })
+          .attr("fill", "#fbbf24")
+          .attr("opacity", 0.08)
+          .attr("stroke", "#f59e0b")
+          .attr("stroke-width", 1.5)
+          .attr("stroke-opacity", 0.3)
+          .attr("stroke-dasharray", "5,5");
+      } else {
+        triangleGroup.selectAll("polygon").remove();
+      }
+
       link
         .attr("x1", (d) => (d.source as Node).x ?? 0)
         .attr("y1", (d) => (d.source as Node).y ?? 0)
@@ -1180,6 +1343,35 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         return `translate(${midX},${midY}) rotate(${angle})`;
       });
 
+      // Update triangle warning badges (only if showTriangles is enabled)
+      if (showTriangles) {
+        triangleBadges
+          .attr("opacity", 1)
+          .attr("transform", (d) => {
+            const source = d.source as Node;
+            const target = d.target as Node;
+            const x1 = source.x ?? 0;
+            const y1 = source.y ?? 0;
+            const x2 = target.x ?? 0;
+            const y2 = target.y ?? 0;
+            
+            // Position badge at midpoint
+            const midX = (x1 + x2) / 2;
+            const midY = (y1 + y2) / 2;
+            
+            // Calculate angle for rotation
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            
+            // Offset the badge slightly above the line
+            const offsetX = -Math.sin(angle * Math.PI / 180) * 15;
+            const offsetY = Math.cos(angle * Math.PI / 180) * 15;
+            
+            return `translate(${midX + offsetX},${midY + offsetY})`;
+          });
+      } else {
+        triangleBadges.attr("opacity", 0);
+      }
+
       nodeGroups.attr("transform", (d) => {
         const x = d.x ?? width / 2;
         const y = d.y ?? height / 2;
@@ -1214,6 +1406,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     visibleRings,
     visibleSentiments,
     hideIsolatedNodes,
+    showTriangles,
   ]);
 
   if (!mounted) {
@@ -1432,7 +1625,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     );
                   })}
                 </div>
-                <div className="flex items-center gap-2 mt-1 md:mt-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-1 md:mt-2">
                   <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
                     <input
                       type="checkbox"
@@ -1441,6 +1634,22 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                       className="w-4 h-4 rounded border-border"
                     />
                     <span>Hide nodes with only 1 connection</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
+                    <input
+                      type="checkbox"
+                      checked={showTriangles}
+                      onChange={(e) => setShowTriangles(e.target.checked)}
+                      className="w-4 h-4 rounded border-border"
+                    />
+                    <span className="inline-flex items-center gap-1">
+                      Show review triangles
+                      {detectedTriangles.length > 0 && (
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
+                          {detectedTriangles.length}
+                        </span>
+                      )}
+                    </span>
                   </label>
                 </div>
               </div>
@@ -1464,8 +1673,38 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-hidden">
-              <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+            <div className="flex-1 flex gap-2 overflow-hidden">
+              <div className="flex-1 overflow-hidden">
+                <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+              </div>
+              {detectedTriangles.length > 0 && showTriangles && (
+                <div className="w-64 border-l border-border pl-2 overflow-y-auto">
+                  <div className="text-xs md:text-sm sticky top-0 bg-background pb-2">
+                    <div className="font-medium text-foreground flex items-center gap-2 mb-1">
+                      <span>Review Triangles ({detectedTriangles.length})</span>
+                    </div>
+                    <div className="text-xs text-yellow-600 dark:text-yellow-500">A→B→C→A cycles</div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {detectedTriangles.map((triangle, idx) => (
+                      <div key={idx} className="flex items-start gap-2 p-2 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800">
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full shrink-0">
+                          !
+                        </span>
+                        <span className="text-xs leading-relaxed">
+                          <span className="font-medium">{triangle.nodes[0].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[1].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[2].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[0].name}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1576,7 +1815,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                   );
                 })}
               </div>
-              <div className="flex items-center gap-2 mt-1 md:mt-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-1 md:mt-2">
                 <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
                   <input
                     type="checkbox"
@@ -1585,6 +1824,22 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     className="w-4 h-4 rounded border-border"
                   />
                   <span>Hide nodes with only 1 connection</span>
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={showTriangles}
+                    onChange={(e) => setShowTriangles(e.target.checked)}
+                    className="w-4 h-4 rounded border-border"
+                  />
+                  <span className="inline-flex items-center gap-1">
+                    Show review triangles
+                    {detectedTriangles.length > 0 && (
+                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
+                        {detectedTriangles.length}
+                      </span>
+                    )}
+                  </span>
                 </label>
               </div>
             </div>
@@ -1608,8 +1863,38 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               </Button>
             </div>
           </div>
-          <div className="w-full aspect-square md:aspect-auto">
-            <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+          <div className="w-full aspect-square md:aspect-auto flex gap-2">
+            <div className="flex-1">
+              <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
+            </div>
+            {detectedTriangles.length > 0 && showTriangles && (
+              <div className="w-64 border-l border-border pl-2 overflow-y-auto max-h-[600px]">
+                <div className="text-xs md:text-sm sticky top-0 bg-background pb-2">
+                  <div className="font-medium text-foreground flex items-center gap-2 mb-1">
+                    <span>Review Triangles ({detectedTriangles.length})</span>
+                  </div>
+                  <div className="text-xs text-yellow-600 dark:text-yellow-500">A→B→C→A cycles</div>
+                </div>
+                <div className="space-y-1.5">
+                  {detectedTriangles.map((triangle, idx) => (
+                    <div key={idx} className="flex items-start gap-2 p-2 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800">
+                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full shrink-0">
+                        !
+                      </span>
+                      <span className="text-xs leading-relaxed">
+                        <span className="font-medium">{triangle.nodes[0].name}</span>
+                        {" → "}
+                        <span className="font-medium">{triangle.nodes[1].name}</span>
+                        {" → "}
+                        <span className="font-medium">{triangle.nodes[2].name}</span>
+                        {" → "}
+                        <span className="font-medium">{triangle.nodes[0].name}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
