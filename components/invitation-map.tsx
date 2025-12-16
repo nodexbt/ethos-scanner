@@ -62,7 +62,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
   const [visibleRings, setVisibleRings] = useState<Record<number, boolean>>({
     1: true, // Ring 1 always visible
     2: true,
-    3: true,
+    3: false,
   });
   const { theme } = useTheme();
 
@@ -253,7 +253,16 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     const nodeMap = new Map<string, Node>();
     nodeMap.set(rootId, rootNode);
 
-    // First pass: track minimum level for each user
+    // Build a complete user information map from all invitations
+    const userInfoMap = new Map<string, Invitee>();
+    invitations.forEach((invitation) => {
+      const userId = invitation.user.profileId?.toString() || invitation.user.id.toString();
+      if (!userInfoMap.has(userId)) {
+        userInfoMap.set(userId, invitation.user);
+      }
+    });
+
+    // First pass: track minimum level for each user (invitees only)
     const userMinLevels = new Map<string, number>();
     
     invitations.forEach((invitation) => {
@@ -262,27 +271,28 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       if (currentMin === undefined || invitation.level < currentMin) {
         userMinLevels.set(nodeId, invitation.level);
       }
-      
-      // Also track sender levels
+    });
+
+    // Second pass: for each sender that's not root, determine their level
+    // A sender's level should be invitee.level - 1
+    invitations.forEach((invitation) => {
       const senderId = invitation.senderProfileId.toString();
       if (senderId !== rootId) {
-        const senderInvitation = invitations.find(
-          (inv) => (inv.user.profileId?.toString() || inv.user.id.toString()) === senderId
-        );
-        const senderLevel = senderInvitation ? senderInvitation.level - 1 : invitation.level - 1;
-        const senderCurrentMin = userMinLevels.get(senderId);
-        if (senderCurrentMin === undefined || senderLevel < senderCurrentMin) {
+        // The sender must be at level invitation.level - 1
+        const senderLevel = invitation.level - 1;
+        const currentMin = userMinLevels.get(senderId);
+        if (currentMin === undefined || senderLevel < currentMin) {
           userMinLevels.set(senderId, senderLevel);
         }
       }
     });
 
-    // Second pass: create nodes with minimum level (ensures each user appears only once)
+    // Third pass: create all nodes with their correct minimum levels
     invitations.forEach((invitation) => {
       // Add the invitee node
       const nodeId = invitation.user.profileId?.toString() || invitation.user.id.toString();
       if (!nodeMap.has(nodeId)) {
-        const minLevel = userMinLevels.get(nodeId) || invitation.level;
+        const level = userMinLevels.get(nodeId) || invitation.level;
         nodeMap.set(nodeId, {
           id: nodeId,
           profileId: invitation.user.profileId,
@@ -291,46 +301,26 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
           avatarUrl: invitation.user.avatarUrl,
           score: invitation.user.score,
           isRoot: false,
-          level: minLevel,
+          level: level,
         });
-      } else {
-        // Update to minimum level if this connection has a lower level
-        const node = nodeMap.get(nodeId)!;
-        const minLevel = userMinLevels.get(nodeId) || node.level;
-        if (minLevel < node.level) {
-          node.level = minLevel;
-        }
       }
       
-      // Ensure sender node exists (might be root or another invitee)
+      // Add sender node if it doesn't exist and is not root
       const senderId = invitation.senderProfileId.toString();
       if (!nodeMap.has(senderId) && senderId !== rootId) {
-        // Find the sender in invitations to get their level
-        const senderInvitation = invitations.find(
-          (inv) => (inv.user.profileId?.toString() || inv.user.id.toString()) === senderId
-        );
-        const senderLevel = senderInvitation ? senderInvitation.level - 1 : invitation.level - 1;
-        const minLevel = userMinLevels.get(senderId) || senderLevel;
+        const level = userMinLevels.get(senderId) || (invitation.level - 1);
+        const senderInfo = userInfoMap.get(senderId);
         
-        // Try to get user info from the invitation if available
-        const senderUserInfo = senderInvitation?.user;
         nodeMap.set(senderId, {
           id: senderId,
           profileId: invitation.senderProfileId,
-          name: senderUserInfo?.displayName || `User ${senderId}`,
-          username: senderUserInfo?.username || null,
-          avatarUrl: senderUserInfo?.avatarUrl || "",
-          score: senderUserInfo?.score || 0,
+          name: senderInfo?.displayName || `User ${senderId}`,
+          username: senderInfo?.username || null,
+          avatarUrl: senderInfo?.avatarUrl || "",
+          score: senderInfo?.score || 0,
           isRoot: false,
-          level: minLevel,
+          level: level,
         });
-      } else if (nodeMap.has(senderId) && senderId !== rootId) {
-        // Update sender node to minimum level if needed
-        const node = nodeMap.get(senderId)!;
-        const minLevel = userMinLevels.get(senderId);
-        if (minLevel !== undefined && minLevel < node.level) {
-          node.level = minLevel;
-        }
       }
     });
 
