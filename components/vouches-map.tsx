@@ -326,26 +326,38 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     // Create a container group for pan/zoom
     const g = svg.append("g").attr("class", "zoom-container");
 
-    // Create dot grid pattern for background
+    // Create plus pattern for background
     const defs = svg.append("defs");
     const isDarkMode = theme === "dark";
-    const dotColor = isDarkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)";
-    const dotSize = 2;
-    const dotSpacing = 20;
+    const plusColor = isDarkMode ? "#1a1a1a" : "#e5e5e5";
+    const plusSize = 8; // Size of the plus sign
+    const plusThickness = 1; // Thickness of the plus lines
+    const plusSpacing = 50;
 
     const pattern = defs
       .append("pattern")
       .attr("id", "dot-grid-vouches")
-      .attr("width", dotSpacing)
-      .attr("height", dotSpacing)
+      .attr("width", plusSpacing)
+      .attr("height", plusSpacing)
       .attr("patternUnits", "userSpaceOnUse");
 
+    // Vertical line of the plus
     pattern
-      .append("circle")
-      .attr("cx", dotSpacing / 2)
-      .attr("cy", dotSpacing / 2)
-      .attr("r", dotSize / 2)
-      .attr("fill", dotColor);
+      .append("rect")
+      .attr("x", plusSpacing / 2 - plusThickness / 2)
+      .attr("y", plusSpacing / 2 - plusSize / 2)
+      .attr("width", plusThickness)
+      .attr("height", plusSize)
+      .attr("fill", plusColor);
+
+    // Horizontal line of the plus
+    pattern
+      .append("rect")
+      .attr("x", plusSpacing / 2 - plusSize / 2)
+      .attr("y", plusSpacing / 2 - plusThickness / 2)
+      .attr("width", plusSize)
+      .attr("height", plusThickness)
+      .attr("fill", plusColor);
 
     // Add background rectangle with dot grid pattern
     const bgSize = Math.max(width, height) * 5;
