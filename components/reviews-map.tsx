@@ -223,8 +223,73 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         setAllReviews(allReviewsWithLevels);
         setLoading(false);
 
-        // Fetch level 2 reviews in background (progressive loading)
-        const level2ProfileIds = profileIdsToProcess.slice(1, MAX_LEVEL_2_PROFILES_TO_FETCH_REVIEWS + 1);
+        // Get all level 1 profile IDs (excluding root)
+        const level1ProfileIds = Array.from(new Set([
+          ...givenData.values.map(v => v.subject.profileId),
+          ...receivedData.values.map(v => v.author.profileId)
+        ].filter(id => id !== profileId)));
+
+        // STEP 1: Fetch ALL reviews between first-ring nodes for complete picture
+        const level1InterConnectionPromises = level1ProfileIds.map(async (pid) => {
+          try {
+            const level1Userkey = `profileId:${pid}`;
+            const response = await fetch("https://api.ethos.network/api/v2/activities/profile/given", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                userkey: level1Userkey,
+                filter: ["review"],
+                limit: 100, // Get all connections for this profile
+              }),
+            });
+
+            if (!response.ok) return [];
+
+            const data: ReviewsResponse = await response.json();
+            const results: ReviewActivityWithLevel[] = [];
+
+            // Only include reviews to other level 1 nodes
+            (data.values || []).forEach((activity) => {
+              if (level1ProfileIds.includes(activity.subject.profileId)) {
+                results.push({ ...activity, level: 1 }); // Mark as level 1 (first-ring connection)
+              }
+            });
+
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        // Wait for all level 1 inter-connection calls
+        const level1InterConnectionResults = await Promise.all(level1InterConnectionPromises);
+        const level1InterConnections = level1InterConnectionResults.flat();
+        
+        // Combine level 1 direct connections + inter-connections
+        const allLevel1Reviews = [...allReviewsWithLevels, ...level1InterConnections];
+        
+        // Count unique nodes in level 1
+        const level1NodeIds = new Set<number>();
+        allLevel1Reviews.forEach((activity) => {
+          if (activity.author.profileId !== profileId) level1NodeIds.add(activity.author.profileId);
+          if (activity.subject.profileId !== profileId) level1NodeIds.add(activity.subject.profileId);
+        });
+
+        // Update with complete level 1 data
+        setAllReviews(allLevel1Reviews.slice(0, MAX_TOTAL_NODES_REVIEWS));
+
+        // Check if we have capacity for level 2
+        const remainingCapacity = MAX_TOTAL_NODES_REVIEWS - level1NodeIds.size - 1; // -1 for root
+        if (remainingCapacity <= 5) {
+          // Not enough capacity for meaningful level 2, stop here
+          return;
+        }
+
+        // STEP 2: Fetch level 2 nodes (only a subset of level 1 profiles)
+        const level2ProfileIds = Array.from(level1NodeIds).slice(0, MAX_LEVEL_2_PROFILES_TO_FETCH_REVIEWS);
         
         // Parallelize all level 2 API calls
         const level2Promises = level2ProfileIds.map(async (pid) => {
@@ -263,6 +328,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               const data: ReviewsResponse = await level2Given.json();
               const level2Reviews = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE_REVIEWS);
               level2Reviews.forEach((activity) => {
+                // Skip if this is a connection to level 1 or root (already captured)
+                if (level1ProfileIds.includes(activity.subject.profileId) || activity.subject.profileId === profileId) return;
                 if (activity.subject.profileId) {
                   results.push({ ...activity, level: 2 });
                 }
@@ -273,6 +340,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               const data: ReviewsResponse = await level2Received.json();
               const level2Reviews = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE_REVIEWS);
               level2Reviews.forEach((activity) => {
+                // Skip if this is a connection to level 1 or root (already captured)
+                if (level1ProfileIds.includes(activity.author.profileId) || activity.author.profileId === profileId) return;
                 if (activity.author.profileId) {
                   results.push({ ...activity, level: 2 });
                 }
@@ -285,12 +354,62 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           }
         });
 
-        // Wait for all level 2 calls and update
+        // Wait for all level 2 calls
         const level2Results = await Promise.all(level2Promises);
-        const level2Reviews = level2Results.flat().slice(0, MAX_TOTAL_NODES_REVIEWS - allReviewsWithLevels.length);
-        
-        // Update with combined data
-        setAllReviews([...allReviewsWithLevels, ...level2Reviews]);
+        let level2Reviews = level2Results.flat();
+
+        // Get level 2 profile IDs
+        const level2NodeIds = new Set<number>();
+        level2Reviews.forEach((activity) => {
+          if (activity.subject.profileId !== profileId && !level1ProfileIds.includes(activity.subject.profileId)) {
+            level2NodeIds.add(activity.subject.profileId);
+          }
+          if (activity.author.profileId !== profileId && !level1ProfileIds.includes(activity.author.profileId)) {
+            level2NodeIds.add(activity.author.profileId);
+          }
+        });
+
+        // STEP 3: Fetch inter-connections between level 2 nodes
+        const level2InterConnectionPromises = Array.from(level2NodeIds).map(async (pid) => {
+          try {
+            const level2Userkey = `profileId:${pid}`;
+            const response = await fetch("https://api.ethos.network/api/v2/activities/profile/given", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                userkey: level2Userkey,
+                filter: ["review"],
+                limit: 50,
+              }),
+            });
+
+            if (!response.ok) return [];
+
+            const data: ReviewsResponse = await response.json();
+            const results: ReviewActivityWithLevel[] = [];
+
+            // Only include reviews to other level 2 nodes
+            (data.values || []).forEach((activity) => {
+              if (level2NodeIds.has(activity.subject.profileId)) {
+                results.push({ ...activity, level: 2 }); // Mark as level 2 (second-ring connection)
+              }
+            });
+
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        const level2InterConnectionResults = await Promise.all(level2InterConnectionPromises);
+        const level2InterConnections = level2InterConnectionResults.flat();
+
+        // Combine all reviews and limit to capacity
+        const allReviewsComplete = [...allLevel1Reviews, ...level2Reviews, ...level2InterConnections];
+        setAllReviews(allReviewsComplete.slice(0, MAX_TOTAL_NODES_REVIEWS));
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch reviews"
