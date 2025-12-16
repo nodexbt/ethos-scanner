@@ -867,15 +867,19 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         };
       });
 
-    // Detect triangular cycles (A→B→C→A) - only positive reviews
+    // Detect triangular cycles (A→B→C→A) - only positive reviews and no reciprocation
     // Build a map of positive review connections only
     const linkMap = new Map<string, Set<string>>();
     const linkSentimentMap = new Map<string, "positive" | "neutral" | "negative">();
+    const allEdges = new Set<string>(); // Track all edges (any sentiment)
     
     links.forEach((link) => {
       const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
       const targetId = typeof link.target === 'string' ? link.target : link.target.id;
       const edgeKey = `${sourceId}-${targetId}`;
+      
+      // Track all edges regardless of sentiment
+      allEdges.add(edgeKey);
       
       // Store sentiment for this edge
       if (link.sentiment) {
@@ -894,7 +898,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     const triangles: Triangle[] = [];
     const triangleEdges = new Set<string>();
     
-    // Find all triangular cycles (only with positive reviews)
+    // Find all triangular cycles (only with positive reviews and no reciprocation)
     nodes.forEach(nodeA => {
       const neighborsA = linkMap.get(nodeA.id);
       if (!neighborsA) return;
@@ -918,9 +922,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             const sentiment2 = linkSentimentMap.get(edge2Key);
             const sentiment3 = linkSentimentMap.get(edge3Key);
             
-            // Only count as triangle if all three reviews are positive
-            if (sentiment1 === 'positive' && sentiment2 === 'positive' && sentiment3 === 'positive') {
-              // Found a triangle: A→B→C→A (all positive)
+            // Check if any of the edges are reciprocated
+            const edge1Reciprocated = allEdges.has(`${nodeBId}-${nodeA.id}`);
+            const edge2Reciprocated = allEdges.has(`${nodeCId}-${nodeBId}`);
+            const edge3Reciprocated = allEdges.has(`${nodeA.id}-${nodeCId}`);
+            
+            // Only count as triangle if:
+            // 1. All three reviews are positive
+            // 2. None of the edges are reciprocated
+            if (sentiment1 === 'positive' && sentiment2 === 'positive' && sentiment3 === 'positive' &&
+                !edge1Reciprocated && !edge2Reciprocated && !edge3Reciprocated) {
+              // Found a triangle: A→B→C→A (all positive, no reciprocation)
               const sortedIds = [nodeA.id, nodeBId, nodeCId].sort();
               const triangleKey = sortedIds.join('-');
               
@@ -1116,34 +1128,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         const target = d.target as Node;
         return 0.6 + (1 - target.level * 0.1);
       });
-
-    // Create warning badges for triangle edges
-    const triangleBadges = g
-      .append("g")
-      .attr("class", "triangle-badges")
-      .selectAll("g")
-      .data(links.filter(d => d.isPartOfTriangle))
-      .enter()
-      .append("g")
-      .attr("class", "triangle-badge");
-
-    // Add triangle background
-    triangleBadges
-      .append("polygon")
-      .attr("points", "-8,6 0,-6 8,6")
-      .attr("fill", "#fbbf24") // Yellow
-      .attr("stroke", "#f59e0b")
-      .attr("stroke-width", 1);
-
-    // Add exclamation mark
-    triangleBadges
-      .append("text")
-      .attr("text-anchor", "middle")
-      .attr("dy", "3")
-      .attr("font-size", "10px")
-      .attr("font-weight", "bold")
-      .attr("fill", "#78350f")
-      .text("!");
 
     // Create node groups
     const nodeGroups = g
@@ -1342,35 +1326,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         
         return `translate(${midX},${midY}) rotate(${angle})`;
       });
-
-      // Update triangle warning badges (only if showTriangles is enabled)
-      if (showTriangles) {
-        triangleBadges
-          .attr("opacity", 1)
-          .attr("transform", (d) => {
-            const source = d.source as Node;
-            const target = d.target as Node;
-            const x1 = source.x ?? 0;
-            const y1 = source.y ?? 0;
-            const x2 = target.x ?? 0;
-            const y2 = target.y ?? 0;
-            
-            // Position badge at midpoint
-            const midX = (x1 + x2) / 2;
-            const midY = (y1 + y2) / 2;
-            
-            // Calculate angle for rotation
-            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
-            
-            // Offset the badge slightly above the line
-            const offsetX = -Math.sin(angle * Math.PI / 180) * 15;
-            const offsetY = Math.cos(angle * Math.PI / 180) * 15;
-            
-            return `translate(${midX + offsetX},${midY + offsetY})`;
-          });
-      } else {
-        triangleBadges.attr("opacity", 0);
-      }
 
       nodeGroups.attr("transform", (d) => {
         const x = d.x ?? width / 2;
@@ -1863,39 +1818,39 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               </Button>
             </div>
           </div>
-          <div className="w-full aspect-square md:aspect-auto flex gap-2">
-            <div className="flex-1">
-              <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
-            </div>
-            {detectedTriangles.length > 0 && showTriangles && (
-              <div className="w-64 border-l border-border pl-2 overflow-y-auto max-h-[600px]">
-                <div className="text-xs md:text-sm sticky top-0 bg-background pb-2">
-                  <div className="font-medium text-foreground flex items-center gap-2 mb-1">
-                    <span>Review Triangles ({detectedTriangles.length})</span>
-                  </div>
-                  <div className="text-xs text-yellow-600 dark:text-yellow-500">A→B→C→A cycles</div>
-                </div>
-                <div className="space-y-1.5">
-                  {detectedTriangles.map((triangle, idx) => (
-                    <div key={idx} className="flex items-start gap-2 p-2 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800">
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full shrink-0">
-                        !
-                      </span>
-                      <span className="text-xs leading-relaxed">
-                        <span className="font-medium">{triangle.nodes[0].name}</span>
-                        {" → "}
-                        <span className="font-medium">{triangle.nodes[1].name}</span>
-                        {" → "}
-                        <span className="font-medium">{triangle.nodes[2].name}</span>
-                        {" → "}
-                        <span className="font-medium">{triangle.nodes[0].name}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="w-full aspect-square md:aspect-auto">
+            <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
           </div>
+          {detectedTriangles.length > 0 && showTriangles && (
+            <div className="mt-2 p-2 md:p-3 border-t border-border">
+              <details className="text-xs md:text-sm">
+                <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground flex items-center gap-2">
+                  <span>Detected Review Triangles ({detectedTriangles.length})</span>
+                  <span className="text-xs text-yellow-600 dark:text-yellow-500">(A→B→C→A cycles - all positive reviews)</span>
+                </summary>
+                <div className="mt-2 max-h-32 overflow-y-auto">
+                  <div className="flex flex-wrap gap-2">
+                    {detectedTriangles.map((triangle, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800">
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full shrink-0">
+                          !
+                        </span>
+                        <span className="text-xs whitespace-nowrap">
+                          <span className="font-medium">{triangle.nodes[0].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[1].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[2].name}</span>
+                          {" → "}
+                          <span className="font-medium">{triangle.nodes[0].name}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            </div>
+          )}
         </div>
       )}
     </>
