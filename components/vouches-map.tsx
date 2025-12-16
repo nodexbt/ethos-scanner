@@ -54,6 +54,8 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   source: string | Node;
   target: string | Node;
   amount?: number;
+  level: number; // The level of this vouch relationship
+  isReciprocal?: boolean; // Whether this vouch is reciprocated
 }
 
 interface VouchWithLevel extends Vouch {
@@ -62,9 +64,19 @@ interface VouchWithLevel extends Vouch {
 
 // Performance limits
 const MAX_LEVEL_1_NODES = 50;
-const MAX_LEVEL_2_PROFILES_TO_FETCH = 10;
-const MAX_LEVEL_2_NODES_PER_PROFILE = 20;
 const MAX_TOTAL_NODES = 200;
+const MAX_TOTAL_VOUCHES = 500; // Max total vouches to fetch and display
+
+// Helper function to check if a vouch is funded (has a balance > 0)
+const isVouchFunded = (vouch: Vouch): boolean => {
+  if (!vouch.balance) return false;
+  try {
+    const balance = Number.parseFloat(vouch.balance);
+    return balance > 0;
+  } catch {
+    return false;
+  }
+};
 
 export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: VouchesMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -171,9 +183,9 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
         const givenData: VouchesResponse = await givenResponse.json();
         const receivedData: VouchesResponse = await receivedResponse.json();
 
-        // Add level 1 vouches (limit to MAX_LEVEL_1_NODES)
-        const level1Given = (givenData.values || []).slice(0, MAX_LEVEL_1_NODES);
-        const level1Received = (receivedData.values || []).slice(0, MAX_LEVEL_1_NODES);
+        // Add level 1 vouches (limit to MAX_LEVEL_1_NODES) - only funded vouches
+        const level1Given = (givenData.values || []).filter(isVouchFunded).slice(0, MAX_LEVEL_1_NODES);
+        const level1Received = (receivedData.values || []).filter(isVouchFunded).slice(0, MAX_LEVEL_1_NODES);
         
         level1Given.forEach((vouch) => {
           if (allVouchesWithLevels.length >= MAX_TOTAL_NODES) return;
@@ -197,54 +209,38 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
         setAllVouches(allVouchesWithLevels);
         setLoading(false);
 
-        // Fetch level 2 data in background (progressive loading)
-        const level2ProfileIds = profileIdsToProcess.slice(1, MAX_LEVEL_2_PROFILES_TO_FETCH + 1);
-        
-        // Parallelize all level 2 API calls
-        const level2Promises = level2ProfileIds.map(async (pid) => {
-          try {
-            const [level2Given, level2Received] = await Promise.all([
-              fetch("https://api.ethos.network/api/v2/vouches", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Ethos-Client": "ethos-scanner@0.1.0",
-                },
-                body: JSON.stringify({
-                  authorProfileIds: [pid],
-                  limit: MAX_LEVEL_2_NODES_PER_PROFILE,
-                }),
-              }),
-              fetch("https://api.ethos.network/api/v2/vouches", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Ethos-Client": "ethos-scanner@0.1.0",
-                },
-                body: JSON.stringify({
-                  subjectProfileIds: [pid],
-                  limit: MAX_LEVEL_2_NODES_PER_PROFILE,
-                }),
-              }),
-            ]);
+        // Get all level 1 profile IDs (excluding root)
+        const level1ProfileIds = Array.from(new Set([
+          ...level1Given.map(v => v.subjectProfileId),
+          ...level1Received.map(v => v.authorProfileId)
+        ].filter(id => id !== profileId)));
 
+        // STEP 1: Fetch ALL vouches between first-ring nodes for complete picture
+        const level1InterConnectionPromises = level1ProfileIds.map(async (pid) => {
+          try {
+            const response = await fetch("https://api.ethos.network/api/v2/vouches", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                authorProfileIds: [pid],
+                limit: 100, // Get all connections for this profile
+              }),
+            });
+
+            if (!response.ok) return [];
+
+            const data: VouchesResponse = await response.json();
             const results: VouchWithLevel[] = [];
 
-            if (level2Given.ok) {
-              const data: VouchesResponse = await level2Given.json();
-              const level2Vouches = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE);
-              level2Vouches.forEach((vouch) => {
-                results.push({ ...vouch, level: 2 });
-              });
-            }
-
-            if (level2Received.ok) {
-              const data: VouchesResponse = await level2Received.json();
-              const level2Vouches = (data.values || []).slice(0, MAX_LEVEL_2_NODES_PER_PROFILE);
-              level2Vouches.forEach((vouch) => {
-                results.push({ ...vouch, level: 2 });
-              });
-            }
+            // Only include funded vouches to other level 1 nodes
+            (data.values || []).forEach((vouch) => {
+              if (isVouchFunded(vouch) && level1ProfileIds.includes(vouch.subjectProfileId)) {
+                results.push({ ...vouch, level: 1 }); // Mark as level 1 (first-ring connection)
+              }
+            });
 
             return results;
           } catch (e) {
@@ -252,12 +248,116 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
           }
         });
 
-        // Wait for all level 2 calls and update
-        const level2Results = await Promise.all(level2Promises);
-        const level2Vouches = level2Results.flat().slice(0, MAX_TOTAL_NODES - allVouchesWithLevels.length);
+        // Wait for all level 1 inter-connection calls
+        const level1InterConnectionResults = await Promise.all(level1InterConnectionPromises);
+        const level1InterConnections = level1InterConnectionResults.flat();
         
-        // Update with combined data
-        setAllVouches([...allVouchesWithLevels, ...level2Vouches]);
+        // Combine level 1 direct connections + inter-connections
+        const allLevel1Vouches = [...allVouchesWithLevels, ...level1InterConnections];
+        
+        // Count unique nodes in level 1
+        const level1NodeIds = new Set<number>();
+        allLevel1Vouches.forEach((vouch) => {
+          if (vouch.authorProfileId !== profileId) level1NodeIds.add(vouch.authorProfileId);
+          if (vouch.subjectProfileId !== profileId) level1NodeIds.add(vouch.subjectProfileId);
+        });
+
+        // Update with complete level 1 data
+        setAllVouches(allLevel1Vouches.slice(0, MAX_TOTAL_VOUCHES));
+
+        // Check if we have capacity for level 2
+        const remainingCapacity = MAX_TOTAL_NODES - level1NodeIds.size - 1; // -1 for root
+        if (remainingCapacity <= 5) {
+          // Not enough capacity for meaningful level 2, stop here
+          return;
+        }
+
+        // STEP 2: Fetch level 2 nodes (only a subset of level 1 profiles)
+        const level2ProfileIds = Array.from(level1NodeIds).slice(0, 10);
+        
+        const level2Promises = level2ProfileIds.map(async (pid) => {
+          try {
+            const response = await fetch("https://api.ethos.network/api/v2/vouches", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                authorProfileIds: [pid],
+                limit: 100,
+              }),
+            });
+
+            if (!response.ok) return [];
+
+            const data: VouchesResponse = await response.json();
+            const results: VouchWithLevel[] = [];
+
+            (data.values || []).forEach((vouch) => {
+              // Skip if this is a connection to level 1 or root (already captured)
+              if (level1ProfileIds.includes(vouch.subjectProfileId) || vouch.subjectProfileId === profileId) return;
+              // Only include funded vouches
+              if (!isVouchFunded(vouch)) return;
+              results.push({ ...vouch, level: 2 });
+            });
+
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        const level2Results = await Promise.all(level2Promises);
+        let level2Vouches = level2Results.flat();
+
+        // Get level 2 profile IDs
+        const level2NodeIds = new Set<number>();
+        level2Vouches.forEach((vouch) => {
+          if (vouch.subjectProfileId !== profileId && !level1ProfileIds.includes(vouch.subjectProfileId)) {
+            level2NodeIds.add(vouch.subjectProfileId);
+          }
+        });
+
+        // STEP 3: Fetch inter-connections between level 2 nodes
+        const level2InterConnectionPromises = Array.from(level2NodeIds).map(async (pid) => {
+          try {
+            const response = await fetch("https://api.ethos.network/api/v2/vouches", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                authorProfileIds: [pid],
+                limit: 50,
+              }),
+            });
+
+            if (!response.ok) return [];
+
+            const data: VouchesResponse = await response.json();
+            const results: VouchWithLevel[] = [];
+
+            // Only include funded vouches to other level 2 nodes
+            (data.values || []).forEach((vouch) => {
+              if (isVouchFunded(vouch) && level2NodeIds.has(vouch.subjectProfileId)) {
+                results.push({ ...vouch, level: 2 }); // Mark as level 2 (second-ring connection)
+              }
+            });
+
+            return results;
+          } catch (e) {
+            return [];
+          }
+        });
+
+        const level2InterConnectionResults = await Promise.all(level2InterConnectionPromises);
+        const level2InterConnections = level2InterConnectionResults.flat();
+
+        // Combine all vouches and limit to capacity
+        const allVouchesComplete = [...allLevel1Vouches, ...level2Vouches, ...level2InterConnections];
+        setAllVouches(allVouchesComplete.slice(0, MAX_TOTAL_VOUCHES));
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch vouches"
@@ -358,6 +458,46 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       .attr("width", plusSize)
       .attr("height", plusThickness)
       .attr("fill", plusColor);
+
+    // Color scheme by level
+    const levelColors: Record<number, string> = {
+      0: "#3b82f6", // Root - blue
+      1: "#10b981", // Level 1 - green
+      2: "#f59e0b", // Level 2 - orange
+      3: "#ef4444", // Level 3 - red
+    };
+
+    // Add arrow markers for reciprocated vouches (level colors)
+    Object.entries(levelColors).forEach(([level, color]) => {
+      defs
+        .append("marker")
+        .attr("id", `arrow-reciprocal-${level}`)
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 5)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto-start-reverse")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", color)
+        .attr("opacity", 1);
+    });
+
+    // Add arrow marker for non-reciprocated vouches (red)
+    defs
+      .append("marker")
+      .attr("id", "arrow-non-reciprocal")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 5)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto-start-reverse")
+      .append("path")
+      .attr("d", "M0,-5L10,0L0,5")
+      .attr("fill", "#ef4444")
+      .attr("opacity", 0.8);
 
     // Add background rectangle with dot grid pattern
     const bgSize = Math.max(width, height) * 5;
@@ -519,6 +659,17 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       .slice(0, MAX_TOTAL_NODES);
     const nodeIds = new Set(nodes.map(n => n.id));
 
+    // Create a map to detect reciprocal vouches
+    const vouchPairs = new Map<string, Set<string>>();
+    allVouches.forEach((vouch) => {
+      const sourceId = vouch.authorProfileId.toString();
+      const targetId = vouch.subjectProfileId.toString();
+      if (!vouchPairs.has(sourceId)) {
+        vouchPairs.set(sourceId, new Set());
+      }
+      vouchPairs.get(sourceId)!.add(targetId);
+    });
+
     const links: Link[] = allVouches.flatMap((vouch) => {
       const sourceId = vouch.authorProfileId.toString();
       const targetId = vouch.subjectProfileId.toString();
@@ -543,23 +694,24 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       if (!sourceVisible || !targetVisible) return [];
     
       const amount = vouch.balance ? Number.parseFloat(vouch.balance) / 1e18 : undefined;
+      
+      // Determine link level based on the maximum level of the connected nodes
+      // This ensures connections between first-ring nodes are colored green
+      const linkLevel = Math.max(sourceNode.level, targetNode.level);
+      
+      // Check if this vouch is reciprocated
+      const isReciprocal = vouchPairs.get(targetId)?.has(sourceId) ?? false;
     
       return [
         {
           source: sourceId,
           target: targetId,
           amount,
+          level: linkLevel,
+          isReciprocal,
         },
       ];
     });
-
-    // Color scheme by level
-    const levelColors: Record<number, string> = {
-      0: "#3b82f6", // Root - blue
-      1: "#10b981", // Level 1 - green
-      2: "#f59e0b", // Level 2 - orange
-      3: "#ef4444", // Level 3 - red
-    };
 
     const getNodeColor = (node: Node) => {
       if (node.isRoot) return levelColors[0];
@@ -600,7 +752,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     // Create force simulation with radial positioning for levels
     const simulation = d3
       .forceSimulation(nodes)
-      .alphaDecay(0.1) // Faster convergence
+      .alphaDecay(0.08) // Slower convergence for better layout
       .velocityDecay(0.4) // More damping for stability
       .force(
         "link",
@@ -611,53 +763,61 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
             const source = d.source as Node;
             const target = d.target as Node;
             const levelDiff = Math.abs(target.level - source.level);
-            // Increase distance for more breathing room
-            return 180 + levelDiff * 100;
+            // Much larger distance between nodes for clarity
+            return 250 + levelDiff * 150;
           })
       )
       .force("charge", d3.forceManyBody().strength((d) => {
         const node = d as Node;
-        // Increase charge strength to push nodes apart more
-        return node.isRoot ? -800 : -400 / (node.level + 1);
+        // Much stronger repulsion to push nodes apart
+        return node.isRoot ? -1500 : -800 / (node.level + 1);
       }))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
         d3.forceCollide().radius((d) => {
           const node = d as Node;
-          // Increase collision radius for more breathing room
-          return node.isRoot ? 70 : Math.max(40, 50 - node.level * 2);
+          // Larger collision radius to prevent overlap
+          return node.isRoot ? 90 : Math.max(60, 70 - node.level * 3);
         })
       )
       .force("radial", d3.forceRadial((d) => {
         const node = d as Node;
-        // Create concentric rings with more spacing
-        const baseRadius = 120;
-        return baseRadius + node.level * 180;
+        // More spacing between concentric rings
+        const baseRadius = 150;
+        return baseRadius + node.level * 250;
       }, width / 2, height / 2).strength(0.8));
 
-    // Create links
+    // Create links with paths instead of lines for better arrow positioning
     const link = g
       .append("g")
       .attr("class", "links")
-      .selectAll("line")
+      .selectAll("path")
       .data(links)
       .enter()
-      .append("line")
+      .append("path")
       .attr("stroke", (d) => {
-        const target = d.target as Node;
-        return getNodeColor(target);
+        // Red for non-reciprocated, level color for reciprocated
+        return d.isReciprocal ? (levelColors[d.level] || "#64748b") : "#ef4444";
       })
       .attr("stroke-opacity", (d) => {
-        const target = d.target as Node;
-        return 0.4 + (1 - target.level * 0.1);
+        // Reciprocal vouches are more opaque for emphasis
+        return d.isReciprocal ? 0.7 : 0.5;
       })
       .attr("stroke-width", (d) => {
-        const target = d.target as Node;
         const baseWidth = d.amount 
           ? Math.max(1, Math.min(5, Math.log10(d.amount + 1) * 1.5))
           : 2;
-        return Math.max(1, baseWidth - target.level * 0.3);
+        const levelAdjustedWidth = Math.max(1, baseWidth - d.level * 0.3);
+        // Reciprocal vouches are thicker
+        return d.isReciprocal ? levelAdjustedWidth * 1.5 : levelAdjustedWidth;
+      })
+      .attr("fill", "none")
+      .attr("marker-mid", (d) => {
+        // Add arrow marker in the middle based on whether it's reciprocal
+        return d.isReciprocal 
+          ? `url(#arrow-reciprocal-${d.level})`
+          : `url(#arrow-non-reciprocal)`;
       });
 
     // Create node groups
@@ -778,11 +938,45 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
 
     // Update positions
     simulation.on("tick", () => {
-      link
-        .attr("x1", (d) => (d.source as Node).x ?? 0)
-        .attr("y1", (d) => (d.source as Node).y ?? 0)
-        .attr("x2", (d) => (d.target as Node).x ?? 0)
-        .attr("y2", (d) => (d.target as Node).y ?? 0);
+      link.attr("d", (d) => {
+        const source = d.source as Node;
+        const target = d.target as Node;
+        const sourceX = source.x ?? 0;
+        const sourceY = source.y ?? 0;
+        const targetX = target.x ?? 0;
+        const targetY = target.y ?? 0;
+        
+        // Calculate angle and adjust for node radii
+        const dx = targetX - sourceX;
+        const dy = targetY - sourceY;
+        const angle = Math.atan2(dy, dx);
+        const sourceRadius = source.isRoot ? 35 : Math.max(18, 25 - source.level * 2);
+        const targetRadius = target.isRoot ? 35 : Math.max(18, 25 - target.level * 2);
+        
+        // Calculate start and end points (adjusted for node circles)
+        const x1 = sourceX + Math.cos(angle) * sourceRadius;
+        const y1 = sourceY + Math.sin(angle) * sourceRadius;
+        const x2 = targetX - Math.cos(angle) * targetRadius;
+        const y2 = targetY - Math.sin(angle) * targetRadius;
+        
+        // Calculate midpoint
+        let arrowX = (x1 + x2) / 2;
+        let arrowY = (y1 + y2) / 2;
+        
+        // If reciprocal, offset arrow slightly towards target to create space between arrows
+        if (d.isReciprocal) {
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0) {
+            const offset = 12; // Offset distance in pixels (matches review map)
+            // Normalize direction vector and offset towards target
+            arrowX += (dx / length) * offset;
+            arrowY += (dy / length) * offset;
+          }
+        }
+        
+        // Create path with 3 points: start, arrow point, end (for marker-mid to work)
+        return `M ${x1},${y1} L ${arrowX},${arrowY} L ${x2},${y2}`;
+      });
 
       nodeGroups.attr("transform", (d) => {
         const x = d.x ?? width / 2;
@@ -849,11 +1043,39 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     );
   }
 
-  // Count vouches by level
+  // Count vouches by level and reciprocal vouches
   const levelCounts = allVouches.reduce((acc, vouch) => {
     acc[vouch.level] = (acc[vouch.level] || 0) + 1;
     return acc;
   }, {} as Record<number, number>);
+
+  // Count reciprocal vouches
+  const vouchPairs = new Map<string, Set<string>>();
+  allVouches.forEach((vouch) => {
+    const sourceId = vouch.authorProfileId.toString();
+    const targetId = vouch.subjectProfileId.toString();
+    if (!vouchPairs.has(sourceId)) {
+      vouchPairs.set(sourceId, new Set());
+    }
+    vouchPairs.get(sourceId)!.add(targetId);
+  });
+  
+  let reciprocalCount = 0;
+  const countedPairs = new Set<string>();
+  allVouches.forEach((vouch) => {
+    const sourceId = vouch.authorProfileId.toString();
+    const targetId = vouch.subjectProfileId.toString();
+    const isReciprocal = vouchPairs.get(targetId)?.has(sourceId) ?? false;
+    
+    if (isReciprocal) {
+      // Create a unique pair key (sorted to avoid counting both directions)
+      const pairKey = [sourceId, targetId].sort().join("-");
+      if (!countedPairs.has(pairKey)) {
+        reciprocalCount++;
+        countedPairs.add(pairKey);
+      }
+    }
+  });
 
   const levelLabels: Record<number, string> = {
     1: "1st ring",
@@ -897,11 +1119,25 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
           >
             <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
               <div className="text-xs md:text-sm text-muted-foreground space-y-1.5 md:space-y-2 flex-1">
-                <div>
-                  Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
-                  {allVouches.length >= MAX_TOTAL_NODES && (
-                    <span className="text-xs ml-1 md:ml-2">(limited)</span>
-                  )}
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>
+                    Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+                    {allVouches.length >= MAX_TOTAL_NODES && (
+                      <span className="text-xs ml-1 md:ml-2">(limited)</span>
+                    )}
+                  </span>
+                  <span className="inline-flex items-center gap-1 font-medium text-green-600 dark:text-green-400" title="Reciprocal vouches (bidirectional trust)">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                    {reciprocalCount} reciprocal
+                  </span>
+                  <span className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400" title="Non-reciprocated vouches (one-way trust)">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                    {allVouches.length - (reciprocalCount * 2)} one-way
+                  </span>
                 </div>
                 <div className="flex gap-2 md:gap-4 flex-wrap">
                   {Object.entries(levelCounts).map(([level, count]) => {
@@ -986,11 +1222,25 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
         <div ref={containerRef} className="w-full overflow-auto rounded-lg border bg-background p-2 md:p-4">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-1 md:mb-2 gap-2 md:gap-0">
             <div className="text-xs md:text-sm text-muted-foreground space-y-1.5 md:space-y-2 flex-1">
-              <div>
-                Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
-                {allVouches.length >= MAX_TOTAL_NODES && (
-                  <span className="text-xs ml-1 md:ml-2">(limited)</span>
-                )}
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                  Showing {allVouches.length} vouch{allVouches.length !== 1 ? "es" : ""} across {Object.keys(levelCounts).length} level{Object.keys(levelCounts).length !== 1 ? "s" : ""}
+                  {allVouches.length >= MAX_TOTAL_NODES && (
+                    <span className="text-xs ml-1 md:ml-2">(limited)</span>
+                  )}
+                </span>
+                <span className="inline-flex items-center gap-1 font-medium text-green-600 dark:text-green-400" title="Reciprocal vouches (bidirectional trust)">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                  {reciprocalCount} reciprocal
+                </span>
+                <span className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400" title="Non-reciprocated vouches (one-way trust)">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                  {allVouches.length - (reciprocalCount * 2)} one-way
+                </span>
               </div>
               <div className="flex gap-2 md:gap-4 flex-wrap">
                 {Object.entries(levelCounts).map(([level, count]) => {
