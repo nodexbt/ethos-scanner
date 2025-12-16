@@ -102,6 +102,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     neutral: true,
     negative: true,
   });
+  const [hideIsolatedNodes, setHideIsolatedNodes] = useState(false);
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -781,8 +782,37 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     }
     // If all sentiments are off, don't add any nodes (empty set)
     
+    // Filter by isolated nodes if enabled
+    let filteredNodeIds = finalNodeIds;
+    if (hideIsolatedNodes) {
+      // Count connections for each node
+      const connectionCounts = new Map<string, number>();
+      allReviews.forEach((activity) => {
+        if (!activity.author.profileId || !activity.subject.profileId) return;
+        const sourceId = activity.author.profileId.toString();
+        const targetId = activity.subject.profileId.toString();
+        
+        // Only count if both nodes are in finalNodeIds and sentiment is visible
+        const sentiment = activity.data.score as "positive" | "neutral" | "negative";
+        if (!visibleSentiments[sentiment]) return;
+        if (!finalNodeIds.has(sourceId) || !finalNodeIds.has(targetId)) return;
+        
+        connectionCounts.set(sourceId, (connectionCounts.get(sourceId) || 0) + 1);
+        connectionCounts.set(targetId, (connectionCounts.get(targetId) || 0) + 1);
+      });
+      
+      // Filter out nodes with only 1 connection (but keep root)
+      filteredNodeIds = new Set<string>();
+      finalNodeIds.forEach(id => {
+        const count = connectionCounts.get(id) || 0;
+        if (id === rootId || count > 1) {
+          filteredNodeIds.add(id);
+        }
+      });
+    }
+    
     const nodes: Node[] = allNodes
-      .filter((node) => finalNodeIds.has(node.id))
+      .filter((node) => filteredNodeIds.has(node.id))
       .slice(0, MAX_TOTAL_NODES_REVIEWS);
     const nodeIds = new Set(nodes.map(n => n.id));
 
@@ -1183,6 +1213,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     theme,
     visibleRings,
     visibleSentiments,
+    hideIsolatedNodes,
   ]);
 
   if (!mounted) {
@@ -1401,6 +1432,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     );
                   })}
                 </div>
+                <div className="flex items-center gap-2 mt-1 md:mt-2">
+                  <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
+                    <input
+                      type="checkbox"
+                      checked={hideIsolatedNodes}
+                      onChange={(e) => setHideIsolatedNodes(e.target.checked)}
+                      className="w-4 h-4 rounded border-border"
+                    />
+                    <span>Hide nodes with only 1 connection</span>
+                  </label>
+                </div>
               </div>
               <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
                 <Button
@@ -1533,6 +1575,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     </button>
                   );
                 })}
+              </div>
+              <div className="flex items-center gap-2 mt-1 md:mt-2">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs md:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={hideIsolatedNodes}
+                    onChange={(e) => setHideIsolatedNodes(e.target.checked)}
+                    className="w-4 h-4 rounded border-border"
+                  />
+                  <span>Hide nodes with only 1 connection</span>
+                </label>
               </div>
             </div>
             <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
