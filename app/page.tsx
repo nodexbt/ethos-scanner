@@ -74,20 +74,11 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8 relative">
+      <div className="fixed top-4 right-4 md:top-8 md:right-8 z-10">
+        <ThemeToggle />
+      </div>
       <div className="mx-auto max-w-4xl space-y-8">
-        <div className="relative">
-          <div className="absolute top-0 right-0">
-            <ThemeToggle />
-          </div>
-          <div className="text-center space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight">Ethos Scanner</h1>
-            <p className="text-muted-foreground">
-              Look up Ethos Network profiles by X username or EVM address
-            </p>
-          </div>
-        </div>
-
         <Card>
           <CardHeader>
             <CardTitle>Search Profile</CardTitle>
