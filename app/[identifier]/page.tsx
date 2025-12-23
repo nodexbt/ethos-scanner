@@ -15,6 +15,7 @@ import { Search, Loader2, ExternalLink, X, Copy, Check } from "lucide-react";
 import { InvitationMap } from "@/components/invitation-map";
 import { VouchesMap } from "@/components/vouches-map";
 import { ReviewsMap } from "@/components/reviews-map";
+import { XPChart } from "@/components/xp-chart";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   getCachedData,
@@ -410,14 +411,6 @@ export default function ProfilePage() {
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-muted-foreground">
-                    Total XP
-                  </div>
-                  <div className="text-2xl font-semibold">
-                    {profile.xpTotal.toLocaleString()}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
                     XP Streak
                   </div>
                   <div className="text-2xl font-semibold">
@@ -501,6 +494,14 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="border-t pt-6">
+                <XPChart
+                  userId={profile.id}
+                  profileId={profile.profileId}
+                  currentXP={profile.xpTotal}
+                />
               </div>
 
               {profile.userkeys.length > 0 && (
