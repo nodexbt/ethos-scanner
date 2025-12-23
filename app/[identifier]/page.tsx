@@ -16,6 +16,12 @@ import { InvitationMap } from "@/components/invitation-map";
 import { VouchesMap } from "@/components/vouches-map";
 import { ReviewsMap } from "@/components/reviews-map";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  getCachedData,
+  setCachedData,
+  getProfileCacheKey,
+  CacheDurations,
+} from "@/lib/cache";
 
 interface EthosProfile {
   id: number;
@@ -108,12 +114,32 @@ export default function ProfilePage() {
       return;
     }
 
+    const trimmedInput = query.trim();
+    const cacheKey = getProfileCacheKey(trimmedInput);
+
+    // Try to get from cache first
+    const cachedProfile = getCachedData<EthosProfile>(
+      cacheKey,
+      CacheDurations.PROFILE
+    );
+
+    if (cachedProfile) {
+      setProfile(cachedProfile);
+      setError(null);
+      setLoading(false);
+      // Still update URL if needed
+      if (trimmedInput !== identifier) {
+        router.replace(`/${encodeURIComponent(trimmedInput)}`);
+      }
+      return;
+    }
+
+    // If not in cache, fetch from API
     setLoading(true);
     setError(null);
     setProfile(null);
 
     try {
-      const trimmedInput = query.trim();
       let url: string;
 
       if (isEthereumAddress(trimmedInput)) {
@@ -138,6 +164,10 @@ export default function ProfilePage() {
       }
 
       const data = await response.json();
+      
+      // Cache the profile data
+      setCachedData(cacheKey, data);
+      
       setProfile(data);
       saveRecentSearch(data, trimmedInput);
       loadRecentSearches(); // Refresh recent searches after saving
@@ -348,14 +378,12 @@ export default function ProfilePage() {
                   />
                 )}
                 <div className="flex-1">
-                  <CardTitle className="flex items-center gap-2">
-                    {profile.displayName}
-                    {profile.username && (
-                      <span className="text-muted-foreground font-normal">
-                        @{profile.username}
-                      </span>
-                    )}
-                  </CardTitle>
+                  <CardTitle>{profile.displayName}</CardTitle>
+                  {profile.username && (
+                    <div className="text-muted-foreground font-normal text-base mt-1">
+                      @{profile.username}
+                    </div>
+                  )}
                   {profile.description && (
                     <CardDescription className="mt-2">
                       {profile.description}

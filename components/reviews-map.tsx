@@ -5,6 +5,13 @@ import * as d3 from "d3";
 import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
+import { useRouter } from "next/navigation";
+import {
+  getCachedData,
+  setCachedData,
+  getReviewsCacheKey,
+  CacheDurations,
+} from "@/lib/cache";
 
 interface User {
   id: number;
@@ -112,6 +119,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
   const [showTriangles, setShowTriangles] = useState(true);
   const [detectedTriangles, setDetectedTriangles] = useState<Triangle[]>([]);
   const { theme } = useTheme();
+  const router = useRouter();
 
   useEffect(() => {
     setMounted(true);
@@ -155,55 +163,96 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         return;
       }
 
-      setLoading(true);
-      setError(null);
+      // Try to get from cache first
+      const givenCacheKey = getReviewsCacheKey(profileId, "given");
+      const receivedCacheKey = getReviewsCacheKey(profileId, "received");
+      
+      const cachedGiven = getCachedData<ReviewsResponse>(
+        givenCacheKey,
+        CacheDurations.REVIEWS
+      );
+      const cachedReceived = getCachedData<ReviewsResponse>(
+        receivedCacheKey,
+        CacheDurations.REVIEWS
+      );
+
+      // If we have cached data, use it and continue with level 2 fetching
+      let givenData: ReviewsResponse;
+      let receivedData: ReviewsResponse;
+
+      if (cachedGiven && cachedReceived) {
+        givenData = cachedGiven;
+        receivedData = cachedReceived;
+      } else {
+        // Fetch from API if not fully cached
+        setLoading(true);
+        setError(null);
+
+        try {
+          const userkey = `profileId:${profileId}`;
+
+          // Fetch level 1 reviews
+          const givenResponse = await fetch(
+            "https://api.ethos.network/api/v2/activities/profile/given",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                userkey: userkey,
+                filter: ["review"],
+                limit: MAX_LEVEL_1_NODES_REVIEWS,
+              }),
+            }
+          );
+
+          const receivedResponse = await fetch(
+            "https://api.ethos.network/api/v2/activities/profile/received",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                userkey: userkey,
+                filter: ["review"],
+                limit: MAX_LEVEL_1_NODES_REVIEWS,
+              }),
+            }
+          );
+
+          if (!givenResponse.ok || !receivedResponse.ok) {
+            setError("Failed to fetch reviews");
+            return;
+          }
+
+          givenData = await givenResponse.json();
+          receivedData = await receivedResponse.json();
+
+          // Cache the responses
+          setCachedData(givenCacheKey, givenData);
+          setCachedData(receivedCacheKey, receivedData);
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Failed to fetch reviews"
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Set loading if we're fetching from API, otherwise process cached data
+      if (!cachedGiven || !cachedReceived) {
+        setLoading(true);
+      }
 
       try {
         const allReviewsWithLevels: ReviewActivityWithLevel[] = [];
         const processedProfileIds = new Set<number>([profileId]);
         const profileIdsToProcess = [profileId];
-        const userkey = `profileId:${profileId}`;
-
-        // Fetch level 1 reviews
-        const givenResponse = await fetch(
-          "https://api.ethos.network/api/v2/activities/profile/given",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({
-              userkey: userkey,
-              filter: ["review"],
-              limit: MAX_LEVEL_1_NODES_REVIEWS,
-            }),
-          }
-        );
-
-        const receivedResponse = await fetch(
-          "https://api.ethos.network/api/v2/activities/profile/received",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({
-              userkey: userkey,
-              filter: ["review"],
-              limit: MAX_LEVEL_1_NODES_REVIEWS,
-            }),
-          }
-        );
-
-        if (!givenResponse.ok || !receivedResponse.ok) {
-          setError("Failed to fetch reviews");
-          return;
-        }
-
-        const givenData: ReviewsResponse = await givenResponse.json();
-        const receivedData: ReviewsResponse = await receivedResponse.json();
 
         // Add level 1 reviews (already limited by API limit)
         (givenData.values || []).forEach((activity) => {
@@ -365,7 +414,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
         // Wait for all level 2 calls
         const level2Results = await Promise.all(level2Promises);
-        let level2Reviews = level2Results.flat();
+        const level2Reviews = level2Results.flat();
 
         // Get level 2 profile IDs
         const level2NodeIds = new Set<number>();
@@ -486,7 +535,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       if (window.innerWidth < 768) {
         height = width;
       } else {
-        height = Math.max(600, Math.min(allReviews.length * 15 + 300, 800));
+        // On desktop, use 60% of viewport height
+        height = Math.floor(window.innerHeight * 0.6);
       }
     }
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
@@ -1138,6 +1188,12 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .enter()
       .append("g")
       .attr("class", "node")
+      .style("cursor", "pointer")
+      .on("click", function(event, d) {
+        // Navigate to user's page using username or profileId
+        const identifier = d.username || d.profileId?.toString() || d.id;
+        router.push(`/${identifier}`);
+      })
       .call(
         d3
           .drag<SVGGElement, Node>()
@@ -1219,9 +1275,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 50;
+        if (d.isRoot) return 46;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 35 + radius;
+        return 18 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getTextColor())
@@ -1236,9 +1292,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 65;
+        if (d.isRoot) return 58;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 50 + radius;
+        return 29 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getMutedColor())
@@ -1349,7 +1405,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       simulation.stop();
     };
   }, [
-    allReviews.length,
+    allReviews,
     loading,
     userId,
     profileId,
@@ -1362,6 +1418,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     visibleSentiments,
     hideIsolatedNodes,
     showTriangles,
+    router,
   ]);
 
   if (!mounted) {
@@ -1598,7 +1655,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                       className="w-4 h-4 rounded border-border"
                     />
                     <span className="inline-flex items-center gap-1">
-                      Show review triangles
+                      Show potential review triangles
                       {detectedTriangles.length > 0 && (
                         <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
                           {detectedTriangles.length}
@@ -1818,7 +1875,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               </Button>
             </div>
           </div>
-          <div className="w-full aspect-square md:aspect-auto">
+          <div className="w-full aspect-square md:aspect-auto md:h-[600px]">
             <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
           </div>
           {detectedTriangles.length > 0 && showTriangles && (

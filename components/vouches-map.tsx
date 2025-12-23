@@ -5,6 +5,13 @@ import * as d3 from "d3";
 import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
+import {
+  getCachedData,
+  setCachedData,
+  getVouchesCacheKey,
+  CacheDurations,
+} from "@/lib/cache";
+import { useRouter } from "next/navigation";
 
 interface User {
   id: number;
@@ -93,6 +100,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     3: false,
   });
   const { theme } = useTheme();
+  const router = useRouter();
 
   useEffect(() => {
     setMounted(true);
@@ -136,52 +144,91 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
         return;
       }
 
-      setLoading(true);
-      setError(null);
+      // Try to get from cache first
+      const givenCacheKey = getVouchesCacheKey(profileId, "given");
+      const receivedCacheKey = getVouchesCacheKey(profileId, "received");
+      
+      const cachedGiven = getCachedData<VouchesResponse>(
+        givenCacheKey,
+        CacheDurations.VOUCHES
+      );
+      const cachedReceived = getCachedData<VouchesResponse>(
+        receivedCacheKey,
+        CacheDurations.VOUCHES
+      );
+
+      // If we have cached data, use it and continue with level 2 fetching
+      let givenData: VouchesResponse;
+      let receivedData: VouchesResponse;
+
+      if (cachedGiven && cachedReceived) {
+        givenData = cachedGiven;
+        receivedData = cachedReceived;
+      } else {
+        // Fetch from API if not fully cached
+        setLoading(true);
+        setError(null);
+
+        try {
+          const givenResponse = await fetch(
+            "https://api.ethos.network/api/v2/vouches",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                authorProfileIds: [profileId],
+                limit: 100,
+              }),
+            }
+          );
+
+          const receivedResponse = await fetch(
+            "https://api.ethos.network/api/v2/vouches",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Ethos-Client": "ethos-scanner@0.1.0",
+              },
+              body: JSON.stringify({
+                subjectProfileIds: [profileId],
+                limit: 100,
+              }),
+            }
+          );
+
+          if (!givenResponse.ok || !receivedResponse.ok) {
+            setError("Failed to fetch vouches");
+            return;
+          }
+
+          givenData = await givenResponse.json();
+          receivedData = await receivedResponse.json();
+
+          // Cache the responses
+          setCachedData(givenCacheKey, givenData);
+          setCachedData(receivedCacheKey, receivedData);
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Failed to fetch vouches"
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Set loading if we're fetching from API, otherwise process cached data
+      if (!cachedGiven || !cachedReceived) {
+        setLoading(true);
+      }
 
       try {
         const allVouchesWithLevels: VouchWithLevel[] = [];
         const processedProfileIds = new Set<number>([profileId]);
         const profileIdsToProcess = [profileId];
-
-        // Fetch level 1 vouches
-        const givenResponse = await fetch(
-          "https://api.ethos.network/api/v2/vouches",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({
-              authorProfileIds: [profileId],
-              limit: 100,
-            }),
-          }
-        );
-
-        const receivedResponse = await fetch(
-          "https://api.ethos.network/api/v2/vouches",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({
-              subjectProfileIds: [profileId],
-              limit: 100,
-            }),
-          }
-        );
-
-        if (!givenResponse.ok || !receivedResponse.ok) {
-          setError("Failed to fetch vouches");
-          return;
-        }
-
-        const givenData: VouchesResponse = await givenResponse.json();
-        const receivedData: VouchesResponse = await receivedResponse.json();
 
         // Add level 1 vouches (limit to MAX_LEVEL_1_NODES) - only funded vouches
         const level1Given = (givenData.values || []).filter(isVouchFunded).slice(0, MAX_LEVEL_1_NODES);
@@ -417,8 +464,8 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       if (window.innerWidth < 768) {
         height = width;
       } else {
-        const maxLevel = Math.max(...allVouches.map((v) => v.level), 1);
-        height = Math.max(600, Math.min(allVouches.length * 15 + 300, 800));
+        // On desktop, use 60% of viewport height
+        height = Math.floor(window.innerHeight * 0.6);
       }
     }
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
@@ -829,6 +876,12 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
       .enter()
       .append("g")
       .attr("class", "node")
+      .style("cursor", "pointer")
+      .on("click", function(event, d) {
+        // Navigate to user's page using username or profileId
+        const identifier = d.username || d.profileId?.toString() || d.id;
+        router.push(`/${identifier}`);
+      })
       .call(
         d3
           .drag<SVGGElement, Node>()
@@ -910,9 +963,9 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 50;
+        if (d.isRoot) return 46;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 35 + radius;
+        return 18 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getTextColor())
@@ -927,9 +980,9 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
     nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 65;
+        if (d.isRoot) return 58;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 50 + radius;
+        return 29 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getMutedColor())
@@ -1315,7 +1368,7 @@ export function VouchesMap({ userId, profileId, userName, avatarUrl = "" }: Vouc
               </Button>
             </div>
           </div>
-          <div className="w-full aspect-square md:aspect-auto">
+          <div className="w-full aspect-square md:aspect-auto md:h-[600px]">
             <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
           </div>
         </div>

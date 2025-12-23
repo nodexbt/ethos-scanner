@@ -5,6 +5,13 @@ import * as d3 from "d3";
 import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
+import { useRouter } from "next/navigation";
+import {
+  getCachedData,
+  setCachedData,
+  getInvitationsCacheKey,
+  CacheDurations,
+} from "@/lib/cache";
 
 interface Invitee {
   id: number;
@@ -65,6 +72,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     3: false,
   });
   const { theme } = useTheme();
+  const router = useRouter();
 
   // Ensure component only renders after client-side hydration
   useEffect(() => {
@@ -109,6 +117,20 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         return;
       }
 
+      // Try cache first
+      const cacheKey = getInvitationsCacheKey(profileId);
+      const cachedInvitations = getCachedData<Invitation[]>(
+        cacheKey,
+        CacheDurations.INVITATIONS
+      );
+
+      if (cachedInvitations) {
+        setInvitations(cachedInvitations);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch from API if not cached
       setLoading(true);
       setError(null);
       try {
@@ -135,6 +157,10 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
         // Limit total nodes for performance (max 200 nodes total)
         if (json.values && Array.isArray(json.values)) {
           const limitedInvitations = json.values.slice(0, 200);
+          
+          // Cache the results
+          setCachedData(cacheKey, limitedInvitations);
+          
           setInvitations(limitedInvitations);
         } else {
           setError("Invalid response format");
@@ -194,8 +220,8 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       if (window.innerWidth < 768) {
         height = width;
       } else {
-        const maxLevel = Math.max(...invitations.map((inv) => inv.level), 1);
-        height = Math.max(600, Math.min(invitations.length * 15 + 300, 800));
+        // On desktop, use 60% of viewport height
+        height = Math.floor(window.innerHeight * 0.6);
       }
     }
     svg.attr("width", width).attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
@@ -536,6 +562,12 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
       .enter()
       .append("g")
       .attr("class", "node")
+      .style("cursor", "pointer")
+      .on("click", function(event, d) {
+        // Navigate to user's page using username or profileId
+        const identifier = d.username || d.profileId?.toString() || d.id;
+        router.push(`/${identifier}`);
+      })
       .call(
         d3
           .drag<SVGGElement, Node>()
@@ -621,9 +653,9 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     const labels = nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 50;
+        if (d.isRoot) return 46;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 35 + radius;
+        return 18 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getTextColor())
@@ -638,9 +670,9 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
     nodeGroups
       .append("text")
       .attr("dy", (d) => {
-        if (d.isRoot) return 65;
+        if (d.isRoot) return 58;
         const radius = Math.max(18, 25 - d.level * 2);
-        return 50 + radius;
+        return 29 + radius;
       })
       .attr("text-anchor", "middle")
       .attr("fill", getMutedColor())
@@ -939,7 +971,7 @@ export function InvitationMap({ userId, profileId, userName, avatarUrl = "" }: I
               </Button>
             </div>
           </div>
-          <div className="w-full aspect-square md:aspect-auto">
+          <div className="w-full aspect-square md:aspect-auto md:h-[600px]">
             <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
           </div>
         </div>
