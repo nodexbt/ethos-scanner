@@ -406,15 +406,7 @@ export default function ProfilePage() {
                   <div className="text-sm font-medium text-muted-foreground">
                     Credibility Score
                   </div>
-                  <div className="text-3xl font-bold">{profile.score}</div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    Status
-                  </div>
-                  <div className="text-lg font-semibold capitalize">
-                    {profile.status.toLowerCase()}
-                  </div>
+                  <div className="text-2xl font-bold">{profile.score}</div>
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-muted-foreground">
@@ -436,7 +428,7 @@ export default function ProfilePage() {
                   <div className="text-sm font-medium text-muted-foreground">
                     Influence Factor
                   </div>
-                  <div className="text-lg font-semibold">
+                  <div className="text-2xl font-semibold">
                     {profile.influenceFactor.toFixed(2)}
                   </div>
                   <div className="text-xs text-muted-foreground">
@@ -448,7 +440,7 @@ export default function ProfilePage() {
                     <div className="text-sm font-medium text-muted-foreground">
                       Profile ID
                     </div>
-                    <div className="text-lg font-semibold">
+                    <div className="text-2xl font-semibold">
                       {profile.profileId}
                     </div>
                   </div>
