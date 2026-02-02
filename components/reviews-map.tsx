@@ -1292,6 +1292,29 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       }
     };
 
+    // Build sets of hub nodes and suspicious nodes for visual indicators
+    const hubNodeIds = new Set<string>();
+    const suspiciousNodeIds = new Set<string>();
+    const nodeTriangleCount = new Map<string, number>();
+
+    // Count how many triangles each node appears in
+    triangles.forEach((t) => {
+      t.nodeIds.forEach((nodeId) => {
+        nodeTriangleCount.set(nodeId, (nodeTriangleCount.get(nodeId) || 0) + 1);
+      });
+      // Track suspicious accounts
+      t.suspiciousAccounts.forEach((acc) => {
+        suspiciousNodeIds.add(acc.nodeId);
+      });
+    });
+
+    // Nodes in 2+ triangles are hubs
+    nodeTriangleCount.forEach((count, nodeId) => {
+      if (count >= 2) {
+        hubNodeIds.add(nodeId);
+      }
+    });
+
     // Set up zoom behavior
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
@@ -1449,6 +1472,72 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .attr("stroke-width", (d) => (d.isRoot ? 3 : 2))
       .attr("opacity", (d) => (d.isRoot ? 1 : 0.9 - d.level * 0.1));
 
+    // Add indicator rings for hubs and suspicious accounts (when triangles shown)
+    if (showTriangles) {
+      // Hub indicator ring (orange, pulsing)
+      nodeGroups
+        .filter((d) => hubNodeIds.has(d.id))
+        .insert("circle", ":first-child")
+        .attr("class", "hub-indicator")
+        .attr("r", (d) => {
+          if (d.isRoot) return 42;
+          return Math.max(25, 32 - d.level * 2);
+        })
+        .attr("fill", "none")
+        .attr("stroke", "#f97316")
+        .attr("stroke-width", 3)
+        .attr("stroke-opacity", 0.8)
+        .attr("stroke-dasharray", "4,2");
+
+      // Suspicious account indicator ring (red)
+      nodeGroups
+        .filter((d) => suspiciousNodeIds.has(d.id) && !hubNodeIds.has(d.id))
+        .insert("circle", ":first-child")
+        .attr("class", "suspicious-indicator")
+        .attr("r", (d) => {
+          if (d.isRoot) return 42;
+          return Math.max(25, 32 - d.level * 2);
+        })
+        .attr("fill", "none")
+        .attr("stroke", "#ef4444")
+        .attr("stroke-width", 2.5)
+        .attr("stroke-opacity", 0.7);
+
+      // Add triangle count badge for hubs
+      nodeGroups
+        .filter((d) => hubNodeIds.has(d.id))
+        .append("circle")
+        .attr("class", "hub-badge-bg")
+        .attr("cx", (d) => {
+          if (d.isRoot) return 25;
+          return Math.max(12, 18 - d.level * 2);
+        })
+        .attr("cy", (d) => {
+          if (d.isRoot) return -25;
+          return -Math.max(12, 18 - d.level * 2);
+        })
+        .attr("r", 10)
+        .attr("fill", "#f97316");
+
+      nodeGroups
+        .filter((d) => hubNodeIds.has(d.id))
+        .append("text")
+        .attr("class", "hub-badge-text")
+        .attr("x", (d) => {
+          if (d.isRoot) return 25;
+          return Math.max(12, 18 - d.level * 2);
+        })
+        .attr("y", (d) => {
+          if (d.isRoot) return -21;
+          return -Math.max(12, 18 - d.level * 2) + 4;
+        })
+        .attr("text-anchor", "middle")
+        .attr("fill", "white")
+        .attr("font-size", "10px")
+        .attr("font-weight", "bold")
+        .text((d) => `${nodeTriangleCount.get(d.id) || 0}△`);
+    }
+
     // Add images with level-based sizing
     nodeGroups
       .append("image")
@@ -1534,6 +1623,17 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     simulation.on("tick", () => {
       // Update triangle shapes (only if showTriangles is enabled)
       if (showTriangles) {
+        // Helper to get triangle color based on suspicion score
+        const getTriangleColors = (t: Triangle) => {
+          if (t.suspicionScore >= 2) {
+            return { fill: "#ef4444", stroke: "#dc2626" }; // Red for high suspicion
+          } else if (t.suspicionScore >= 1) {
+            return { fill: "#f97316", stroke: "#ea580c" }; // Orange for medium
+          }
+          return { fill: "#fbbf24", stroke: "#f59e0b" }; // Yellow for low
+        };
+
+        // Draw triangle fill polygons
         triangleGroup
           .selectAll("polygon")
           .data(triangles)
@@ -1548,14 +1648,80 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             const y3 = n3.y ?? 0;
             return `${x1},${y1} ${x2},${y2} ${x3},${y3}`;
           })
-          .attr("fill", "#fbbf24")
-          .attr("opacity", 0.08)
-          .attr("stroke", "#f59e0b")
-          .attr("stroke-width", 1.5)
-          .attr("stroke-opacity", 0.3)
-          .attr("stroke-dasharray", "5,5");
+          .attr("fill", (t) => getTriangleColors(t).fill)
+          .attr("opacity", (t) => t.suspicionScore >= 2 ? 0.15 : t.suspicionScore >= 1 ? 0.12 : 0.08)
+          .attr("stroke", (t) => getTriangleColors(t).stroke)
+          .attr("stroke-width", (t) => t.suspicionScore >= 2 ? 2.5 : t.suspicionScore >= 1 ? 2 : 1.5)
+          .attr("stroke-opacity", (t) => t.suspicionScore >= 2 ? 0.6 : t.suspicionScore >= 1 ? 0.5 : 0.3)
+          .attr("stroke-dasharray", "none");
+
+        // Draw directional flow arrows on triangle edges
+        // Each triangle has edges: A→B, B→C, C→A
+        const triangleFlowData: { x1: number; y1: number; x2: number; y2: number; suspicionScore: number }[] = [];
+        triangles.forEach((t) => {
+          const [n1, n2, n3] = t.nodes;
+          // Edge 1: n1 → n2
+          triangleFlowData.push({
+            x1: n1.x ?? 0, y1: n1.y ?? 0,
+            x2: n2.x ?? 0, y2: n2.y ?? 0,
+            suspicionScore: t.suspicionScore
+          });
+          // Edge 2: n2 → n3
+          triangleFlowData.push({
+            x1: n2.x ?? 0, y1: n2.y ?? 0,
+            x2: n3.x ?? 0, y2: n3.y ?? 0,
+            suspicionScore: t.suspicionScore
+          });
+          // Edge 3: n3 → n1
+          triangleFlowData.push({
+            x1: n3.x ?? 0, y1: n3.y ?? 0,
+            x2: n1.x ?? 0, y2: n1.y ?? 0,
+            suspicionScore: t.suspicionScore
+          });
+        });
+
+        // Draw flow arrows along triangle edges
+        triangleGroup
+          .selectAll("path.triangle-flow")
+          .data(triangleFlowData)
+          .join("path")
+          .attr("class", "triangle-flow")
+          .attr("d", (d) => {
+            const midX = (d.x1 + d.x2) / 2;
+            const midY = (d.y1 + d.y2) / 2;
+            const dx = d.x2 - d.x1;
+            const dy = d.y2 - d.y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len === 0) return "";
+
+            // Arrow at midpoint pointing towards target
+            const arrowSize = 6;
+            const ux = dx / len;
+            const uy = dy / len;
+            // Perpendicular
+            const px = -uy;
+            const py = ux;
+
+            // Arrow tip at midpoint + small offset towards target
+            const tipX = midX + ux * 3;
+            const tipY = midY + uy * 3;
+            // Arrow base points
+            const baseX1 = tipX - ux * arrowSize + px * arrowSize * 0.5;
+            const baseY1 = tipY - uy * arrowSize + py * arrowSize * 0.5;
+            const baseX2 = tipX - ux * arrowSize - px * arrowSize * 0.5;
+            const baseY2 = tipY - uy * arrowSize - py * arrowSize * 0.5;
+
+            return `M${tipX},${tipY} L${baseX1},${baseY1} L${baseX2},${baseY2} Z`;
+          })
+          .attr("fill", (d) => {
+            if (d.suspicionScore >= 2) return "#dc2626";
+            if (d.suspicionScore >= 1) return "#ea580c";
+            return "#f59e0b";
+          })
+          .attr("opacity", (d) => d.suspicionScore >= 2 ? 0.9 : d.suspicionScore >= 1 ? 0.8 : 0.6);
       } else {
         triangleGroup.selectAll("polygon").remove();
+        triangleGroup.selectAll("path.triangle-flow").remove();
       }
 
       link
