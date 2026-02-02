@@ -145,6 +145,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
   });
   const [hideIsolatedNodes, setHideIsolatedNodes] = useState(false);
   const [showTriangles, setShowTriangles] = useState(true);
+  const [triangleThreshold, setTriangleThreshold] = useState(1); // Minimum suspicion score to show
   const [detectedTriangles, setDetectedTriangles] = useState<Triangle[]>([]);
   const [detectedClusters, setDetectedClusters] = useState<Cluster[]>([]);
   const { theme } = useTheme();
@@ -1293,12 +1294,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     };
 
     // Build sets of hub nodes and suspicious nodes for visual indicators
+    // Only consider triangles that meet the threshold
+    const visibleTrianglesForIndicators = triangles.filter(t => t.suspicionScore >= triangleThreshold);
     const hubNodeIds = new Set<string>();
     const suspiciousNodeIds = new Set<string>();
     const nodeTriangleCount = new Map<string, number>();
 
-    // Count how many triangles each node appears in
-    triangles.forEach((t) => {
+    // Count how many visible triangles each node appears in
+    visibleTrianglesForIndicators.forEach((t) => {
       t.nodeIds.forEach((nodeId) => {
         nodeTriangleCount.set(nodeId, (nodeTriangleCount.get(nodeId) || 0) + 1);
       });
@@ -1308,7 +1311,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       });
     });
 
-    // Nodes in 2+ triangles are hubs
+    // Nodes in 2+ visible triangles are hubs
     nodeTriangleCount.forEach((count, nodeId) => {
       if (count >= 2) {
         hubNodeIds.add(nodeId);
@@ -1623,67 +1626,62 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     simulation.on("tick", () => {
       // Update triangle shapes (only if showTriangles is enabled)
       if (showTriangles) {
+        // Filter triangles by threshold
+        const visibleTriangles = triangles.filter(t => t.suspicionScore >= triangleThreshold);
+
         // Helper to get triangle color based on suspicion score
-        const getTriangleColors = (t: Triangle) => {
-          if (t.suspicionScore >= 2) {
-            return { fill: "#ef4444", stroke: "#dc2626" }; // Red for high suspicion
-          } else if (t.suspicionScore >= 1) {
-            return { fill: "#f97316", stroke: "#ea580c" }; // Orange for medium
-          }
-          return { fill: "#fbbf24", stroke: "#f59e0b" }; // Yellow for low
+        const getTriangleColor = (score: number) => {
+          if (score >= 2) return "#dc2626"; // Red for high suspicion
+          if (score >= 1) return "#ea580c"; // Orange for medium
+          return "#f59e0b"; // Yellow for low
         };
 
-        // Draw triangle fill polygons
-        triangleGroup
-          .selectAll("polygon")
-          .data(triangles)
-          .join("polygon")
-          .attr("points", (t) => {
-            const [n1, n2, n3] = t.nodes;
-            const x1 = n1.x ?? 0;
-            const y1 = n1.y ?? 0;
-            const x2 = n2.x ?? 0;
-            const y2 = n2.y ?? 0;
-            const x3 = n3.x ?? 0;
-            const y3 = n3.y ?? 0;
-            return `${x1},${y1} ${x2},${y2} ${x3},${y3}`;
-          })
-          .attr("fill", (t) => getTriangleColors(t).fill)
-          .attr("opacity", (t) => t.suspicionScore >= 2 ? 0.15 : t.suspicionScore >= 1 ? 0.12 : 0.08)
-          .attr("stroke", (t) => getTriangleColors(t).stroke)
-          .attr("stroke-width", (t) => t.suspicionScore >= 2 ? 2.5 : t.suspicionScore >= 1 ? 2 : 1.5)
-          .attr("stroke-opacity", (t) => t.suspicionScore >= 2 ? 0.6 : t.suspicionScore >= 1 ? 0.5 : 0.3)
-          .attr("stroke-dasharray", "none");
-
-        // Draw directional flow arrows on triangle edges
-        // Each triangle has edges: A→B, B→C, C→A
-        const triangleFlowData: { x1: number; y1: number; x2: number; y2: number; suspicionScore: number }[] = [];
-        triangles.forEach((t) => {
+        // Build edge data for visible triangles (highlight edges instead of polygon fill)
+        const triangleEdgeData: { x1: number; y1: number; x2: number; y2: number; suspicionScore: number }[] = [];
+        visibleTriangles.forEach((t) => {
           const [n1, n2, n3] = t.nodes;
           // Edge 1: n1 → n2
-          triangleFlowData.push({
+          triangleEdgeData.push({
             x1: n1.x ?? 0, y1: n1.y ?? 0,
             x2: n2.x ?? 0, y2: n2.y ?? 0,
             suspicionScore: t.suspicionScore
           });
           // Edge 2: n2 → n3
-          triangleFlowData.push({
+          triangleEdgeData.push({
             x1: n2.x ?? 0, y1: n2.y ?? 0,
             x2: n3.x ?? 0, y2: n3.y ?? 0,
             suspicionScore: t.suspicionScore
           });
           // Edge 3: n3 → n1
-          triangleFlowData.push({
+          triangleEdgeData.push({
             x1: n3.x ?? 0, y1: n3.y ?? 0,
             x2: n1.x ?? 0, y2: n1.y ?? 0,
             suspicionScore: t.suspicionScore
           });
         });
 
+        // Remove polygon fills - just use edge highlights
+        triangleGroup.selectAll("polygon").remove();
+
+        // Draw highlighted edges for triangles
+        triangleGroup
+          .selectAll("line.triangle-edge")
+          .data(triangleEdgeData)
+          .join("line")
+          .attr("class", "triangle-edge")
+          .attr("x1", (d) => d.x1)
+          .attr("y1", (d) => d.y1)
+          .attr("x2", (d) => d.x2)
+          .attr("y2", (d) => d.y2)
+          .attr("stroke", (d) => getTriangleColor(d.suspicionScore))
+          .attr("stroke-width", 3)
+          .attr("stroke-opacity", 0.7)
+          .attr("stroke-linecap", "round");
+
         // Draw flow arrows along triangle edges
         triangleGroup
           .selectAll("path.triangle-flow")
-          .data(triangleFlowData)
+          .data(triangleEdgeData)
           .join("path")
           .attr("class", "triangle-flow")
           .attr("d", (d) => {
@@ -1695,7 +1693,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             if (len === 0) return "";
 
             // Arrow at midpoint pointing towards target
-            const arrowSize = 6;
+            const arrowSize = 7;
             const ux = dx / len;
             const uy = dy / len;
             // Perpendicular
@@ -1703,8 +1701,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             const py = ux;
 
             // Arrow tip at midpoint + small offset towards target
-            const tipX = midX + ux * 3;
-            const tipY = midY + uy * 3;
+            const tipX = midX + ux * 4;
+            const tipY = midY + uy * 4;
             // Arrow base points
             const baseX1 = tipX - ux * arrowSize + px * arrowSize * 0.5;
             const baseY1 = tipY - uy * arrowSize + py * arrowSize * 0.5;
@@ -1713,14 +1711,11 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
 
             return `M${tipX},${tipY} L${baseX1},${baseY1} L${baseX2},${baseY2} Z`;
           })
-          .attr("fill", (d) => {
-            if (d.suspicionScore >= 2) return "#dc2626";
-            if (d.suspicionScore >= 1) return "#ea580c";
-            return "#f59e0b";
-          })
-          .attr("opacity", (d) => d.suspicionScore >= 2 ? 0.9 : d.suspicionScore >= 1 ? 0.8 : 0.6);
+          .attr("fill", (d) => getTriangleColor(d.suspicionScore))
+          .attr("opacity", 0.9);
       } else {
         triangleGroup.selectAll("polygon").remove();
+        triangleGroup.selectAll("line.triangle-edge").remove();
         triangleGroup.selectAll("path.triangle-flow").remove();
       }
 
@@ -1813,6 +1808,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     visibleSentiments,
     hideIsolatedNodes,
     showTriangles,
+    triangleThreshold,
     router,
   ]);
 
@@ -2050,7 +2046,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                       className="w-4 h-4 rounded border-border"
                     />
                     <span className="inline-flex items-center gap-1">
-                      Show potential review triangles
+                      Show triangles
                       {detectedTriangles.length > 0 && (
                         <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
                           {detectedTriangles.length}
@@ -2058,6 +2054,23 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                       )}
                     </span>
                   </label>
+                  {showTriangles && detectedTriangles.length > 0 && (
+                    <div className="flex items-center gap-2 ml-4">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">Min risk:</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="3"
+                        value={triangleThreshold}
+                        onChange={(e) => setTriangleThreshold(parseInt(e.target.value))}
+                        className="w-20 h-2 accent-orange-500"
+                      />
+                      <span className="text-xs font-medium w-4">{triangleThreshold}</span>
+                      <span className="text-xs text-muted-foreground">
+                        ({detectedTriangles.filter(t => t.suspicionScore >= triangleThreshold).length} shown)
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
@@ -2322,7 +2335,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     className="w-4 h-4 rounded border-border"
                   />
                   <span className="inline-flex items-center gap-1">
-                    Show review triangles
+                    Show triangles
                     {detectedTriangles.length > 0 && (
                       <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
                         {detectedTriangles.length}
@@ -2330,6 +2343,23 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     )}
                   </span>
                 </label>
+                {showTriangles && detectedTriangles.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Min risk:</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="3"
+                      value={triangleThreshold}
+                      onChange={(e) => setTriangleThreshold(parseInt(e.target.value))}
+                      className="w-16 h-2 accent-orange-500"
+                    />
+                    <span className="text-xs font-medium w-4">{triangleThreshold}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({detectedTriangles.filter(t => t.suspicionScore >= triangleThreshold).length} shown)
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex gap-1 md:gap-2 md:ml-4 shrink-0">
