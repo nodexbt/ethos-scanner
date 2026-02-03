@@ -72,7 +72,7 @@ interface Triangle {
   nodes: [Node, Node, Node];
 }
 
-const MAX_NODES_DEFAULT = 100;
+const MAX_NODES_DEFAULT = Infinity; // No limit - show all nodes
 
 export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional = false, maxNodes = MAX_NODES_DEFAULT }: ClusterMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
