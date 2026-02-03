@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Search, Loader2, X, Plus, ArrowLeft, Users, Share2, Check, Copy } from "lucide-react";
+import Link from "next/link";
 import { ClusterMap } from "@/components/cluster-map";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -108,11 +109,11 @@ interface Vouch {
 }
 
 const MIN_PROFILES = 2;
-const MAX_PROFILES = 50; // Allow up to 50 profiles to investigate
-const MIN_CONNECTIONS_FOR_DISCOVERY = 2; // Minimum connections to cluster profiles to auto-discover
+const DEFAULT_MIN_CONNECTIONS = 2; // Default minimum connections to cluster profiles to auto-discover
 const STORAGE_KEY = "ethos-cluster-profiles";
 const MAX_EXPANSION_DEPTH = 3;
-const MAX_DISCOVERED_PER_LEVEL = 100; // Allow discovering up to 100 profiles per expansion level
+const REVIEWS_BATCH_SIZE = 100; // Fetch reviews in batches of 100 to be gentle on the API
+const MAX_REVIEWS_PER_PROFILE = 1000; // Maximum reviews to fetch per profile
 
 function ClusterPageContent() {
   const router = useRouter();
@@ -128,9 +129,12 @@ function ClusterPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [expansionDepth, setExpansionDepth] = useState(2); // How many levels deep to expand
   const [currentLevel, setCurrentLevel] = useState(0); // Progress indicator
+  const [minConnections, setMinConnections] = useState(DEFAULT_MIN_CONNECTIONS); // Min connections to discover
   const [loadingFromUrl, setLoadingFromUrl] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedProfiles, setCopiedProfiles] = useState(false);
+  const [minConnectionsToShow, setMinConnectionsToShow] = useState(0); // Filter for profile list display (will be set to 20% after investigation)
+  const [showOnlyBidirectional, setShowOnlyBidirectional] = useState(true); // Filter to show only profiles that both gave AND received (enabled by default)
 
   // Combined profiles for visualization
   const allProfiles = [...profiles, ...discoveredProfiles];
@@ -138,6 +142,24 @@ function ClusterPageContent() {
   // Helper to check if string is ethereum address
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
+  };
+
+  // Helper to extract identifier from URL (Ethos profile URL or Twitter URL)
+  const extractIdentifierFromUrl = (input: string): string => {
+    // Ethos profile URL for Twitter: https://app.ethos.network/profile/x/username
+    const ethosTwitterMatch = input.match(/app\.ethos\.network\/profile\/x\/([^/?#]+)/i);
+    if (ethosTwitterMatch) return ethosTwitterMatch[1];
+
+    // Ethos profile URL for wallet: https://app.ethos.network/profile/0x...
+    const ethosWalletMatch = input.match(/app\.ethos\.network\/profile\/(0x[a-fA-F0-9]{40})/i);
+    if (ethosWalletMatch) return ethosWalletMatch[1];
+
+    // Twitter/X URL: https://twitter.com/username or https://x.com/username
+    const twitterMatch = input.match(/(?:twitter\.com|x\.com)\/([^/?#]+)/i);
+    if (twitterMatch) return twitterMatch[1];
+
+    // Return as-is if not a URL
+    return input;
   };
 
   // Load profiles from URL params or localStorage on mount
@@ -294,23 +316,31 @@ function ClusterPageContent() {
     return count;
   }, [reviews, vouches]);
 
+  // Get detailed connection info for a profile (given vs received)
+  const getConnectionDetails = useCallback((profileId: number) => {
+    let given = 0;
+    let received = 0;
+    reviews.forEach(r => {
+      if (r.author.profileId === profileId) given++;
+      if (r.subject.profileId === profileId) received++;
+    });
+    return { given, received, isBidirectional: given > 0 && received > 0 };
+  }, [reviews]);
+
   const addProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
-    // Check if already at max
-    if (profiles.length >= MAX_PROFILES) {
-      setError(`Maximum ${MAX_PROFILES} profiles allowed`);
-      return;
-    }
+    // Extract identifier from URL if provided
+    const identifier = extractIdentifierFromUrl(trimmedInput);
 
     setAddingProfile(true);
     setError(null);
 
     try {
       // Check cache first
-      const cacheKey = getProfileCacheKey(trimmedInput);
+      const cacheKey = getProfileCacheKey(identifier);
       const cached = getCachedData<EthosProfile>(cacheKey, CacheDurations.PROFILE);
 
       if (cached) {
@@ -329,12 +359,15 @@ function ClusterPageContent() {
         return;
       }
 
-      // Fetch from API
+      // Fetch from API - try profile ID first if numeric, otherwise try username/address
       let url: string;
-      if (isEthereumAddress(trimmedInput)) {
-        url = `https://api.ethos.network/api/v2/user/by/address/${trimmedInput}`;
+      if (/^\d+$/.test(identifier)) {
+        // Numeric - could be Ethos profile ID
+        url = `https://api.ethos.network/api/v2/user/by/profile/${identifier}`;
+      } else if (isEthereumAddress(identifier)) {
+        url = `https://api.ethos.network/api/v2/user/by/address/${identifier}`;
       } else {
-        url = `https://api.ethos.network/api/v2/user/by/x/${trimmedInput}`;
+        url = `https://api.ethos.network/api/v2/user/by/x/${identifier}`;
       }
 
       const response = await fetch(url, {
@@ -397,195 +430,140 @@ function ClusterPageContent() {
     setError(null);
   };
 
-  // Helper: Fetch connections for a set of profile IDs
-  const fetchConnectionsForProfiles = async (
+  // Helper: Fetch reviews with pagination (batches of 100, up to 1000 total)
+  const fetchReviewsPaginated = async (
+    url: string,
+    userkey: string
+  ): Promise<ReviewActivity[]> => {
+    const allReviews: ReviewActivity[] = [];
+    let offset = 0;
+
+    while (offset < MAX_REVIEWS_PER_PROFILE) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Ethos-Client": "ethos-scanner@0.1.0",
+          },
+          body: JSON.stringify({
+            userkey,
+            filter: ["review"],
+            limit: REVIEWS_BATCH_SIZE,
+            pagination: { offset, limit: REVIEWS_BATCH_SIZE }
+          }),
+        });
+
+        if (!response.ok) break;
+
+        const data = await response.json();
+        const reviews = data.values || [];
+        allReviews.push(...reviews);
+
+        // Stop if we got fewer than batch size (no more data)
+        if (reviews.length < REVIEWS_BATCH_SIZE) break;
+
+        offset += REVIEWS_BATCH_SIZE;
+
+        // Small delay between batches to be gentle on the API
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (err) {
+        console.error("Error fetching reviews batch", err);
+        break;
+      }
+    }
+
+    return allReviews;
+  };
+
+  // Helper: Fetch review connections for a set of profile IDs (reviews only)
+  const fetchReviewsForProfiles = async (
     profileIds: number[],
     knownProfileIds: Set<number>
   ): Promise<{
     reviews: ReviewActivity[];
-    vouches: Vouch[];
     externalConnections: Map<number, {
       connectedTo: Set<number>;
       reviews: ReviewActivity[];
-      vouches: Vouch[];
+      username: string | null; // Twitter handle for fetching full profile
     }>;
   }> => {
     const reviews: ReviewActivity[] = [];
-    const vouches: Vouch[] = [];
     const externalConnections = new Map<number, {
       connectedTo: Set<number>;
       reviews: ReviewActivity[];
-      vouches: Vouch[];
+      username: string | null;
     }>();
 
     await Promise.all(profileIds.map(async (profileId) => {
       const userkey = `profileId:${profileId}`;
 
-      // Fetch reviews given
+      // Fetch reviews given (paginated)
       try {
-        const response = await fetch(
+        const givenReviews = await fetchReviewsPaginated(
           "https://api.ethos.network/api/v2/activities/profile/given",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({ userkey, filter: ["review"], limit: 100 }),
-          }
+          userkey
         );
-        if (response.ok) {
-          const data = await response.json();
-          data.values?.forEach((review: ReviewActivity) => {
-            const targetId = review.subject.profileId;
-            if (!targetId) return;
-            if (knownProfileIds.has(targetId)) {
-              reviews.push(review);
-            } else {
-              if (!externalConnections.has(targetId)) {
-                externalConnections.set(targetId, { connectedTo: new Set(), reviews: [], vouches: [] });
-              }
-              externalConnections.get(targetId)!.connectedTo.add(profileId);
-              externalConnections.get(targetId)!.reviews.push(review);
+        givenReviews.forEach((review: ReviewActivity) => {
+          const targetId = review.subject.profileId;
+          if (!targetId) return;
+          if (knownProfileIds.has(targetId)) {
+            reviews.push(review);
+          } else {
+            if (!externalConnections.has(targetId)) {
+              externalConnections.set(targetId, {
+                connectedTo: new Set(),
+                reviews: [],
+                username: review.subject.username || null,
+              });
             }
-          });
-        }
+            externalConnections.get(targetId)!.connectedTo.add(profileId);
+            externalConnections.get(targetId)!.reviews.push(review);
+            // Update username if we get one
+            if (review.subject.username && !externalConnections.get(targetId)!.username) {
+              externalConnections.get(targetId)!.username = review.subject.username;
+            }
+          }
+        });
       } catch (err) {
         console.error("Error fetching given reviews", profileId, err);
       }
 
-      // Fetch reviews received
+      // Fetch reviews received (paginated)
       try {
-        const response = await fetch(
+        const receivedReviews = await fetchReviewsPaginated(
           "https://api.ethos.network/api/v2/activities/profile/received",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({ userkey, filter: ["review"], limit: 100 }),
-          }
+          userkey
         );
-        if (response.ok) {
-          const data = await response.json();
-          data.values?.forEach((review: ReviewActivity) => {
-            const authorId = review.author.profileId;
-            if (!authorId) return;
-            if (knownProfileIds.has(authorId)) {
-              if (!reviews.some(r => r.data.id === review.data.id)) {
-                reviews.push(review);
-              }
-            } else {
-              if (!externalConnections.has(authorId)) {
-                externalConnections.set(authorId, { connectedTo: new Set(), reviews: [], vouches: [] });
-              }
-              externalConnections.get(authorId)!.connectedTo.add(profileId);
-              externalConnections.get(authorId)!.reviews.push(review);
+        receivedReviews.forEach((review: ReviewActivity) => {
+          const authorId = review.author.profileId;
+          if (!authorId) return;
+          if (knownProfileIds.has(authorId)) {
+            if (!reviews.some(r => r.data.id === review.data.id)) {
+              reviews.push(review);
             }
-          });
-        }
+          } else {
+            if (!externalConnections.has(authorId)) {
+              externalConnections.set(authorId, {
+                connectedTo: new Set(),
+                reviews: [],
+                username: review.author.username || null,
+              });
+            }
+            externalConnections.get(authorId)!.connectedTo.add(profileId);
+            externalConnections.get(authorId)!.reviews.push(review);
+            // Update username if we get one
+            if (review.author.username && !externalConnections.get(authorId)!.username) {
+              externalConnections.get(authorId)!.username = review.author.username;
+            }
+          }
+        });
       } catch (err) {
         console.error("Error fetching received reviews", profileId, err);
       }
-
-      // Fetch vouches given
-      try {
-        const response = await fetch(
-          "https://api.ethos.network/api/v2/vouches",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({ authorProfileIds: [profileId], limit: 100 }),
-          }
-        );
-        if (response.ok) {
-          const data = await response.json();
-          data.values?.forEach((vouch: Vouch) => {
-            const targetId = vouch.subjectProfileId;
-            if (!targetId) return;
-            if (knownProfileIds.has(targetId)) {
-              vouches.push(vouch);
-            } else {
-              if (!externalConnections.has(targetId)) {
-                externalConnections.set(targetId, { connectedTo: new Set(), reviews: [], vouches: [] });
-              }
-              externalConnections.get(targetId)!.connectedTo.add(profileId);
-              externalConnections.get(targetId)!.vouches.push(vouch);
-            }
-          });
-        }
-      } catch (err) {
-        console.error("Error fetching given vouches", profileId, err);
-      }
-
-      // Fetch vouches received
-      try {
-        const response = await fetch(
-          "https://api.ethos.network/api/v2/vouches",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Ethos-Client": "ethos-scanner@0.1.0",
-            },
-            body: JSON.stringify({ subjectProfileIds: [profileId], limit: 100 }),
-          }
-        );
-        if (response.ok) {
-          const data = await response.json();
-          data.values?.forEach((vouch: Vouch) => {
-            const authorId = vouch.authorProfileId;
-            if (!authorId) return;
-            if (knownProfileIds.has(authorId)) {
-              if (!vouches.some(v => v.authorProfileId === vouch.authorProfileId && v.subjectProfileId === vouch.subjectProfileId)) {
-                vouches.push(vouch);
-              }
-            } else {
-              if (!externalConnections.has(authorId)) {
-                externalConnections.set(authorId, { connectedTo: new Set(), reviews: [], vouches: [] });
-              }
-              externalConnections.get(authorId)!.connectedTo.add(profileId);
-              externalConnections.get(authorId)!.vouches.push(vouch);
-            }
-          });
-        }
-      } catch (err) {
-        console.error("Error fetching received vouches", profileId, err);
-      }
     }));
 
-    return { reviews, vouches, externalConnections };
-  };
-
-  // Helper: Fetch profile data for a list of profile IDs
-  const fetchProfileData = async (profileIds: number[], level: number): Promise<EthosProfile[]> => {
-    const profiles: EthosProfile[] = [];
-    await Promise.all(profileIds.map(async (profileId) => {
-      try {
-        const cacheKey = `cache-profile-id-${profileId}`;
-        const cached = getCachedData<EthosProfile>(cacheKey, CacheDurations.PROFILE);
-        if (cached) {
-          profiles.push({ ...cached, isDiscovered: true, discoveryLevel: level });
-          return;
-        }
-        const response = await fetch(
-          `https://api.ethos.network/api/v2/user/by/profile/${profileId}`,
-          { headers: { "X-Ethos-Client": "ethos-scanner@0.1.0" } }
-        );
-        if (response.ok) {
-          const profile: EthosProfile = await response.json();
-          setCachedData(cacheKey, profile);
-          profiles.push({ ...profile, isDiscovered: true, discoveryLevel: level });
-        }
-      } catch (err) {
-        console.error("Error fetching profile", profileId, err);
-      }
-    }));
-    return profiles;
+    return { reviews, externalConnections };
   };
 
   const investigateCluster = async () => {
@@ -606,17 +584,16 @@ function ClusterPageContent() {
       const allKnownIds = new Set(profiles.map(p => p.profileId!));
       const allDiscovered: EthosProfile[] = [];
       const allReviews: ReviewActivity[] = [];
-      const allVouches: Vouch[] = [];
 
       // Profiles to scan at each level (start with submitted profiles)
       let profilesToScan = profiles.map(p => p.profileId!);
 
-      // Iterative multi-level expansion
+      // Iterative multi-level expansion (reviews only for discovery)
       for (let level = 1; level <= expansionDepth; level++) {
         setCurrentLevel(level);
 
-        // Fetch connections for current level's profiles
-        const { reviews, vouches, externalConnections } = await fetchConnectionsForProfiles(
+        // Fetch review connections for current level's profiles
+        const { reviews, externalConnections } = await fetchReviewsForProfiles(
           profilesToScan,
           allKnownIds
         );
@@ -627,39 +604,58 @@ function ClusterPageContent() {
             allReviews.push(r);
           }
         });
-        vouches.forEach(v => {
-          if (!allVouches.some(existing =>
-            existing.authorProfileId === v.authorProfileId &&
-            existing.subjectProfileId === v.subjectProfileId
-          )) {
-            allVouches.push(v);
-          }
-        });
 
-        // Find new profiles connected to 2+ known profiles
-        const newDiscoveredIds: number[] = [];
+        // Find new profiles connected to N+ known profiles that have a username
+        // Only profiles with usernames can be fetched properly
+        const discoveredWithUsernames: { id: number; username: string }[] = [];
         externalConnections.forEach((data, externalId) => {
-          if (data.connectedTo.size >= MIN_CONNECTIONS_FOR_DISCOVERY && !allKnownIds.has(externalId)) {
-            newDiscoveredIds.push(externalId);
+          if (data.connectedTo.size >= minConnections && !allKnownIds.has(externalId)) {
+            // Only include profiles with valid profileId and a username
+            if (externalId > 0 && data.username) {
+              discoveredWithUsernames.push({ id: externalId, username: data.username });
+            }
           }
         });
 
-        // Limit discoveries per level to avoid runaway expansion
-        const limitedDiscoveredIds = newDiscoveredIds.slice(0, MAX_DISCOVERED_PER_LEVEL);
-
-        if (limitedDiscoveredIds.length === 0) {
+        if (discoveredWithUsernames.length === 0) {
           // No more profiles to discover, stop expansion early
           break;
         }
 
-        // Fetch profile data for newly discovered profiles
-        const newProfiles = await fetchProfileData(limitedDiscoveredIds, level);
+        // Fetch full profile data using Twitter usernames
+        // This gets accurate scores and filters out uninitialized profiles
+        const newProfiles: EthosProfile[] = [];
+        await Promise.all(discoveredWithUsernames.map(async ({ id, username }) => {
+          try {
+            const response = await fetch(
+              `https://api.ethos.network/api/v2/user/by/x/${username}`,
+              {
+                headers: { "X-Ethos-Client": "ethos-scanner@0.1.0" }
+              }
+            );
+            if (response.ok) {
+              const profile: EthosProfile = await response.json();
+              // Only include profiles with valid data (initialized)
+              if (profile.profileId && profile.displayName) {
+                newProfiles.push({
+                  ...profile,
+                  isDiscovered: true,
+                  discoveryLevel: level,
+                });
+              }
+            }
+          } catch (err) {
+            // Profile doesn't exist or is uninitialized, skip it
+            console.error("Error fetching discovered profile", username, err);
+          }
+        }));
         allDiscovered.push(...newProfiles);
 
-        // Add newly discovered IDs to known set
-        limitedDiscoveredIds.forEach(id => allKnownIds.add(id));
+        // Add successfully fetched profile IDs to known set (only initialized profiles)
+        const fetchedIds = newProfiles.map(p => p.profileId!);
+        fetchedIds.forEach(id => allKnownIds.add(id));
 
-        // Add connections involving discovered profiles
+        // Add review connections involving discovered profiles
         externalConnections.forEach((data, externalId) => {
           if (allKnownIds.has(externalId)) {
             data.reviews.forEach(review => {
@@ -669,27 +665,63 @@ function ClusterPageContent() {
                 }
               }
             });
-            data.vouches.forEach(vouch => {
-              if (allKnownIds.has(vouch.authorProfileId) && allKnownIds.has(vouch.subjectProfileId)) {
-                if (!allVouches.some(v =>
-                  v.authorProfileId === vouch.authorProfileId &&
-                  v.subjectProfileId === vouch.subjectProfileId
-                )) {
-                  allVouches.push(vouch);
-                }
-              }
-            });
           }
         });
 
-        // Next level will scan the newly discovered profiles
-        profilesToScan = limitedDiscoveredIds;
+        // Next level will scan the successfully fetched profiles
+        profilesToScan = fetchedIds;
+      }
+
+      // Final pass: fetch inter-review connections between all discovered profiles
+      // This catches reviews between profiles discovered at the same level
+      if (allDiscovered.length > 0) {
+        setCurrentLevel(expansionDepth + 1);
+        const discoveredIds = allDiscovered.map(p => p.profileId!);
+
+        await Promise.all(discoveredIds.map(async (profileId) => {
+          const userkey = `profileId:${profileId}`;
+
+          // Fetch reviews given by this discovered profile (paginated)
+          try {
+            const givenReviews = await fetchReviewsPaginated(
+              "https://api.ethos.network/api/v2/activities/profile/given",
+              userkey
+            );
+            givenReviews.forEach((review: ReviewActivity) => {
+              const targetId = review.subject.profileId;
+              if (!targetId) return;
+              // Only add if target is in our cluster (submitted or discovered)
+              if (allKnownIds.has(targetId)) {
+                if (!allReviews.some(r => r.data.id === review.data.id)) {
+                  allReviews.push(review);
+                }
+              }
+            });
+          } catch (err) {
+            console.error("Error fetching inter-connections", profileId, err);
+          }
+        }));
       }
 
       setDiscoveredProfiles(allDiscovered);
       setReviews(allReviews);
-      setVouches(allVouches);
+      setVouches([]); // Vouches not used for cluster discovery
       setInvestigated(true);
+
+      // Calculate max connections and set slider to 20%
+      const allProfileIds = new Set([...profiles.map(p => p.profileId!), ...allDiscovered.map(p => p.profileId!)]);
+      const connectionCounts = new Map<number, number>();
+      allProfileIds.forEach(id => connectionCounts.set(id, 0));
+      allReviews.forEach(r => {
+        if (connectionCounts.has(r.author.profileId)) {
+          connectionCounts.set(r.author.profileId, connectionCounts.get(r.author.profileId)! + 1);
+        }
+        if (connectionCounts.has(r.subject.profileId)) {
+          connectionCounts.set(r.subject.profileId, connectionCounts.get(r.subject.profileId)! + 1);
+        }
+      });
+      const maxConn = Math.max(...connectionCounts.values(), 0);
+      setMinConnectionsToShow(Math.floor(maxConn * 0.2));
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -698,7 +730,7 @@ function ClusterPageContent() {
     }
   };
 
-  const totalConnections = reviews.length + vouches.length;
+  const totalConnections = reviews.length;
   const positiveReviews = reviews.filter(r => r.data.score === "positive").length;
   const neutralReviews = reviews.filter(r => r.data.score === "neutral").length;
   const negativeReviews = reviews.filter(r => r.data.score === "negative").length;
@@ -728,8 +760,8 @@ function ClusterPageContent() {
               Cluster Investigation
             </CardTitle>
             <CardDescription>
-              Enter {MIN_PROFILES}-{MAX_PROFILES} profiles to investigate their connections on Ethos.
-              Supports X usernames or wallet addresses.
+              Enter {MIN_PROFILES}+ profiles to investigate their connections on Ethos.
+              Supports X usernames, wallet addresses, Ethos profile URLs, or Twitter URLs.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -739,16 +771,16 @@ function ClusterPageContent() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder="Enter X username or wallet address"
+                  placeholder="Username, address, or profile URL"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   className="pl-10"
-                  disabled={addingProfile || profiles.length >= MAX_PROFILES}
+                  disabled={addingProfile}
                 />
               </div>
               <Button
                 type="submit"
-                disabled={addingProfile || !input.trim() || profiles.length >= MAX_PROFILES}
+                disabled={addingProfile || !input.trim()}
               >
                 {addingProfile ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -777,7 +809,7 @@ function ClusterPageContent() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium text-muted-foreground">
-                    Added Profiles ({profiles.length}/{MAX_PROFILES})
+                    Added Profiles ({profiles.length})
                   </div>
                   <div className="flex items-center gap-3">
                     <button
@@ -811,21 +843,27 @@ function ClusterPageContent() {
                       key={profile.profileId}
                       className="group flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm"
                     >
-                      {profile.avatarUrl && (
-                        <img
-                          src={profile.avatarUrl}
-                          alt={profile.displayName}
-                          className="h-6 w-6 shrink-0 rounded-full"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">
-                          {profile.displayName}
+                      <Link
+                        href={`/${encodeURIComponent(profile.username || profile.profileId!.toString())}`}
+                        className="flex items-center gap-2 min-w-0 hover:opacity-80"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {profile.avatarUrl && (
+                          <img
+                            src={profile.avatarUrl}
+                            alt={profile.displayName}
+                            className="h-6 w-6 shrink-0 rounded-full"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">
+                            {profile.displayName}
+                          </div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            Score: {profile.score}
+                          </div>
                         </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          Score: {profile.score}
-                        </div>
-                      </div>
+                      </Link>
                       <button
                         onClick={() => removeProfile(profile.profileId!)}
                         className="shrink-0 cursor-pointer rounded p-1 hover:bg-muted"
@@ -845,7 +883,7 @@ function ClusterPageContent() {
                 <div className="text-sm font-medium text-amber-600 dark:text-amber-400">
                   Discovered Profiles ({discoveredProfiles.length})
                   <span className="ml-2 text-xs text-muted-foreground font-normal">
-                    Connected to 2+ cluster profiles
+                    Connected to {minConnections}+ cluster profiles
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -854,26 +892,32 @@ function ClusterPageContent() {
                       key={profile.profileId}
                       className="group flex items-center gap-2 rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm"
                     >
-                      {profile.avatarUrl && (
-                        <img
-                          src={profile.avatarUrl}
-                          alt={profile.displayName}
-                          className="h-6 w-6 shrink-0 rounded-full ring-2 ring-amber-400"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">
-                          {profile.displayName}
+                      <Link
+                        href={`/${encodeURIComponent(profile.username || profile.profileId!.toString())}`}
+                        className="flex items-center gap-2 min-w-0 hover:opacity-80"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {profile.avatarUrl && (
+                          <img
+                            src={profile.avatarUrl}
+                            alt={profile.displayName}
+                            className="h-6 w-6 shrink-0 rounded-full ring-2 ring-amber-400"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">
+                            {profile.displayName}
+                          </div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            Score: {profile.score}
+                            {profile.discoveryLevel && (
+                              <span className="ml-1 text-amber-600 dark:text-amber-400">
+                                • L{profile.discoveryLevel}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          Score: {profile.score}
-                          {profile.discoveryLevel && (
-                            <span className="ml-1 text-amber-600 dark:text-amber-400">
-                              • L{profile.discoveryLevel}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      </Link>
                       <button
                         onClick={() => removeProfile(profile.profileId!, true)}
                         className="shrink-0 cursor-pointer rounded p-1 hover:bg-amber-100 dark:hover:bg-amber-900/40"
@@ -887,30 +931,59 @@ function ClusterPageContent() {
               </div>
             )}
 
-            {/* Expansion depth control */}
+            {/* Scan settings */}
             {profiles.length >= MIN_PROFILES && (
-              <div className="space-y-2 pt-2 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    Network Expansion Depth
+              <div className="space-y-4 pt-2 border-t">
+                {/* Expansion depth control */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-muted-foreground">
+                      Network Expansion Depth
+                    </div>
+                    <div className="text-sm font-medium">
+                      {expansionDepth} level{expansionDepth > 1 ? "s" : ""}
+                    </div>
                   </div>
-                  <div className="text-sm font-medium">
-                    {expansionDepth} level{expansionDepth > 1 ? "s" : ""}
+                  <input
+                    type="range"
+                    min="1"
+                    max={MAX_EXPANSION_DEPTH}
+                    value={expansionDepth}
+                    onChange={(e) => setExpansionDepth(Number(e.target.value))}
+                    className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                    disabled={investigating}
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>1 (Direct only)</span>
+                    <span>2 (2nd degree)</span>
+                    <span>3 (Deep scan)</span>
                   </div>
                 </div>
-                <input
-                  type="range"
-                  min="1"
-                  max={MAX_EXPANSION_DEPTH}
-                  value={expansionDepth}
-                  onChange={(e) => setExpansionDepth(Number(e.target.value))}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
-                  disabled={investigating}
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>1 (Direct only)</span>
-                  <span>2 (2nd degree)</span>
-                  <span>3 (Deep scan)</span>
+
+                {/* Min connections control */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-muted-foreground">
+                      Min Connections to Discover
+                    </div>
+                    <div className="text-sm font-medium">
+                      {minConnections}+ profiles
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="3"
+                    value={minConnections}
+                    onChange={(e) => setMinConnections(Number(e.target.value))}
+                    className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                    disabled={investigating}
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>1 (All connected)</span>
+                    <span>2 (Shared)</span>
+                    <span>3 (Strong overlap)</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -924,7 +997,11 @@ function ClusterPageContent() {
               {investigating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {currentLevel > 0 ? `Scanning level ${currentLevel}...` : "Starting..."}
+                  {currentLevel > expansionDepth
+                    ? "Fetching inter-connections..."
+                    : currentLevel > 0
+                    ? `Scanning level ${currentLevel}...`
+                    : "Starting..."}
                 </>
               ) : (
                 <>
@@ -997,52 +1074,118 @@ function ClusterPageContent() {
                     profiles={allProfiles}
                     reviews={reviews}
                     vouches={vouches}
+                    showOnlyBidirectional={showOnlyBidirectional}
                   />
                 )}
               </CardContent>
             </Card>
 
             {/* Profile List */}
-            {allProfiles.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">Connected Profiles ({allProfiles.length})</CardTitle>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={copyAllProfiles}
-                      className="gap-2"
-                    >
-                      {copiedProfiles ? (
-                        <>
-                          <Check className="h-4 w-4 text-green-500" />
-                          Copied!
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-4 w-4" />
-                          Copy All
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  <CardDescription>
-                    All profiles in this cluster sorted by connection count
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
-                    {allProfiles
-                      .map(profile => ({
-                        ...profile,
-                        connectionCount: getConnectionCount(profile.profileId!)
-                      }))
-                      .sort((a, b) => b.connectionCount - a.connectionCount)
-                      .map((profile) => (
-                        <div
+            {allProfiles.length > 0 && (() => {
+              // Calculate connection counts and bidirectional info
+              const profilesWithCounts = allProfiles
+                .map(profile => {
+                  const details = getConnectionDetails(profile.profileId!);
+                  return {
+                    ...profile,
+                    connectionCount: getConnectionCount(profile.profileId!),
+                    given: details.given,
+                    received: details.received,
+                    isBidirectional: details.isBidirectional
+                  };
+                })
+                .sort((a, b) => b.connectionCount - a.connectionCount);
+
+              const maxConnections = profilesWithCounts[0]?.connectionCount || 0;
+              const filteredProfiles = profilesWithCounts.filter(
+                p => p.connectionCount >= minConnectionsToShow &&
+                     (!showOnlyBidirectional || p.isBidirectional)
+              );
+
+              return (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">
+                        Connected Profiles ({filteredProfiles.length}
+                        {(minConnectionsToShow > 0 || showOnlyBidirectional) && ` of ${allProfiles.length}`})
+                      </CardTitle>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const urls = filteredProfiles
+                            .map(p => p.links?.profile || `https://ethos.network/profile/${p.profileId}`)
+                            .join("\n");
+                          navigator.clipboard.writeText(urls);
+                          setCopiedProfiles(true);
+                          setTimeout(() => setCopiedProfiles(false), 2000);
+                        }}
+                        className="gap-2"
+                      >
+                        {copiedProfiles ? (
+                          <>
+                            <Check className="h-4 w-4 text-green-500" />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4" />
+                            Copy All
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <CardDescription>
+                      Profiles sorted by connection count. Filter to find core cluster members.
+                    </CardDescription>
+
+                    {/* Filters */}
+                    <div className="pt-3 space-y-4">
+                      {/* Bidirectional filter toggle */}
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showOnlyBidirectional}
+                          onChange={(e) => setShowOnlyBidirectional(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium">Participants only</span>
+                          <span className="block text-xs text-muted-foreground">
+                            Hide profiles that only received reviews (likely targets, not cluster members)
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* Min connections slider */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Min connections to show</span>
+                          <span className="font-medium">{minConnectionsToShow}+</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max={Math.max(50, Math.floor(maxConnections / 2))}
+                          value={minConnectionsToShow}
+                          onChange={(e) => setMinConnectionsToShow(Number(e.target.value))}
+                          className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>All</span>
+                          <span>Core cluster</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {filteredProfiles.map((profile) => (
+                        <Link
                           key={profile.profileId}
-                          className={`flex items-center gap-3 p-3 rounded-lg border ${
+                          href={`/${encodeURIComponent(profile.username || profile.profileId!.toString())}`}
+                          className={`flex items-center gap-3 p-3 rounded-lg border hover:opacity-80 transition-opacity ${
                             profile.isDiscovered
                               ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800"
                               : "bg-background"
@@ -1075,14 +1218,26 @@ function ClusterPageContent() {
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold">{profile.connectionCount}</div>
-                            <div className="text-xs text-muted-foreground">connections</div>
+                            <div className="text-xs text-muted-foreground">
+                              <span className="text-green-600 dark:text-green-400">{profile.given}→</span>
+                              {" / "}
+                              <span className="text-blue-600 dark:text-blue-400">←{profile.received}</span>
+                            </div>
                           </div>
-                        </div>
+                        </Link>
                       ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                      {filteredProfiles.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground">
+                          No profiles match the filter.
+                          {showOnlyBidirectional && " Try unchecking 'Participants only' or"}
+                          {!showOnlyBidirectional && " Try"} lowering the minimum connections.
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </>
         )}
       </div>

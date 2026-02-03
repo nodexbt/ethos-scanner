@@ -45,6 +45,8 @@ interface ClusterMapProps {
   profiles: EthosProfile[];
   reviews: ReviewActivity[];
   vouches: Vouch[];
+  showOnlyBidirectional?: boolean;
+  maxNodes?: number;
 }
 
 interface Node extends d3.SimulationNodeDatum {
@@ -70,7 +72,9 @@ interface Triangle {
   nodes: [Node, Node, Node];
 }
 
-export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
+const MAX_NODES_DEFAULT = 150;
+
+export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional = false, maxNodes = MAX_NODES_DEFAULT }: ClusterMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -117,9 +121,56 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
     const g = svg.append("g");
     const defs = svg.append("defs");
 
-    // Build nodes from profiles
+    // Filter profiles based on bidirectional setting
+    // When showOnlyBidirectional is true, only include profiles that both gave AND received reviews
+    let filteredProfiles = profiles;
+    if (showOnlyBidirectional) {
+      const givenReviews = new Set<number>();
+      const receivedReviews = new Set<number>();
+
+      reviews.forEach((review) => {
+        if (review.author.profileId) givenReviews.add(review.author.profileId);
+        if (review.subject.profileId) receivedReviews.add(review.subject.profileId);
+      });
+
+      filteredProfiles = profiles.filter((profile) => {
+        const profileId = profile.profileId!;
+        return givenReviews.has(profileId) && receivedReviews.has(profileId);
+      });
+    }
+
+    // Limit to most connected profiles for performance
+    if (filteredProfiles.length > maxNodes) {
+      // Calculate connection count for each profile
+      const connectionCounts = new Map<number, number>();
+      filteredProfiles.forEach(p => connectionCounts.set(p.profileId!, 0));
+
+      reviews.forEach(r => {
+        if (connectionCounts.has(r.author.profileId)) {
+          connectionCounts.set(r.author.profileId, connectionCounts.get(r.author.profileId)! + 1);
+        }
+        if (connectionCounts.has(r.subject.profileId)) {
+          connectionCounts.set(r.subject.profileId, connectionCounts.get(r.subject.profileId)! + 1);
+        }
+      });
+      vouches.forEach(v => {
+        if (connectionCounts.has(v.authorProfileId)) {
+          connectionCounts.set(v.authorProfileId, connectionCounts.get(v.authorProfileId)! + 1);
+        }
+        if (connectionCounts.has(v.subjectProfileId)) {
+          connectionCounts.set(v.subjectProfileId, connectionCounts.get(v.subjectProfileId)! + 1);
+        }
+      });
+
+      // Sort by connection count and take top N
+      filteredProfiles = filteredProfiles
+        .sort((a, b) => (connectionCounts.get(b.profileId!) || 0) - (connectionCounts.get(a.profileId!) || 0))
+        .slice(0, maxNodes);
+    }
+
+    // Build nodes from filtered profiles
     const nodeMap = new Map<string, Node>();
-    profiles.forEach((profile) => {
+    filteredProfiles.forEach((profile) => {
       const id = profile.profileId!.toString();
       nodeMap.set(id, {
         id,
@@ -268,7 +319,7 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
     // Triangle group (behind everything)
     const triangleGroup = g.append("g").attr("class", "triangles").lower();
 
-    // Create force simulation
+    // Create force simulation with generous spacing
     const simulation = d3
       .forceSimulation(nodes)
       .alphaDecay(0.05)
@@ -278,11 +329,11 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
         d3
           .forceLink<Node, Link>(links)
           .id((d) => d.id)
-          .distance(150)
+          .distance(250)
       )
-      .force("charge", d3.forceManyBody().strength(-500))
+      .force("charge", d3.forceManyBody().strength(-1200))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(60));
+      .force("collision", d3.forceCollide().radius(100));
 
     // Create links
     const link = g
@@ -293,9 +344,9 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
       .enter()
       .append("line")
       .attr("stroke", (d) => getLinkColor(d))
-      .attr("stroke-opacity", 0.7)
-      .attr("stroke-width", 2.5)
-      .attr("stroke-dasharray", (d) => (d.type === "vouch" ? "5,5" : "none"));
+      .attr("stroke-opacity", 0.6)
+      .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", (d) => (d.type === "vouch" ? "4,4" : "none"));
 
     // Create arrow markers
     const arrowMarkers = g
@@ -340,20 +391,19 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
           })
       );
 
-    // Add circles - color based on discovery level
-    // Level 0 (submitted) = blue, Level 1 = amber, Level 2 = orange, Level 3 = red-orange
-    const getNodeColor = (level: number) => {
-      if (level === 0) return "#3b82f6"; // Blue - submitted
-      if (level === 1) return "#f59e0b"; // Amber - 1st degree
-      if (level === 2) return "#f97316"; // Orange - 2nd degree
-      return "#ea580c"; // Deep orange - 3rd+ degree
+    // Add circles - color based on Ethos score
+    const getScoreColor = (score: number) => {
+      if (score < 1200) return "#ca8a04"; // Yellow - Low score
+      if (score < 1400) return "#9ca3af"; // Gray - Neutral
+      if (score < 2000) return "#3b82f6"; // Blue - Good
+      return "#16a34a"; // Green - Excellent
     };
 
     nodeGroups
       .append("circle")
       .attr("r", 30)
-      .attr("fill", (d) => getNodeColor(d.discoveryLevel))
-      .attr("stroke", (d) => getNodeColor(d.discoveryLevel))
+      .attr("fill", (d) => getScoreColor(d.score))
+      .attr("stroke", (d) => getScoreColor(d.score))
       .attr("stroke-width", (d) => d.isDiscovered ? 4 : 2)
       .attr("stroke-dasharray", (d) => d.isDiscovered ? "5,3" : "none")
       .attr("opacity", 0.9);
@@ -408,7 +458,7 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
       .append("text")
       .attr("dy", 70)
       .attr("text-anchor", "middle")
-      .attr("fill", (d) => getNodeColor(d.discoveryLevel))
+      .attr("fill", "#f59e0b") // Amber for discovered profiles
       .attr("font-size", "9px")
       .attr("font-weight", "bold")
       .text((d) => `L${d.discoveryLevel} DISCOVERED`);
@@ -435,8 +485,8 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
           .attr("x2", (d) => d.x2)
           .attr("y2", (d) => d.y2)
           .attr("stroke", "#ef4444")
-          .attr("stroke-width", 4)
-          .attr("stroke-opacity", 0.5);
+          .attr("stroke-width", 2)
+          .attr("stroke-opacity", 0.4);
       } else {
         triangleGroup.selectAll("line.triangle-edge").remove();
       }
@@ -473,7 +523,7 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
     return () => {
       simulation.stop();
     };
-  }, [mounted, profiles, reviews, vouches, showReviews, showVouches, showTriangles, isFullscreen, theme, router]);
+  }, [mounted, profiles, reviews, vouches, showReviews, showVouches, showTriangles, showOnlyBidirectional, isFullscreen, theme, router]);
 
   const toggleFullscreen = () => setIsFullscreen(!isFullscreen);
 
@@ -508,7 +558,7 @@ export function ClusterMap({ profiles, reviews, vouches }: ClusterMapProps) {
           <div className="flex items-center justify-between p-2 border-b">
             <div className="flex items-center gap-4">
               <div className="text-sm font-medium">
-                Cluster Map: {profiles.length} profiles, {reviews.length + vouches.length} connections
+                Cluster Map: {profiles.length} profiles{showOnlyBidirectional && " (participants only)"}, {reviews.length + vouches.length} connections
               </div>
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-2 cursor-pointer text-xs">
