@@ -111,7 +111,8 @@ interface Vouch {
 const MIN_PROFILES = 2;
 const DEFAULT_MIN_CONNECTIONS = 2; // Default minimum connections to cluster profiles to auto-discover
 const STORAGE_KEY = "ethos-cluster-profiles";
-const MAX_EXPANSION_DEPTH = 3;
+const MAX_EXPANSION_DEPTH = 1; // Only level 1 for now
+const MAX_DISCOVERED_PROFILES = 100; // Limit discovered profiles to top 100 most connected
 const REVIEWS_BATCH_SIZE = 100; // Fetch reviews in batches of 100 to be gentle on the API
 const MAX_REVIEWS_PER_PROFILE = 1000; // Maximum reviews to fetch per profile
 
@@ -607,17 +608,25 @@ function ClusterPageContent() {
 
         // Find new profiles connected to N+ known profiles that have a username
         // Only profiles with usernames can be fetched properly
-        const discoveredWithUsernames: { id: number; username: string }[] = [];
+        const discoveredWithUsernames: { id: number; username: string; connectionCount: number }[] = [];
         externalConnections.forEach((data, externalId) => {
           if (data.connectedTo.size >= minConnections && !allKnownIds.has(externalId)) {
             // Only include profiles with valid profileId and a username
             if (externalId > 0 && data.username) {
-              discoveredWithUsernames.push({ id: externalId, username: data.username });
+              discoveredWithUsernames.push({
+                id: externalId,
+                username: data.username,
+                connectionCount: data.connectedTo.size
+              });
             }
           }
         });
 
-        if (discoveredWithUsernames.length === 0) {
+        // Sort by connection count and limit to top N most connected
+        discoveredWithUsernames.sort((a, b) => b.connectionCount - a.connectionCount);
+        const limitedDiscovered = discoveredWithUsernames.slice(0, MAX_DISCOVERED_PROFILES);
+
+        if (limitedDiscovered.length === 0) {
           // No more profiles to discover, stop expansion early
           break;
         }
@@ -625,7 +634,7 @@ function ClusterPageContent() {
         // Fetch full profile data using Twitter usernames
         // This gets accurate scores and filters out uninitialized profiles
         const newProfiles: EthosProfile[] = [];
-        await Promise.all(discoveredWithUsernames.map(async ({ id, username }) => {
+        await Promise.all(limitedDiscovered.map(async ({ id, username }) => {
           try {
             const response = await fetch(
               `https://api.ethos.network/api/v2/user/by/x/${username}`,
@@ -934,32 +943,6 @@ function ClusterPageContent() {
             {/* Scan settings */}
             {profiles.length >= MIN_PROFILES && (
               <div className="space-y-4 pt-2 border-t">
-                {/* Expansion depth control */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-muted-foreground">
-                      Network Expansion Depth
-                    </div>
-                    <div className="text-sm font-medium">
-                      {expansionDepth} level{expansionDepth > 1 ? "s" : ""}
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max={MAX_EXPANSION_DEPTH}
-                    value={expansionDepth}
-                    onChange={(e) => setExpansionDepth(Number(e.target.value))}
-                    className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
-                    disabled={investigating}
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>1 (Direct only)</span>
-                    <span>2 (2nd degree)</span>
-                    <span>3 (Deep scan)</span>
-                  </div>
-                </div>
-
                 {/* Min connections control */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
