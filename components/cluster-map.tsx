@@ -123,6 +123,7 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
 
     // Filter profiles based on bidirectional setting
     // When showOnlyBidirectional is true, only include profiles that both gave AND received reviews
+    // But always include submitted profiles (not discovered) so user can see who's connected vs not
     let filteredProfiles = profiles;
     if (showOnlyBidirectional) {
       const givenReviews = new Set<number>();
@@ -135,6 +136,8 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
 
       filteredProfiles = profiles.filter((profile) => {
         const profileId = profile.profileId!;
+        // Always show submitted profiles, only filter discovered profiles
+        if (!profile.isDiscovered) return true;
         return givenReviews.has(profileId) && receivedReviews.has(profileId);
       });
     }

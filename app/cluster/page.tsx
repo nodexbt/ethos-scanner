@@ -1052,9 +1052,12 @@ function ClusterPageContent() {
                 .sort((a, b) => b.connectionCount - a.connectionCount);
 
               const maxConnections = profilesWithCounts[0]?.connectionCount || 0;
+              // Always show submitted profiles, only filter discovered profiles
               const filteredProfiles = profilesWithCounts.filter(
-                p => p.connectionCount >= minConnectionsToShow &&
-                     (!showOnlyBidirectional || p.isBidirectional)
+                p => !p.isDiscovered || (
+                  p.connectionCount >= minConnectionsToShow &&
+                  (!showOnlyBidirectional || p.isBidirectional)
+                )
               );
 
               return (
