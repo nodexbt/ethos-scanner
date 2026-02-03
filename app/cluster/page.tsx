@@ -109,12 +109,12 @@ interface Vouch {
 }
 
 const MIN_PROFILES = 2;
-const DEFAULT_MIN_CONNECTIONS = 2; // Default minimum connections to cluster profiles to auto-discover
+const DEFAULT_MIN_CONNECTIONS = 15; // Default minimum connections to cluster profiles to auto-discover
 const STORAGE_KEY = "ethos-cluster-profiles";
 const MAX_EXPANSION_DEPTH = 1; // Only level 1 for now
 const MAX_DISCOVERED_PROFILES = 100; // Limit discovered profiles to top 100 most connected
 const REVIEWS_BATCH_SIZE = 100; // Fetch reviews in batches of 100 to be gentle on the API
-const MAX_REVIEWS_PER_PROFILE = 1000; // Maximum reviews to fetch per profile
+const MAX_REVIEWS_PER_PROFILE = 300; // Maximum reviews to fetch per profile
 
 function ClusterPageContent() {
   const router = useRouter();
@@ -475,9 +475,6 @@ function ClusterPageContent() {
         if (reviews.length < REVIEWS_BATCH_SIZE) break;
 
         offset += REVIEWS_BATCH_SIZE;
-
-        // Small delay between batches to be gentle on the API
-        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (err) {
         console.error("Error fetching reviews batch", err);
         break;
@@ -691,35 +688,20 @@ function ClusterPageContent() {
         profilesToScan = fetchedIds;
       }
 
-      // Final pass: fetch inter-review connections between all discovered profiles
-      // This catches reviews between profiles discovered at the same level
+      // Final pass: Fetch inter-connections between all discovered profiles
+      // This finds connections between discovered profiles themselves
       if (allDiscovered.length > 0) {
-        setCurrentLevel(expansionDepth + 1);
+        setCurrentLevel(expansionDepth + 1); // Indicate final pass in progress
         const discoveredIds = allDiscovered.map(p => p.profileId!);
-
-        await Promise.all(discoveredIds.map(async (profileId) => {
-          const userkey = `profileId:${profileId}`;
-
-          // Fetch reviews given by this discovered profile (paginated)
-          try {
-            const givenReviews = await fetchReviewsPaginated(
-              "https://api.ethos.network/api/v2/activities/profile/given",
-              userkey
-            );
-            givenReviews.forEach((review: ReviewActivity) => {
-              const targetId = review.subject.profileId;
-              if (!targetId) return;
-              // Only add if target is in our cluster (submitted or discovered)
-              if (allKnownIds.has(targetId)) {
-                if (!allReviews.some(r => r.data.id === review.data.id)) {
-                  allReviews.push(review);
-                }
-              }
-            });
-          } catch (err) {
-            console.error("Error fetching inter-connections", profileId, err);
+        const { reviews: interReviews } = await fetchReviewsForProfiles(
+          discoveredIds,
+          allKnownIds
+        );
+        interReviews.forEach(r => {
+          if (!allReviews.some(existing => existing.data.id === r.data.id)) {
+            allReviews.push(r);
           }
-        }));
+        });
       }
 
       setDiscoveredProfiles(allDiscovered);
@@ -955,22 +937,22 @@ function ClusterPageContent() {
                       Min Connections to Discover
                     </div>
                     <div className="text-sm font-medium">
-                      {minConnections}+ profiles
+                      {minConnections}+ connections
                     </div>
                   </div>
                   <input
                     type="range"
-                    min="1"
-                    max="3"
+                    min="2"
+                    max="30"
                     value={minConnections}
                     onChange={(e) => setMinConnections(Number(e.target.value))}
                     className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
                     disabled={investigating}
                   />
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>1 (All connected)</span>
-                    <span>2 (Shared)</span>
-                    <span>3 (Strong overlap)</span>
+                    <span>2 (Loose)</span>
+                    <span>15 (Core)</span>
+                    <span>30 (Tight)</span>
                   </div>
                 </div>
               </div>
