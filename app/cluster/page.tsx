@@ -109,7 +109,7 @@ interface Vouch {
 }
 
 const MIN_PROFILES = 2;
-const DEFAULT_MIN_CONNECTIONS = 15; // Default minimum connections to cluster profiles to auto-discover
+const DEFAULT_MIN_CONNECTIONS = 3; // Default minimum connections to cluster profiles to auto-discover
 const STORAGE_KEY = "ethos-cluster-profiles";
 const MAX_EXPANSION_DEPTH = 1; // Only level 1 for now
 const MAX_DISCOVERED_PROFILES = 100; // Limit discovered profiles to top 100 most connected
@@ -942,17 +942,17 @@ function ClusterPageContent() {
                   </div>
                   <input
                     type="range"
-                    min="5"
-                    max="30"
+                    min="2"
+                    max="5"
                     value={minConnections}
                     onChange={(e) => setMinConnections(Number(e.target.value))}
                     className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
                     disabled={investigating}
                   />
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>5 (Loose)</span>
-                    <span>15 (Core)</span>
-                    <span>30 (Tight)</span>
+                    <span>2 (Loose)</span>
+                    <span>3</span>
+                    <span>5 (Tight)</span>
                   </div>
                 </div>
               </div>
