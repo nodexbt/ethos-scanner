@@ -128,7 +128,7 @@ function ClusterPageContent() {
   const [reviews, setReviews] = useState<ReviewActivity[]>([]);
   const [vouches, setVouches] = useState<Vouch[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [expansionDepth, setExpansionDepth] = useState(2); // How many levels deep to expand
+  const [expansionDepth] = useState(MAX_EXPANSION_DEPTH); // How many levels deep to expand (fixed to 1 for now)
   const [currentLevel, setCurrentLevel] = useState(0); // Progress indicator
   const [minConnections, setMinConnections] = useState(DEFAULT_MIN_CONNECTIONS); // Min connections to discover
   const [loadingFromUrl, setLoadingFromUrl] = useState(false);
@@ -143,6 +143,16 @@ function ClusterPageContent() {
   // Helper to check if string is ethereum address
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
+  };
+
+  // Helper to get score-based border color (matches Ethos Network colors)
+  const getScoreBorderColor = (score: number): string => {
+    if (score < 1200) return "ring-yellow-600"; // Yellow - Low score
+    if (score < 1400) return "ring-gray-400"; // Gray - Neutral
+    if (score < 1600) return "ring-sky-400"; // Light blue
+    if (score < 1800) return "ring-blue-500"; // Medium blue
+    if (score < 2000) return "ring-blue-700"; // Dark blue
+    return "ring-green-600"; // Green - Excellent
   };
 
   // Helper to extract identifier from URL (Ethos profile URL or Twitter URL)
@@ -861,7 +871,7 @@ function ClusterPageContent() {
                           <img
                             src={profile.avatarUrl}
                             alt={profile.displayName}
-                            className="h-6 w-6 shrink-0 rounded-full"
+                            className={`h-6 w-6 shrink-0 rounded-full ring-2 ${getScoreBorderColor(profile.score)}`}
                           />
                         )}
                         <div className="min-w-0">
@@ -910,7 +920,7 @@ function ClusterPageContent() {
                           <img
                             src={profile.avatarUrl}
                             alt={profile.displayName}
-                            className="h-6 w-6 shrink-0 rounded-full ring-2 ring-amber-400"
+                            className={`h-6 w-6 shrink-0 rounded-full ring-2 ${getScoreBorderColor(profile.score)}`}
                           />
                         )}
                         <div className="min-w-0">
@@ -919,11 +929,6 @@ function ClusterPageContent() {
                           </div>
                           <div className="truncate text-xs text-muted-foreground">
                             Score: {profile.score}
-                            {profile.discoveryLevel && (
-                              <span className="ml-1 text-amber-600 dark:text-amber-400">
-                                • L{profile.discoveryLevel}
-                              </span>
-                            )}
                           </div>
                         </div>
                       </Link>
@@ -1178,9 +1183,7 @@ function ClusterPageContent() {
                             <img
                               src={profile.avatarUrl}
                               alt={profile.displayName}
-                              className={`h-10 w-10 rounded-full ${
-                                profile.isDiscovered ? "ring-2 ring-amber-400" : ""
-                              }`}
+                              className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(profile.score)}`}
                             />
                           )}
                           <div className="flex-1 min-w-0">
@@ -1188,11 +1191,6 @@ function ClusterPageContent() {
                               <span className="font-medium truncate">
                                 {profile.displayName}
                               </span>
-                              {profile.isDiscovered && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">
-                                  L{profile.discoveryLevel}
-                                </span>
-                              )}
                             </div>
                             <div className="text-sm text-muted-foreground">
                               {profile.username && <span>@{profile.username} · </span>}

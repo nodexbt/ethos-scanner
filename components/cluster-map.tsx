@@ -72,7 +72,7 @@ interface Triangle {
   nodes: [Node, Node, Node];
 }
 
-const MAX_NODES_DEFAULT = 150;
+const MAX_NODES_DEFAULT = 100;
 
 export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional = false, maxNodes = MAX_NODES_DEFAULT }: ClusterMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -395,7 +395,9 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     const getScoreColor = (score: number) => {
       if (score < 1200) return "#ca8a04"; // Yellow - Low score
       if (score < 1400) return "#9ca3af"; // Gray - Neutral
-      if (score < 2000) return "#3b82f6"; // Blue - Good
+      if (score < 1600) return "#38bdf8"; // Light blue (sky-400)
+      if (score < 1800) return "#3b82f6"; // Medium blue (blue-500)
+      if (score < 2000) return "#1d4ed8"; // Dark blue (blue-700)
       return "#16a34a"; // Green - Excellent
     };
 
