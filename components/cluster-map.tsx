@@ -143,10 +143,14 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     }
 
     // Limit to most connected profiles for performance
-    if (filteredProfiles.length > maxNodes) {
-      // Calculate connection count for each profile
+    // But always include submitted profiles (not discovered)
+    const submittedProfiles = filteredProfiles.filter(p => !p.isDiscovered);
+    const discoveredOnly = filteredProfiles.filter(p => p.isDiscovered);
+
+    if (filteredProfiles.length > maxNodes && discoveredOnly.length > 0) {
+      // Calculate connection count for discovered profiles only
       const connectionCounts = new Map<number, number>();
-      filteredProfiles.forEach(p => connectionCounts.set(p.profileId!, 0));
+      discoveredOnly.forEach(p => connectionCounts.set(p.profileId!, 0));
 
       reviews.forEach(r => {
         if (connectionCounts.has(r.author.profileId)) {
@@ -165,10 +169,13 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
         }
       });
 
-      // Sort by connection count and take top N
-      filteredProfiles = filteredProfiles
+      // Sort discovered by connection count and take top N (minus submitted count)
+      const maxDiscovered = Math.max(0, maxNodes - submittedProfiles.length);
+      const topDiscovered = discoveredOnly
         .sort((a, b) => (connectionCounts.get(b.profileId!) || 0) - (connectionCounts.get(a.profileId!) || 0))
-        .slice(0, maxNodes);
+        .slice(0, maxDiscovered);
+
+      filteredProfiles = [...submittedProfiles, ...topDiscovered];
     }
 
     // Build nodes from filtered profiles
