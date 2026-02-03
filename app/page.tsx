@@ -11,7 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Search, X } from "lucide-react";
+import { Search, X, Users } from "lucide-react";
+import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 interface RecentSearch {
@@ -154,6 +155,21 @@ export default function Home() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Cluster Investigation Link */}
+        <Card>
+          <CardContent className="pt-6">
+            <Link href="/cluster">
+              <Button variant="outline" className="w-full gap-2">
+                <Users className="h-4 w-4" />
+                Cluster Investigation
+                <span className="text-xs text-muted-foreground ml-2">
+                  Investigate connections between multiple profiles
+                </span>
+              </Button>
+            </Link>
           </CardContent>
         </Card>
 
