@@ -873,7 +873,7 @@ function ClusterPageContent() {
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {discoveredProfiles.map((profile) => (
+                  {[...discoveredProfiles].sort((a, b) => b.score - a.score).map((profile) => (
                     <div
                       key={profile.profileId}
                       className="group flex items-center gap-2 rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm"
