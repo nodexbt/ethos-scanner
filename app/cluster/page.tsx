@@ -109,7 +109,7 @@ interface Vouch {
 }
 
 const MIN_PROFILES = 2;
-const DEFAULT_MIN_CONNECTIONS = 3; // Default minimum connections to cluster profiles to auto-discover
+const DEFAULT_MIN_CONNECTIONS = 5; // Default minimum connections to cluster profiles to auto-discover
 const STORAGE_KEY = "ethos-cluster-profiles";
 const MAX_EXPANSION_DEPTH = 1; // Only level 1 for now
 const MAX_DISCOVERED_PROFILES = 100; // Limit discovered profiles to top 100 most connected
@@ -134,7 +134,7 @@ function ClusterPageContent() {
   const [loadingFromUrl, setLoadingFromUrl] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedProfiles, setCopiedProfiles] = useState(false);
-  const [minConnectionsToShow, setMinConnectionsToShow] = useState(0); // Filter for profile list display (will be set to 20% after investigation)
+  const [minConnectionsToShow, setMinConnectionsToShow] = useState(0); // Filter for profile list display (defaults to show all)
   const [showOnlyBidirectional, setShowOnlyBidirectional] = useState(true); // Filter to show only profiles that both gave AND received (enabled by default)
 
   // Combined profiles for visualization
@@ -708,21 +708,6 @@ function ClusterPageContent() {
       setReviews(allReviews);
       setVouches([]); // Vouches not used for cluster discovery
       setInvestigated(true);
-
-      // Calculate max connections and set slider to 20%
-      const allProfileIds = new Set([...profiles.map(p => p.profileId!), ...allDiscovered.map(p => p.profileId!)]);
-      const connectionCounts = new Map<number, number>();
-      allProfileIds.forEach(id => connectionCounts.set(id, 0));
-      allReviews.forEach(r => {
-        if (connectionCounts.has(r.author.profileId)) {
-          connectionCounts.set(r.author.profileId, connectionCounts.get(r.author.profileId)! + 1);
-        }
-        if (connectionCounts.has(r.subject.profileId)) {
-          connectionCounts.set(r.subject.profileId, connectionCounts.get(r.subject.profileId)! + 1);
-        }
-      });
-      const maxConn = Math.max(...connectionCounts.values(), 0);
-      setMinConnectionsToShow(Math.floor(maxConn * 0.2));
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
