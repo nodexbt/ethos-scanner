@@ -178,10 +178,13 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       filteredProfiles = [...submittedProfiles, ...topDiscovered];
     }
 
-    // Build nodes from filtered profiles
+    // Build nodes from filtered profiles with initial random positions
     const nodeMap = new Map<string, Node>();
-    filteredProfiles.forEach((profile) => {
+    filteredProfiles.forEach((profile, i) => {
       const id = profile.profileId!.toString();
+      // Spread nodes in a circle initially for better layout starting point
+      const angle = (i / filteredProfiles.length) * 2 * Math.PI;
+      const radius = Math.min(width, height) * 0.3;
       nodeMap.set(id, {
         id,
         profileId: profile.profileId!,
@@ -191,6 +194,8 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
         score: profile.score,
         isDiscovered: profile.isDiscovered || false,
         discoveryLevel: profile.discoveryLevel || 0,
+        x: width / 2 + radius * Math.cos(angle),
+        y: height / 2 + radius * Math.sin(angle),
       });
     });
 
@@ -352,7 +357,31 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       simulation.tick();
     }
 
-    // Create links
+    // Draw initial triangles with pre-computed positions
+    if (showTriangles && triangles.length > 0) {
+      const triangleEdgeData: { x1: number; y1: number; x2: number; y2: number }[] = [];
+      triangles.forEach((t) => {
+        const [n1, n2, n3] = t.nodes;
+        triangleEdgeData.push({ x1: n1.x ?? 0, y1: n1.y ?? 0, x2: n2.x ?? 0, y2: n2.y ?? 0 });
+        triangleEdgeData.push({ x1: n2.x ?? 0, y1: n2.y ?? 0, x2: n3.x ?? 0, y2: n3.y ?? 0 });
+        triangleEdgeData.push({ x1: n3.x ?? 0, y1: n3.y ?? 0, x2: n1.x ?? 0, y2: n1.y ?? 0 });
+      });
+
+      triangleGroup
+        .selectAll("line.triangle-edge")
+        .data(triangleEdgeData)
+        .join("line")
+        .attr("class", "triangle-edge")
+        .attr("x1", (d) => d.x1)
+        .attr("y1", (d) => d.y1)
+        .attr("x2", (d) => d.x2)
+        .attr("y2", (d) => d.y2)
+        .attr("stroke", "#ef4444")
+        .attr("stroke-width", 2)
+        .attr("stroke-opacity", 0.4);
+    }
+
+    // Create links with pre-computed positions
     const link = g
       .append("g")
       .attr("class", "links")
@@ -363,9 +392,13 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       .attr("stroke", (d) => getLinkColor(d))
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", 1.5)
-      .attr("stroke-dasharray", (d) => (d.type === "vouch" ? "4,4" : "none"));
+      .attr("stroke-dasharray", (d) => (d.type === "vouch" ? "4,4" : "none"))
+      .attr("x1", (d) => (d.source as Node).x ?? 0)
+      .attr("y1", (d) => (d.source as Node).y ?? 0)
+      .attr("x2", (d) => (d.target as Node).x ?? 0)
+      .attr("y2", (d) => (d.target as Node).y ?? 0);
 
-    // Create arrow markers
+    // Create arrow markers with pre-computed positions
     const arrowMarkers = g
       .append("g")
       .attr("class", "arrow-markers")
@@ -375,9 +408,21 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       .append("path")
       .attr("d", "M-6,-4 L0,0 L-6,4 Z")
       .attr("fill", (d) => getLinkColor(d))
-      .attr("opacity", 0.8);
+      .attr("opacity", 0.8)
+      .attr("transform", (d) => {
+        const source = d.source as Node;
+        const target = d.target as Node;
+        const x1 = source.x ?? 0;
+        const y1 = source.y ?? 0;
+        const x2 = target.x ?? 0;
+        const y2 = target.y ?? 0;
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        const angle = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+        return `translate(${midX}, ${midY}) rotate(${angle})`;
+      });
 
-    // Create node groups
+    // Create node groups with pre-computed positions
     const nodeGroups = g
       .append("g")
       .attr("class", "nodes")
@@ -386,6 +431,7 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       .enter()
       .append("g")
       .attr("cursor", "pointer")
+      .attr("transform", (d) => `translate(${d.x ?? 0}, ${d.y ?? 0})`)
       .on("click", (_, d) => {
         router.push(`/${encodeURIComponent(d.username || d.id)}`);
       })
