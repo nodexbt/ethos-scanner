@@ -942,7 +942,7 @@ function ClusterPageContent() {
                   </div>
                   <input
                     type="range"
-                    min="2"
+                    min="5"
                     max="30"
                     value={minConnections}
                     onChange={(e) => setMinConnections(Number(e.target.value))}
@@ -950,7 +950,7 @@ function ClusterPageContent() {
                     disabled={investigating}
                   />
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>2 (Loose)</span>
+                    <span>5 (Loose)</span>
                     <span>15 (Core)</span>
                     <span>30 (Tight)</span>
                   </div>
