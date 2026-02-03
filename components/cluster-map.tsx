@@ -332,7 +332,8 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     // Create force simulation with generous spacing
     const simulation = d3
       .forceSimulation(nodes)
-      .alphaDecay(0.05)
+      .alphaDecay(0.1) // Faster decay for quicker settling
+      .alphaMin(0.01) // Stop earlier
       .velocityDecay(0.4)
       .force(
         "link",
@@ -343,7 +344,13 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       )
       .force("charge", d3.forceManyBody().strength(-1200))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(100));
+      .force("collision", d3.forceCollide().radius(80).iterations(1)); // Reduced radius and single iteration
+
+    // Pre-compute layout synchronously for instant rendering
+    simulation.stop();
+    for (let i = 0; i < 150; i++) {
+      simulation.tick();
+    }
 
     // Create links
     const link = g
