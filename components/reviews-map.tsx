@@ -6,6 +6,7 @@ import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
 import { useRouter } from "next/navigation";
+import { TriangleList } from "@/components/triangle-list";
 import {
   getCachedData,
   setCachedData,
@@ -82,6 +83,7 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   source: string | Node;
   target: string | Node;
   sentiment?: "positive" | "neutral" | "negative";
+  createdAt?: number;
   isPartOfTriangle?: boolean;
 }
 
@@ -98,24 +100,9 @@ interface SuspiciousAccount {
 interface Triangle {
   nodeIds: [string, string, string];
   nodes: [Node, Node, Node];
-  suspicionScore: number; // 0-3, higher = more suspicious
+  suspicionScore: number; // 0+, higher = more suspicious
   suspiciousAccounts: SuspiciousAccount[];
-}
-
-interface HubAccount {
-  nodeId: string;
-  name: string;
-  score: number;
-  triangleCount: number; // Number of triangles this account appears in
-}
-
-interface Cluster {
-  id: number;
-  triangles: Triangle[];
-  participants: Node[]; // All unique participants in the cluster
-  hubAccounts: HubAccount[]; // Accounts appearing in multiple triangles
-  suspicionScore: number; // Aggregate suspicion score
-  size: number; // Number of unique participants
+  timeSpanHours: number | null; // Duration between earliest and latest review in the triangle
 }
 
 // Performance limits
@@ -145,9 +132,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
   });
   const [hideIsolatedNodes, setHideIsolatedNodes] = useState(false);
   const [showTriangles, setShowTriangles] = useState(true);
-  const [triangleThreshold, setTriangleThreshold] = useState(1); // Minimum suspicion score to show
+  // Show all triangles (no threshold filtering)
   const [detectedTriangles, setDetectedTriangles] = useState<Triangle[]>([]);
-  const [detectedClusters, setDetectedClusters] = useState<Cluster[]>([]);
   const { theme } = useTheme();
   const router = useRouter();
 
@@ -943,31 +929,31 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           source: sourceId,
           target: targetId,
           sentiment: activity.data.score as "positive" | "neutral" | "negative",
+          createdAt: activity.data.createdAt,
           isPartOfTriangle: false,
         };
       });
 
     // Detect triangular cycles (A→B→C→A) - only positive reviews and no reciprocation
-    // Build a map of positive review connections only
+    // Only track positive review edges — per spec, only a positive reverse review
+    // should exclude a triangle (a negative/neutral reverse review is not reciprocation)
     const linkMap = new Map<string, Set<string>>();
-    const linkSentimentMap = new Map<string, "positive" | "neutral" | "negative">();
-    const allEdges = new Set<string>(); // Track all edges (any sentiment)
-    
+    const positiveEdges = new Set<string>();
+    const edgeCreatedAt = new Map<string, number>(); // Track review timestamps for time span analysis
+
     links.forEach((link) => {
       const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
       const targetId = typeof link.target === 'string' ? link.target : link.target.id;
       const edgeKey = `${sourceId}-${targetId}`;
-      
-      // Track all edges regardless of sentiment
-      allEdges.add(edgeKey);
-      
-      // Store sentiment for this edge
-      if (link.sentiment) {
-        linkSentimentMap.set(edgeKey, link.sentiment);
+
+      // Store timestamp for every edge
+      if (link.createdAt) {
+        edgeCreatedAt.set(edgeKey, link.createdAt);
       }
-      
-      // Only add to link map if it's a positive review
+
+      // Only track positive review edges
       if (link.sentiment === 'positive') {
+        positiveEdges.add(edgeKey);
         if (!linkMap.has(sourceId)) {
           linkMap.set(sourceId, new Set());
         }
@@ -1033,48 +1019,41 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     const triangles: Triangle[] = [];
     const triangleEdges = new Set<string>();
 
-    // Find all triangular cycles (only with positive reviews and no reciprocation)
+    // Find all triangular cycles (only with positive reviews and no positive reciprocation)
     nodes.forEach(nodeA => {
       const neighborsA = linkMap.get(nodeA.id);
       if (!neighborsA) return;
-      
+
       neighborsA.forEach(nodeBId => {
         const neighborsB = linkMap.get(nodeBId);
         if (!neighborsB) return;
-        
+
         neighborsB.forEach(nodeCId => {
           const neighborsC = linkMap.get(nodeCId);
           if (!neighborsC) return;
-          
+
           // Check if C points back to A (completing the triangle)
           if (neighborsC.has(nodeA.id)) {
-            // Verify all three edges are positive reviews
             const edge1Key = `${nodeA.id}-${nodeBId}`;
             const edge2Key = `${nodeBId}-${nodeCId}`;
             const edge3Key = `${nodeCId}-${nodeA.id}`;
-            
-            const sentiment1 = linkSentimentMap.get(edge1Key);
-            const sentiment2 = linkSentimentMap.get(edge2Key);
-            const sentiment3 = linkSentimentMap.get(edge3Key);
-            
-            // Check if any of the edges are reciprocated
-            const edge1Reciprocated = allEdges.has(`${nodeBId}-${nodeA.id}`);
-            const edge2Reciprocated = allEdges.has(`${nodeCId}-${nodeBId}`);
-            const edge3Reciprocated = allEdges.has(`${nodeA.id}-${nodeCId}`);
-            
-            // Only count as triangle if:
-            // 1. All three reviews are positive
-            // 2. None of the edges are reciprocated
-            if (sentiment1 === 'positive' && sentiment2 === 'positive' && sentiment3 === 'positive' &&
-                !edge1Reciprocated && !edge2Reciprocated && !edge3Reciprocated) {
-              // Found a triangle: A→B→C→A (all positive, no reciprocation)
+
+            // Check if any of the edges have a positive reciprocal review
+            // Only positive reverse reviews disqualify — a negative/neutral reverse
+            // review doesn't indicate a legitimate bidirectional relationship
+            const edge1Reciprocated = positiveEdges.has(`${nodeBId}-${nodeA.id}`);
+            const edge2Reciprocated = positiveEdges.has(`${nodeCId}-${nodeBId}`);
+            const edge3Reciprocated = positiveEdges.has(`${nodeA.id}-${nodeCId}`);
+
+            if (!edge1Reciprocated && !edge2Reciprocated && !edge3Reciprocated) {
+              // Found a triangle: A→B→C→A (all positive, no positive reciprocation)
               const sortedIds = [nodeA.id, nodeBId, nodeCId].sort();
               const triangleKey = sortedIds.join('-');
-              
+
               // Avoid duplicates by checking if we've already recorded this triangle
               if (!triangleEdges.has(triangleKey)) {
                 triangleEdges.add(triangleKey);
-                
+
                 const nodeB = nodeMap.get(nodeBId);
                 const nodeC = nodeMap.get(nodeCId);
                 if (nodeB && nodeC) {
@@ -1088,14 +1067,35 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                   if (suspicionB) suspiciousAccounts.push(suspicionB);
                   if (suspicionC) suspiciousAccounts.push(suspicionC);
 
-                  // Suspicion score: count of suspicious accounts in triangle (0-3)
-                  const suspicionScore = suspiciousAccounts.length;
+                  // Time span analysis: compute hours between earliest and latest review
+                  const timestamps = [
+                    edgeCreatedAt.get(edge1Key),
+                    edgeCreatedAt.get(edge2Key),
+                    edgeCreatedAt.get(edge3Key),
+                  ].filter((t): t is number => t != null);
+
+                  let timeSpanHours: number | null = null;
+                  if (timestamps.length === 3) {
+                    const minTime = Math.min(...timestamps);
+                    const maxTime = Math.max(...timestamps);
+                    timeSpanHours = Math.round((maxTime - minTime) / (1000 * 60 * 60) * 10) / 10;
+                  }
+
+                  // Suspicion score: suspicious accounts + time proximity bonus
+                  // Reviews within 48 hours = +2, within 7 days = +1
+                  let suspicionScore = suspiciousAccounts.length;
+                  if (timeSpanHours != null && timeSpanHours <= 48) {
+                    suspicionScore += 2;
+                  } else if (timeSpanHours != null && timeSpanHours <= 168) {
+                    suspicionScore += 1;
+                  }
 
                   triangles.push({
                     nodeIds: [nodeA.id, nodeBId, nodeCId],
                     nodes: [nodeA, nodeB, nodeC],
                     suspicionScore,
                     suspiciousAccounts,
+                    timeSpanHours,
                   });
 
                   // Mark edges as part of triangle
@@ -1120,138 +1120,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       }
     });
 
+    // Build set of node IDs participating in triangles (for layout separation)
+    const triangleNodeIds = new Set<string>();
+    triangles.forEach((t) => {
+      t.nodeIds.forEach((id) => triangleNodeIds.add(id));
+    });
+
     // Store detected triangles in state
     setDetectedTriangles(triangles);
-
-    // Cluster Detection: Group overlapping triangles into clusters
-    // Two triangles are connected if they share at least 1 node
-    const buildClusters = (triangleList: Triangle[]): Cluster[] => {
-      if (triangleList.length === 0) return [];
-
-      // Union-Find data structure for clustering
-      const parent = new Map<number, number>();
-      const rank = new Map<number, number>();
-
-      const find = (i: number): number => {
-        if (parent.get(i) !== i) {
-          parent.set(i, find(parent.get(i)!));
-        }
-        return parent.get(i)!;
-      };
-
-      const union = (i: number, j: number): void => {
-        const pi = find(i);
-        const pj = find(j);
-        if (pi === pj) return;
-
-        const ri = rank.get(pi) || 0;
-        const rj = rank.get(pj) || 0;
-
-        if (ri < rj) {
-          parent.set(pi, pj);
-        } else if (ri > rj) {
-          parent.set(pj, pi);
-        } else {
-          parent.set(pj, pi);
-          rank.set(pi, ri + 1);
-        }
-      };
-
-      // Initialize Union-Find
-      triangleList.forEach((_, idx) => {
-        parent.set(idx, idx);
-        rank.set(idx, 0);
-      });
-
-      // Build a map of nodeId -> triangle indices
-      const nodeToTriangles = new Map<string, number[]>();
-      triangleList.forEach((triangle, idx) => {
-        triangle.nodeIds.forEach(nodeId => {
-          if (!nodeToTriangles.has(nodeId)) {
-            nodeToTriangles.set(nodeId, []);
-          }
-          nodeToTriangles.get(nodeId)!.push(idx);
-        });
-      });
-
-      // Union triangles that share at least 1 node
-      nodeToTriangles.forEach((triangleIndices) => {
-        for (let i = 1; i < triangleIndices.length; i++) {
-          union(triangleIndices[0], triangleIndices[i]);
-        }
-      });
-
-      // Group triangles by their cluster root
-      const clusterMap = new Map<number, Triangle[]>();
-      triangleList.forEach((triangle, idx) => {
-        const root = find(idx);
-        if (!clusterMap.has(root)) {
-          clusterMap.set(root, []);
-        }
-        clusterMap.get(root)!.push(triangle);
-      });
-
-      // Build cluster objects
-      const clusters: Cluster[] = [];
-      let clusterId = 0;
-
-      clusterMap.forEach((clusterTriangles) => {
-        // Get all unique participants
-        const participantMap = new Map<string, Node>();
-        const nodeTriangleCount = new Map<string, number>();
-
-        clusterTriangles.forEach(triangle => {
-          triangle.nodes.forEach(node => {
-            participantMap.set(node.id, node);
-            nodeTriangleCount.set(node.id, (nodeTriangleCount.get(node.id) || 0) + 1);
-          });
-        });
-
-        const participants = Array.from(participantMap.values());
-
-        // Find hub accounts (appear in 2+ triangles within this cluster)
-        const hubAccounts: HubAccount[] = [];
-        nodeTriangleCount.forEach((count, nodeId) => {
-          if (count >= 2) {
-            const node = participantMap.get(nodeId)!;
-            hubAccounts.push({
-              nodeId,
-              name: node.name,
-              score: node.score,
-              triangleCount: count,
-            });
-          }
-        });
-
-        // Sort hubs by triangle count (most connected first)
-        hubAccounts.sort((a, b) => b.triangleCount - a.triangleCount);
-
-        // Calculate cluster suspicion score
-        // - Base: sum of triangle suspicion scores
-        // - Bonus: +2 for each hub account, +1 for each triangle beyond the first
-        const baseSuspicion = clusterTriangles.reduce((sum, t) => sum + t.suspicionScore, 0);
-        const hubBonus = hubAccounts.length * 2;
-        const sizeBonus = clusterTriangles.length - 1;
-        const suspicionScore = baseSuspicion + hubBonus + sizeBonus;
-
-        clusters.push({
-          id: clusterId++,
-          triangles: clusterTriangles,
-          participants,
-          hubAccounts,
-          suspicionScore,
-          size: participants.length,
-        });
-      });
-
-      // Sort clusters by suspicion score (highest first)
-      clusters.sort((a, b) => b.suspicionScore - a.suspicionScore);
-
-      return clusters;
-    };
-
-    const clusters = buildClusters(triangles);
-    setDetectedClusters(clusters);
 
     // Color scheme by level
     const levelColors: Record<number, string> = {
@@ -1293,31 +1169,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       }
     };
 
-    // Build sets of hub nodes and suspicious nodes for visual indicators
-    // Only consider triangles that meet the threshold
-    const visibleTrianglesForIndicators = triangles.filter(t => t.suspicionScore >= triangleThreshold);
-    const hubNodeIds = new Set<string>();
-    const suspiciousNodeIds = new Set<string>();
-    const nodeTriangleCount = new Map<string, number>();
-
-    // Count how many visible triangles each node appears in
-    visibleTrianglesForIndicators.forEach((t) => {
-      t.nodeIds.forEach((nodeId) => {
-        nodeTriangleCount.set(nodeId, (nodeTriangleCount.get(nodeId) || 0) + 1);
-      });
-      // Track suspicious accounts
-      t.suspiciousAccounts.forEach((acc) => {
-        suspiciousNodeIds.add(acc.nodeId);
-      });
-    });
-
-    // Nodes in 2+ visible triangles are hubs
-    nodeTriangleCount.forEach((count, nodeId) => {
-      if (count >= 2) {
-        hubNodeIds.add(nodeId);
-      }
-    });
-
     // Set up zoom behavior
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
@@ -1349,13 +1200,8 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       svg.call(zoom.transform, initialTransform);
     }
 
-    // Draw subtle triangle shapes for detected cycles (behind everything else)
-    const triangleGroup = g
-      .append("g")
-      .attr("class", "triangles")
-      .lower(); // Place behind links and nodes
-
     // Create force simulation with radial positioning for levels
+    const hasTriangles = showTriangles && triangleNodeIds.size > 0;
     const simulation = d3
       .forceSimulation(nodes)
       .alphaDecay(0.1) // Faster convergence
@@ -1368,31 +1214,55 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           .distance((d) => {
             const source = d.source as Node;
             const target = d.target as Node;
+            // Push cross-boundary links apart to help separation
+            if (hasTriangles) {
+              const sourceInTriangle = triangleNodeIds.has(source.id);
+              const targetInTriangle = triangleNodeIds.has(target.id);
+              if (sourceInTriangle !== targetInTriangle) return 400; // Cross-boundary
+            }
             const levelDiff = Math.abs(target.level - source.level);
-            // Increase distance for more breathing room
             return 180 + levelDiff * 100;
+          })
+          .strength((d) => {
+            if (!hasTriangles) return 1;
+            const source = d.source as Node;
+            const target = d.target as Node;
+            const sourceInTriangle = triangleNodeIds.has(source.id);
+            const targetInTriangle = triangleNodeIds.has(target.id);
+            // Weaken cross-boundary links so separation force wins
+            return sourceInTriangle !== targetInTriangle ? 0.05 : 0.3;
           })
       )
       .force("charge", d3.forceManyBody().strength((d) => {
         const node = d as Node;
-        // Increase charge strength to push nodes apart more
         return node.isRoot ? -800 : -400 / (node.level + 1);
       }))
-      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("center", hasTriangles ? null : d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
         d3.forceCollide().radius((d) => {
           const node = d as Node;
-          // Increase collision radius for more breathing room
           return node.isRoot ? 70 : Math.max(40, 50 - node.level * 2);
         })
       )
-      .force("radial", d3.forceRadial((d) => {
+      .force("radial", hasTriangles ? null : d3.forceRadial((d) => {
         const node = d as Node;
-        // Create concentric rings with more spacing
         const baseRadius = 120;
         return baseRadius + node.level * 180;
-      }, width / 2, height / 2).strength(0.8));
+      }, width / 2, height / 2).strength(0.8))
+      // When triangles exist: push triangle nodes left, clean nodes right
+      .force("separateX", hasTriangles
+        ? d3.forceX<Node>((d) => {
+            if (triangleNodeIds.has(d.id)) return width * 0.25; // Triangle nodes to left
+            return d.isRoot ? width * 0.65 : width * 0.8; // Clean nodes to right
+          }).strength((d) => {
+            if ((d as Node).isRoot) return 0.5;
+            return triangleNodeIds.has((d as Node).id) ? 0.7 : 0.6;
+          })
+        : null)
+      .force("separateY", hasTriangles
+        ? d3.forceY<Node>(height / 2).strength(0.05)
+        : null);
 
     // Create links colored by sentiment
     const link = g
@@ -1433,6 +1303,11 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         const target = d.target as Node;
         return 0.6 + (1 - target.level * 0.1);
       });
+
+    // Triangle overlay group (above links and arrows, below nodes)
+    const triangleGroup = g
+      .append("g")
+      .attr("class", "triangles");
 
     // Create node groups
     const nodeGroups = g
@@ -1475,71 +1350,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       .attr("stroke-width", (d) => (d.isRoot ? 3 : 2))
       .attr("opacity", (d) => (d.isRoot ? 1 : 0.9 - d.level * 0.1));
 
-    // Add indicator rings for hubs and suspicious accounts (when triangles shown)
-    if (showTriangles) {
-      // Hub indicator ring (orange, pulsing)
-      nodeGroups
-        .filter((d) => hubNodeIds.has(d.id))
-        .insert("circle", ":first-child")
-        .attr("class", "hub-indicator")
-        .attr("r", (d) => {
-          if (d.isRoot) return 42;
-          return Math.max(25, 32 - d.level * 2);
-        })
-        .attr("fill", "none")
-        .attr("stroke", "#f97316")
-        .attr("stroke-width", 3)
-        .attr("stroke-opacity", 0.8)
-        .attr("stroke-dasharray", "4,2");
-
-      // Suspicious account indicator ring (red)
-      nodeGroups
-        .filter((d) => suspiciousNodeIds.has(d.id) && !hubNodeIds.has(d.id))
-        .insert("circle", ":first-child")
-        .attr("class", "suspicious-indicator")
-        .attr("r", (d) => {
-          if (d.isRoot) return 42;
-          return Math.max(25, 32 - d.level * 2);
-        })
-        .attr("fill", "none")
-        .attr("stroke", "#ef4444")
-        .attr("stroke-width", 2.5)
-        .attr("stroke-opacity", 0.7);
-
-      // Add triangle count badge for hubs
-      nodeGroups
-        .filter((d) => hubNodeIds.has(d.id))
-        .append("circle")
-        .attr("class", "hub-badge-bg")
-        .attr("cx", (d) => {
-          if (d.isRoot) return 25;
-          return Math.max(12, 18 - d.level * 2);
-        })
-        .attr("cy", (d) => {
-          if (d.isRoot) return -25;
-          return -Math.max(12, 18 - d.level * 2);
-        })
-        .attr("r", 10)
-        .attr("fill", "#f97316");
-
-      nodeGroups
-        .filter((d) => hubNodeIds.has(d.id))
-        .append("text")
-        .attr("class", "hub-badge-text")
-        .attr("x", (d) => {
-          if (d.isRoot) return 25;
-          return Math.max(12, 18 - d.level * 2);
-        })
-        .attr("y", (d) => {
-          if (d.isRoot) return -21;
-          return -Math.max(12, 18 - d.level * 2) + 4;
-        })
-        .attr("text-anchor", "middle")
-        .attr("fill", "white")
-        .attr("font-size", "10px")
-        .attr("font-weight", "bold")
-        .text((d) => `${nodeTriangleCount.get(d.id) || 0}△`);
-    }
 
     // Add images with level-based sizing
     nodeGroups
@@ -1627,7 +1437,7 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
       // Update triangle shapes (only if showTriangles is enabled)
       if (showTriangles) {
         // Filter triangles by threshold
-        const visibleTriangles = triangles.filter(t => t.suspicionScore >= triangleThreshold);
+        const visibleTriangles = triangles;
 
         // Helper to get triangle color based on suspicion score
         const getTriangleColor = (score: number) => {
@@ -1660,10 +1470,25 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           });
         });
 
-        // Remove polygon fills - just use edge highlights
+        // Remove polygon fills
         triangleGroup.selectAll("polygon").remove();
 
-        // Draw highlighted edges for triangles
+        // Glow layer (thick, blurred background stroke for visibility)
+        triangleGroup
+          .selectAll("line.triangle-glow")
+          .data(triangleEdgeData)
+          .join("line")
+          .attr("class", "triangle-glow")
+          .attr("x1", (d) => d.x1)
+          .attr("y1", (d) => d.y1)
+          .attr("x2", (d) => d.x2)
+          .attr("y2", (d) => d.y2)
+          .attr("stroke", (d) => getTriangleColor(d.suspicionScore))
+          .attr("stroke-width", 10)
+          .attr("stroke-opacity", 0.15)
+          .attr("stroke-linecap", "round");
+
+        // Main triangle edge lines (thick, dashed to distinguish from regular edges)
         triangleGroup
           .selectAll("line.triangle-edge")
           .data(triangleEdgeData)
@@ -1674,9 +1499,10 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           .attr("x2", (d) => d.x2)
           .attr("y2", (d) => d.y2)
           .attr("stroke", (d) => getTriangleColor(d.suspicionScore))
-          .attr("stroke-width", 3)
-          .attr("stroke-opacity", 0.7)
-          .attr("stroke-linecap", "round");
+          .attr("stroke-width", 4)
+          .attr("stroke-opacity", 0.85)
+          .attr("stroke-linecap", "round")
+          .attr("stroke-dasharray", "8,4");
 
         // Draw flow arrows along triangle edges
         triangleGroup
@@ -1692,18 +1518,14 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             const len = Math.sqrt(dx * dx + dy * dy);
             if (len === 0) return "";
 
-            // Arrow at midpoint pointing towards target
-            const arrowSize = 7;
+            const arrowSize = 9;
             const ux = dx / len;
             const uy = dy / len;
-            // Perpendicular
             const px = -uy;
             const py = ux;
 
-            // Arrow tip at midpoint + small offset towards target
-            const tipX = midX + ux * 4;
-            const tipY = midY + uy * 4;
-            // Arrow base points
+            const tipX = midX + ux * 5;
+            const tipY = midY + uy * 5;
             const baseX1 = tipX - ux * arrowSize + px * arrowSize * 0.5;
             const baseY1 = tipY - uy * arrowSize + py * arrowSize * 0.5;
             const baseX2 = tipX - ux * arrowSize - px * arrowSize * 0.5;
@@ -1712,18 +1534,25 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
             return `M${tipX},${tipY} L${baseX1},${baseY1} L${baseX2},${baseY2} Z`;
           })
           .attr("fill", (d) => getTriangleColor(d.suspicionScore))
-          .attr("opacity", 0.9);
+          .attr("opacity", 0.95);
       } else {
         triangleGroup.selectAll("polygon").remove();
+        triangleGroup.selectAll("line.triangle-glow").remove();
         triangleGroup.selectAll("line.triangle-edge").remove();
         triangleGroup.selectAll("path.triangle-flow").remove();
       }
 
+      // Hide regular edges that are part of triangles — the red triangle overlay replaces them
       link
         .attr("x1", (d) => (d.source as Node).x ?? 0)
         .attr("y1", (d) => (d.source as Node).y ?? 0)
         .attr("x2", (d) => (d.target as Node).x ?? 0)
-        .attr("y2", (d) => (d.target as Node).y ?? 0);
+        .attr("y2", (d) => (d.target as Node).y ?? 0)
+        .attr("stroke-opacity", (d) => {
+          if (showTriangles && d.isPartOfTriangle) return 0;
+          const target = d.target as Node;
+          return 0.6 + (1 - target.level * 0.1);
+        });
 
       // Check for bidirectional connections (both A->B and B->A exist)
       const linkKeySet = new Set<string>();
@@ -1733,6 +1562,12 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
         const sourceId = source.id;
         const targetId = target.id;
         linkKeySet.add(`${sourceId}-${targetId}`);
+      });
+
+      // Hide arrow markers for triangle edges
+      arrowMarkers.attr("opacity", (d) => {
+        if (showTriangles && d.isPartOfTriangle) return 0;
+        return 0.8;
       });
 
       // Update arrow markers at midpoint of each line
@@ -1808,7 +1643,6 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
     visibleSentiments,
     hideIsolatedNodes,
     showTriangles,
-    triangleThreshold,
     router,
   ]);
 
@@ -2055,21 +1889,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                     </span>
                   </label>
                   {showTriangles && detectedTriangles.length > 0 && (
-                    <div className="flex items-center gap-2 ml-4">
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">Min risk:</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="3"
-                        value={triangleThreshold}
-                        onChange={(e) => setTriangleThreshold(parseInt(e.target.value))}
-                        className="w-20 h-2 accent-orange-500"
-                      />
-                      <span className="text-xs font-medium w-4">{triangleThreshold}</span>
-                      <span className="text-xs text-muted-foreground">
-                        ({detectedTriangles.filter(t => t.suspicionScore >= triangleThreshold).length} shown)
-                      </span>
-                    </div>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({detectedTriangles.length} detected)
+                    </span>
                   )}
                 </div>
               </div>
@@ -2097,114 +1919,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
               <div className="flex-1 overflow-hidden">
                 <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
               </div>
-              {detectedClusters.length > 0 && showTriangles && (
-                <div className="w-72 border-l border-border pl-2 overflow-y-auto">
-                  <div className="text-xs md:text-sm sticky top-0 bg-background pb-2 z-10">
-                    <div className="font-medium text-foreground flex items-center gap-2 mb-1">
-                      <span>Review Clusters ({detectedClusters.length})</span>
-                      <span className="text-xs text-muted-foreground">
-                        {detectedTriangles.length} triangle{detectedTriangles.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    <div className="text-xs text-yellow-600 dark:text-yellow-500">Connected triangle networks</div>
-                  </div>
-                  <div className="space-y-3">
-                    {detectedClusters.map((cluster) => (
-                      <div
-                        key={cluster.id}
-                        className={`flex flex-col gap-2 p-2 rounded border ${
-                          cluster.suspicionScore >= 5
-                            ? 'bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800'
-                            : cluster.suspicionScore >= 2
-                            ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800'
-                            : 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
-                        }`}
-                      >
-                        {/* Cluster header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className={`inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded-full shrink-0 ${
-                              cluster.suspicionScore >= 5
-                                ? 'bg-red-500 text-white'
-                                : cluster.suspicionScore >= 2
-                                ? 'bg-orange-500 text-white'
-                                : 'bg-yellow-400 text-yellow-900'
-                            }`}>
-                              {cluster.suspicionScore}
-                            </span>
-                            <span className="text-xs font-medium">
-                              {cluster.size} users, {cluster.triangles.length} triangle{cluster.triangles.length !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Hub accounts */}
-                        {cluster.hubAccounts.length > 0 && (
-                          <div className="text-xs">
-                            <div className="font-medium text-orange-700 dark:text-orange-400 mb-1">
-                              🔗 Hub accounts (in {'>'}1 triangle):
-                            </div>
-                            {cluster.hubAccounts.map((hub) => (
-                              <div key={hub.nodeId} className="ml-2 text-orange-600 dark:text-orange-400">
-                                {hub.name} ({hub.triangleCount} triangles, score: {hub.score})
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Participants */}
-                        <div className="text-xs">
-                          <div className="font-medium text-muted-foreground mb-1">Participants:</div>
-                          <div className="ml-2 flex flex-wrap gap-1">
-                            {cluster.participants.map((node) => {
-                              const isHub = cluster.hubAccounts.some(h => h.nodeId === node.id);
-                              const isSuspicious = cluster.triangles.some(t =>
-                                t.suspiciousAccounts.some(s => s.nodeId === node.id)
-                              );
-                              return (
-                                <span
-                                  key={node.id}
-                                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${
-                                    isHub
-                                      ? 'bg-orange-200 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium'
-                                      : isSuspicious
-                                      ? 'bg-red-200 dark:bg-red-900 text-red-800 dark:text-red-200'
-                                      : 'bg-muted text-muted-foreground'
-                                  }`}
-                                >
-                                  {node.name}
-                                  {isHub && ' 🔗'}
-                                  {isSuspicious && !isHub && ' ⚠'}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Triangles in cluster */}
-                        <details className="text-xs">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                            View {cluster.triangles.length} triangle{cluster.triangles.length !== 1 ? 's' : ''}
-                          </summary>
-                          <div className="mt-1 ml-2 space-y-1">
-                            {cluster.triangles.map((triangle, idx) => (
-                              <div key={idx} className="text-xs text-muted-foreground">
-                                {triangle.nodes.map((n, i) => (
-                                  <span key={n.id}>
-                                    <span className={triangle.suspiciousAccounts.some(s => s.nodeId === n.id) ? 'text-red-600 dark:text-red-400' : ''}>
-                                      {n.name}
-                                    </span>
-                                    {i < 2 ? ' → ' : ''}
-                                  </span>
-                                ))}
-                                {' → '}{triangle.nodes[0].name}
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      </div>
-                    ))}
-                  </div>
+              {detectedTriangles.length > 0 && showTriangles && (
+                <div className="w-96 border-l border-border pl-2 overflow-y-auto">
+                  <TriangleList triangles={detectedTriangles} rootName={userName} />
                 </div>
               )}
             </div>
@@ -2344,21 +2061,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
                   </span>
                 </label>
                 {showTriangles && detectedTriangles.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">Min risk:</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="3"
-                      value={triangleThreshold}
-                      onChange={(e) => setTriangleThreshold(parseInt(e.target.value))}
-                      className="w-16 h-2 accent-orange-500"
-                    />
-                    <span className="text-xs font-medium w-4">{triangleThreshold}</span>
-                    <span className="text-xs text-muted-foreground">
-                      ({detectedTriangles.filter(t => t.suspicionScore >= triangleThreshold).length} shown)
-                    </span>
-                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    ({detectedTriangles.length} detected)
+                  </span>
                 )}
               </div>
             </div>
@@ -2385,94 +2090,9 @@ export function ReviewsMap({ userId, profileId, userName, avatarUrl = "" }: Revi
           <div className="w-full aspect-square md:aspect-auto md:h-[600px]">
             <svg ref={svgRef} className="w-full h-full" style={{ shapeRendering: "geometricPrecision" }}></svg>
           </div>
-          {detectedClusters.length > 0 && showTriangles && (
-            <div className="mt-2 p-2 md:p-3 border-t border-border">
-              <details className="text-xs md:text-sm" open>
-                <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground flex items-center gap-2">
-                  <span>Review Clusters ({detectedClusters.length})</span>
-                  <span className="text-xs text-muted-foreground">
-                    {detectedTriangles.length} triangle{detectedTriangles.length !== 1 ? 's' : ''}
-                  </span>
-                  {detectedClusters.some(c => c.suspicionScore >= 5) && (
-                    <span className="text-xs text-red-600 dark:text-red-400">
-                      ({detectedClusters.filter(c => c.suspicionScore >= 5).length} high risk)
-                    </span>
-                  )}
-                </summary>
-                <div className="mt-2 max-h-64 overflow-y-auto">
-                  <div className="flex flex-col gap-3">
-                    {detectedClusters.map((cluster) => (
-                      <div
-                        key={cluster.id}
-                        className={`flex flex-col gap-2 p-2 rounded border ${
-                          cluster.suspicionScore >= 5
-                            ? 'bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800'
-                            : cluster.suspicionScore >= 2
-                            ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800'
-                            : 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
-                        }`}
-                      >
-                        {/* Cluster header */}
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded-full shrink-0 ${
-                            cluster.suspicionScore >= 5
-                              ? 'bg-red-500 text-white'
-                              : cluster.suspicionScore >= 2
-                              ? 'bg-orange-500 text-white'
-                              : 'bg-yellow-400 text-yellow-900'
-                          }`}>
-                            {cluster.suspicionScore}
-                          </span>
-                          <span className="text-xs font-medium">
-                            {cluster.size} users in {cluster.triangles.length} triangle{cluster.triangles.length !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-
-                        {/* Hub accounts */}
-                        {cluster.hubAccounts.length > 0 && (
-                          <div className="text-xs">
-                            <span className="font-medium text-orange-700 dark:text-orange-400">
-                              🔗 Hubs:{' '}
-                            </span>
-                            {cluster.hubAccounts.map((hub, i) => (
-                              <span key={hub.nodeId} className="text-orange-600 dark:text-orange-400">
-                                {hub.name} ({hub.triangleCount}△)
-                                {i < cluster.hubAccounts.length - 1 ? ', ' : ''}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Participants */}
-                        <div className="flex flex-wrap gap-1">
-                          {cluster.participants.map((node) => {
-                            const isHub = cluster.hubAccounts.some(h => h.nodeId === node.id);
-                            const isSuspicious = cluster.triangles.some(t =>
-                              t.suspiciousAccounts.some(s => s.nodeId === node.id)
-                            );
-                            return (
-                              <span
-                                key={node.id}
-                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${
-                                  isHub
-                                    ? 'bg-orange-200 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium'
-                                    : isSuspicious
-                                    ? 'bg-red-200 dark:bg-red-900 text-red-800 dark:text-red-200'
-                                    : 'bg-muted text-muted-foreground'
-                                }`}
-                              >
-                                {node.name}
-                                {isHub && ' 🔗'}
-                                {isSuspicious && !isHub && ' ⚠'}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </details>
+          {detectedTriangles.length > 0 && showTriangles && (
+            <div className="mt-3">
+              <TriangleList triangles={detectedTriangles} rootName={userName} />
             </div>
           )}
         </div>

@@ -6,6 +6,7 @@ import { Loader2, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
 import { useRouter } from "next/navigation";
+import { TriangleList } from "@/components/triangle-list";
 
 interface EthosProfile {
   id: number;
@@ -82,7 +83,7 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showReviews, setShowReviews] = useState(true);
   const [showVouches, setShowVouches] = useState(true);
-  const [showTriangles, setShowTriangles] = useState(false);
+  const [showTriangles, setShowTriangles] = useState(true);
   const [detectedTriangles, setDetectedTriangles] = useState<Triangle[]>([]);
   const { theme } = useTheme();
   const router = useRouter();
@@ -247,15 +248,17 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     }
 
     // Detect triangles (only for positive reviews, no reciprocation)
+    // Only track positive review edges — per spec, only a positive reverse review
+    // should exclude a triangle (a negative/neutral reverse review is not reciprocation)
     const positiveReviewMap = new Map<string, Set<string>>();
-    const allEdges = new Set<string>();
+    const positiveEdges = new Set<string>();
 
     links.forEach((link) => {
       const sourceId = typeof link.source === "string" ? link.source : link.source.id;
       const targetId = typeof link.target === "string" ? link.target : link.target.id;
-      allEdges.add(`${sourceId}-${targetId}`);
 
       if (link.type === "review" && link.sentiment === "positive") {
+        positiveEdges.add(`${sourceId}-${targetId}`);
         if (!positiveReviewMap.has(sourceId)) {
           positiveReviewMap.set(sourceId, new Set());
         }
@@ -264,7 +267,8 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     });
 
     const triangles: Triangle[] = [];
-    const triangleEdges = new Set<string>();
+    const triangleKeys = new Set<string>(); // For deduplication (sorted IDs)
+    const triangleEdgeKeys = new Set<string>(); // Directional edge keys (source-target)
 
     nodes.forEach((nodeA) => {
       const neighborsA = positiveReviewMap.get(nodeA.id);
@@ -279,17 +283,21 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
           if (!neighborsC) return;
 
           if (neighborsC.has(nodeA.id)) {
-            // Check no reciprocation
-            const edge1Reciprocated = allEdges.has(`${nodeBId}-${nodeA.id}`);
-            const edge2Reciprocated = allEdges.has(`${nodeCId}-${nodeBId}`);
-            const edge3Reciprocated = allEdges.has(`${nodeA.id}-${nodeCId}`);
+            // Check no positive reciprocation (only positive reverse reviews disqualify)
+            const edge1Reciprocated = positiveEdges.has(`${nodeBId}-${nodeA.id}`);
+            const edge2Reciprocated = positiveEdges.has(`${nodeCId}-${nodeBId}`);
+            const edge3Reciprocated = positiveEdges.has(`${nodeA.id}-${nodeCId}`);
 
             if (!edge1Reciprocated && !edge2Reciprocated && !edge3Reciprocated) {
               const sortedIds = [nodeA.id, nodeBId, nodeCId].sort();
               const triangleKey = sortedIds.join("-");
 
-              if (!triangleEdges.has(triangleKey)) {
-                triangleEdges.add(triangleKey);
+              if (!triangleKeys.has(triangleKey)) {
+                triangleKeys.add(triangleKey);
+                // Track directional edges for hiding regular links
+                triangleEdgeKeys.add(`${nodeA.id}-${nodeBId}`);
+                triangleEdgeKeys.add(`${nodeBId}-${nodeCId}`);
+                triangleEdgeKeys.add(`${nodeCId}-${nodeA.id}`);
                 const nodeB = nodeMap.get(nodeBId);
                 const nodeC = nodeMap.get(nodeCId);
                 if (nodeB && nodeC) {
@@ -334,6 +342,27 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
     // Triangle group (behind everything)
     const triangleGroup = g.append("g").attr("class", "triangles").lower();
 
+    // Build set of node IDs participating in triangles (for layout separation)
+    const triangleNodeIds = new Set<string>();
+    triangles.forEach((t) => {
+      t.nodeIds.forEach((id) => triangleNodeIds.add(id));
+    });
+
+    // Build a set of cross-boundary links (triangle <-> clean nodes) to weaken them
+    const hasTriangles = showTriangles && triangleNodeIds.size > 0;
+    const crossBoundaryLinks = new Set<number>();
+    links.forEach((link, i) => {
+      const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+      const targetId = typeof link.target === "string" ? link.target : link.target.id;
+      if (hasTriangles) {
+        const sourceInTriangle = triangleNodeIds.has(sourceId);
+        const targetInTriangle = triangleNodeIds.has(targetId);
+        if (sourceInTriangle !== targetInTriangle) {
+          crossBoundaryLinks.add(i);
+        }
+      }
+    });
+
     // Create force simulation with generous spacing
     const simulation = d3
       .forceSimulation(nodes)
@@ -345,11 +374,22 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
         d3
           .forceLink<Node, Link>(links)
           .id((d) => d.id)
-          .distance(250)
+          .distance((_, i) => crossBoundaryLinks.has(i) ? 400 : 250)
+          .strength((_, i) => crossBoundaryLinks.has(i) ? 0.05 : 0.3)
       )
       .force("charge", d3.forceManyBody().strength(-1200))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(80).iterations(1)); // Reduced radius and single iteration
+      .force("center", hasTriangles ? null : d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(80).iterations(1))
+      // When triangles exist: push triangle nodes left, clean nodes right
+      .force("separateX", hasTriangles
+        ? d3.forceX<Node>((d) => {
+            if (triangleNodeIds.has(d.id)) return width * 0.25;
+            return width * 0.75;
+          }).strength(0.7)
+        : null)
+      .force("separateY", hasTriangles
+        ? d3.forceY<Node>(height / 2).strength(0.05)
+        : null);
 
     // Pre-compute layout synchronously for instant rendering
     simulation.stop();
@@ -367,6 +407,22 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
         triangleEdgeData.push({ x1: n3.x ?? 0, y1: n3.y ?? 0, x2: n1.x ?? 0, y2: n1.y ?? 0 });
       });
 
+      // Glow layer
+      triangleGroup
+        .selectAll("line.triangle-glow")
+        .data(triangleEdgeData)
+        .join("line")
+        .attr("class", "triangle-glow")
+        .attr("x1", (d) => d.x1)
+        .attr("y1", (d) => d.y1)
+        .attr("x2", (d) => d.x2)
+        .attr("y2", (d) => d.y2)
+        .attr("stroke", "#ef4444")
+        .attr("stroke-width", 10)
+        .attr("stroke-opacity", 0.15)
+        .attr("stroke-linecap", "round");
+
+      // Main triangle edges
       triangleGroup
         .selectAll("line.triangle-edge")
         .data(triangleEdgeData)
@@ -377,9 +433,18 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
         .attr("x2", (d) => d.x2)
         .attr("y2", (d) => d.y2)
         .attr("stroke", "#ef4444")
-        .attr("stroke-width", 2)
-        .attr("stroke-opacity", 0.4);
+        .attr("stroke-width", 4)
+        .attr("stroke-opacity", 0.85)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-dasharray", "8,4");
     }
+
+    // Helper to check if a link is part of a triangle
+    const isLinkInTriangle = (d: Link) => {
+      const sourceId = typeof d.source === "string" ? d.source : d.source.id;
+      const targetId = typeof d.target === "string" ? d.target : d.target.id;
+      return triangleEdgeKeys.has(`${sourceId}-${targetId}`);
+    };
 
     // Create links with pre-computed positions
     const link = g
@@ -390,7 +455,7 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       .enter()
       .append("line")
       .attr("stroke", (d) => getLinkColor(d))
-      .attr("stroke-opacity", 0.6)
+      .attr("stroke-opacity", (d) => showTriangles && isLinkInTriangle(d) ? 0 : 0.6)
       .attr("stroke-width", 1.5)
       .attr("stroke-dasharray", (d) => (d.type === "vouch" ? "4,4" : "none"))
       .attr("x1", (d) => (d.source as Node).x ?? 0)
@@ -408,7 +473,7 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
       .append("path")
       .attr("d", "M-6,-4 L0,0 L-6,4 Z")
       .attr("fill", (d) => getLinkColor(d))
-      .attr("opacity", 0.8)
+      .attr("opacity", (d) => showTriangles && isLinkInTriangle(d) ? 0 : 0.8)
       .attr("transform", (d) => {
         const source = d.source as Node;
         const target = d.target as Node;
@@ -540,6 +605,22 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
           triangleEdgeData.push({ x1: n3.x ?? 0, y1: n3.y ?? 0, x2: n1.x ?? 0, y2: n1.y ?? 0 });
         });
 
+        // Glow layer
+        triangleGroup
+          .selectAll("line.triangle-glow")
+          .data(triangleEdgeData)
+          .join("line")
+          .attr("class", "triangle-glow")
+          .attr("x1", (d) => d.x1)
+          .attr("y1", (d) => d.y1)
+          .attr("x2", (d) => d.x2)
+          .attr("y2", (d) => d.y2)
+          .attr("stroke", "#ef4444")
+          .attr("stroke-width", 10)
+          .attr("stroke-opacity", 0.15)
+          .attr("stroke-linecap", "round");
+
+        // Main triangle edges
         triangleGroup
           .selectAll("line.triangle-edge")
           .data(triangleEdgeData)
@@ -550,9 +631,12 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
           .attr("x2", (d) => d.x2)
           .attr("y2", (d) => d.y2)
           .attr("stroke", "#ef4444")
-          .attr("stroke-width", 2)
-          .attr("stroke-opacity", 0.4);
+          .attr("stroke-width", 4)
+          .attr("stroke-opacity", 0.85)
+          .attr("stroke-linecap", "round")
+          .attr("stroke-dasharray", "8,4");
       } else {
+        triangleGroup.selectAll("line.triangle-glow").remove();
         triangleGroup.selectAll("line.triangle-edge").remove();
       }
 
@@ -671,8 +755,15 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
               </Button>
             </div>
           </div>
-          <div className="flex-1">
-            <svg ref={svgRef} className="w-full h-full" />
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex-1">
+              <svg ref={svgRef} className="w-full h-full" />
+            </div>
+            {detectedTriangles.length > 0 && showTriangles && (
+              <div className="w-96 border-l border-border pl-2 overflow-y-auto">
+                <TriangleList triangles={detectedTriangles} />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -733,6 +824,11 @@ export function ClusterMap({ profiles, reviews, vouches, showOnlyBidirectional =
           <div className="w-full h-[500px] border rounded-lg overflow-hidden">
             <svg ref={svgRef} className="w-full h-full" />
           </div>
+          {detectedTriangles.length > 0 && showTriangles && (
+            <div className="mt-3">
+              <TriangleList triangles={detectedTriangles} />
+            </div>
+          )}
         </div>
       )}
     </>
