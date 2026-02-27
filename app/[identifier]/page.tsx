@@ -2,109 +2,31 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Search, Loader2, ExternalLink, X } from "lucide-react";
-import { InvitationMap } from "@/components/invitation-map";
-import { VouchesMap } from "@/components/vouches-map";
-import { ReviewsMap } from "@/components/reviews-map";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
+import { ProfileHeader } from "@/components/profile-header";
+import { ProfileTabs } from "@/components/profile-tabs";
+import { useRecentSearches } from "@/hooks/use-recent-searches";
 import {
   getCachedData,
   setCachedData,
   getProfileCacheKey,
   CacheDurations,
 } from "@/lib/cache";
-
-interface EthosProfile {
-  id: number;
-  profileId: number | null;
-  displayName: string;
-  username: string | null;
-  avatarUrl: string;
-  description: string | null;
-  score: number;
-  status: "ACTIVE" | "INACTIVE" | "MERGED";
-  userkeys: string[];
-  xpTotal: number;
-  xpStreakDays: number;
-  xpRemovedDueToAbuse: boolean;
-  influenceFactor: number;
-  influenceFactorPercentile: number;
-  links: {
-    profile: string;
-    scoreBreakdown: string;
-  };
-  stats: {
-    review: {
-      received: {
-        negative: number;
-        neutral: number;
-        positive: number;
-      };
-    };
-    vouch: {
-      given: {
-        amountWeiTotal: number;
-        count: number;
-      };
-      received: {
-        amountWeiTotal: number;
-        count: number;
-      };
-    };
-  };
-}
-
-interface RecentSearch {
-  query: string;
-  displayName: string;
-  username: string | null;
-  avatarUrl: string;
-  timestamp: number;
-}
+import type { EthosProfile } from "@/lib/types";
 
 export default function ProfilePage() {
   const params = useParams();
   const router = useRouter();
   const identifier = params?.identifier as string;
-  
-  const [input, setInput] = useState("");
+  const { saveSearch } = useRecentSearches();
+
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<EthosProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
   const isEthereumAddress = (value: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(value);
-  };
-
-  const saveRecentSearch = (profile: EthosProfile, query: string) => {
-    const newSearch: RecentSearch = {
-      query,
-      displayName: profile.displayName,
-      username: profile.username,
-      avatarUrl: profile.avatarUrl,
-      timestamp: Date.now(),
-    };
-
-    try {
-      const stored = localStorage.getItem("ethos-recent-searches");
-      const prev = stored ? JSON.parse(stored) : [];
-      // Remove duplicates and limit to 10 most recent
-      const filtered = prev.filter((s: RecentSearch) => s.query.toLowerCase() !== query.toLowerCase());
-      const updated = [newSearch, ...filtered].slice(0, 10);
-      localStorage.setItem("ethos-recent-searches", JSON.stringify(updated));
-    } catch (e) {
-      // Ignore localStorage errors
-    }
   };
 
   const fetchProfile = async (query: string) => {
@@ -116,7 +38,6 @@ export default function ProfilePage() {
     const trimmedInput = query.trim();
     const cacheKey = getProfileCacheKey(trimmedInput);
 
-    // Try to get from cache first
     const cachedProfile = getCachedData<EthosProfile>(
       cacheKey,
       CacheDurations.PROFILE
@@ -126,14 +47,13 @@ export default function ProfilePage() {
       setProfile(cachedProfile);
       setError(null);
       setLoading(false);
-      // Still update URL if needed
+      saveSearch(cachedProfile, trimmedInput);
       if (trimmedInput !== identifier) {
         router.replace(`/${encodeURIComponent(trimmedInput)}`);
       }
       return;
     }
 
-    // If not in cache, fetch from API
     setLoading(true);
     setError(null);
     setProfile(null);
@@ -163,16 +83,11 @@ export default function ProfilePage() {
       }
 
       const data = await response.json();
-      
-      // Cache the profile data
+
       setCachedData(cacheKey, data);
-      
       setProfile(data);
-      saveRecentSearch(data, trimmedInput);
-      loadRecentSearches(); // Refresh recent searches after saving
-      
-      // Update URL if different from current identifier
-      // Note: Next.js automatically decodes URL params, so identifier is already decoded
+      saveSearch(data, trimmedInput);
+
       if (trimmedInput !== identifier) {
         router.replace(`/${encodeURIComponent(trimmedInput)}`);
       }
@@ -185,368 +100,43 @@ export default function ProfilePage() {
     }
   };
 
-  // Load recent searches from localStorage
-  const loadRecentSearches = () => {
-    const stored = localStorage.getItem("ethos-recent-searches");
-    if (stored) {
-      try {
-        setRecentSearches(JSON.parse(stored));
-      } catch (e) {
-        // Invalid JSON, ignore
-      }
-    }
-  };
-
-  // Remove a recent search
-  const removeRecentSearch = (query: string, e?: React.MouseEvent | React.KeyboardEvent) => {
-    e?.stopPropagation();
-    setRecentSearches((prev) => {
-      const updated = prev.filter((s) => s.query.toLowerCase() !== query.toLowerCase());
-      localStorage.setItem("ethos-recent-searches", JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  // Search using a recent search query
-  const searchRecent = (query: string) => {
-    const trimmedInput = query.trim();
-    if (trimmedInput) {
-      router.push(`/${encodeURIComponent(trimmedInput)}`);
-    }
-  };
-
-  // Load profile when identifier changes
   useEffect(() => {
     if (identifier) {
-      // Note: Next.js automatically decodes URL params, so identifier is already decoded
-      setInput(identifier);
       fetchProfile(identifier);
     }
-    loadRecentSearches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifier]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedInput = input.trim();
-    if (trimmedInput) {
-      router.push(`/${encodeURIComponent(trimmedInput)}`);
-    }
-  };
-
   return (
-    <div className="min-h-screen p-4 md:p-8">
-      <div className="mx-auto max-w-4xl space-y-8">
-        <div className="relative">
-          <div className="absolute top-0 right-0">
-            <ThemeToggle />
+    <div className="p-4 md:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        {loading && (
+          <div className="flex justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-          <div className="text-center space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight">Ethos Scanner</h1>
-            <p className="text-muted-foreground">
-              Look up Ethos Network profiles by X username or EVM address
-            </p>
+        )}
+
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">
+            {error}
           </div>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Search Profile</CardTitle>
-            <CardDescription>
-              Enter an X (Twitter) username or an Ethereum wallet address
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="e.g., VitalikButerin or 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    className="pl-10"
-                    disabled={loading}
-                  />
-                </div>
-                <Button type="submit" disabled={loading}>
-                  {loading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Searching...
-                    </>
-                  ) : (
-                    "Search"
-                  )}
-                </Button>
-              </div>
-            </form>
-
-            {error && (
-              <div className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-
-            {recentSearches.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <div className="text-sm font-medium text-muted-foreground">
-                  Recent Searches
-                </div>
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {recentSearches.slice(0, 5).map((search, index) => (
-                    <button
-                      key={index}
-                      onClick={() => searchRecent(search.query)}
-                      className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted cursor-pointer"
-                    >
-                      {search.avatarUrl && (
-                        <img
-                          src={search.avatarUrl}
-                          alt={search.displayName}
-                          className="h-6 w-6 shrink-0 rounded-full"
-                        />
-                      )}
-                      <div className="min-w-0 flex-1 text-left">
-                        <div className="truncate font-medium">
-                          {search.displayName}
-                        </div>
-                        {search.username && (
-                          <div className="truncate text-xs text-muted-foreground">
-                            @{search.username}
-                          </div>
-                        )}
-                      </div>
-                      <div
-                        onClick={(e) => removeRecentSearch(search.query, e)}
-                        className="shrink-0 cursor-pointer rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
-                        aria-label="Remove from recent searches"
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            removeRecentSearch(search.query, e);
-                          }
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        )}
 
         {profile && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-start gap-4">
-                {profile.avatarUrl && (
-                  <img
-                    src={profile.avatarUrl}
-                    alt={profile.displayName}
-                    className="h-16 w-16 rounded-full"
-                  />
-                )}
-                <div className="flex-1">
-                  <CardTitle>{profile.displayName}</CardTitle>
-                  {profile.username && (
-                    <div className="text-muted-foreground font-normal text-base mt-1">
-                      @{profile.username}
-                    </div>
-                  )}
-                  {profile.description && (
-                    <CardDescription className="mt-2">
-                      {profile.description}
-                    </CardDescription>
-                  )}
-                </div>
-                <a
-                  href={profile.links.profile}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  <ExternalLink className="h-5 w-5" />
-                </a>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    Credibility Score
-                  </div>
-                  <div className="text-2xl font-bold">{profile.score}</div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    XP Streak
-                  </div>
-                  <div className="text-2xl font-semibold">
-                    {profile.xpStreakDays} days
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    Influence Factor
-                  </div>
-                  <div className="text-2xl font-semibold">
-                    {profile.influenceFactor.toFixed(2)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {profile.influenceFactorPercentile.toFixed(1)}th percentile
-                  </div>
-                </div>
-                {profile.profileId && (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium text-muted-foreground">
-                      Profile ID
-                    </div>
-                    <div className="text-2xl font-semibold">
-                      {profile.profileId}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t pt-6">
-                <h3 className="mb-4 text-lg font-semibold">Reviews Received</h3>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">Positive</div>
-                    <div className="text-xl font-semibold text-green-600">
-                      {profile.stats.review.received.positive}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">Neutral</div>
-                    <div className="text-xl font-semibold text-gray-600">
-                      {profile.stats.review.received.neutral}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">Negative</div>
-                    <div className="text-xl font-semibold text-red-600">
-                      {profile.stats.review.received.negative}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h3 className="mb-4 text-lg font-semibold">Vouches</h3>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">Given</div>
-                    <div className="text-lg font-semibold">
-                      {profile.stats.vouch.given.count} vouches
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {(
-                        Number(profile.stats.vouch.given.amountWeiTotal) /
-                        1e18
-                      ).toFixed(4)}{" "}
-                      ETH
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">Received</div>
-                    <div className="text-lg font-semibold">
-                      {profile.stats.vouch.received.count} vouches
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {(
-                        Number(profile.stats.vouch.received.amountWeiTotal) /
-                        1e18
-                      ).toFixed(4)}{" "}
-                      ETH
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Show network maps for initialized profiles only */}
-              {profile.profileId === null ? (
-                <div className="border-t pt-6">
-                  <div className="rounded-md bg-muted p-6 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Network maps not available for uninitialized profiles
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* Reviews Map - show if user has any reviews */}
-                  {(profile.stats.review.received.positive + profile.stats.review.received.neutral + profile.stats.review.received.negative) > 0 && (
-                    <div className="border-t pt-6">
-                      <h3 className="mb-4 text-lg font-semibold">Reviews Network</h3>
-                      <ReviewsMap
-                        userId={profile.id}
-                        profileId={profile.profileId}
-                        userName={profile.displayName}
-                        avatarUrl={profile.avatarUrl}
-                      />
-                    </div>
-                  )}
-
-                  {/* Vouches Map - show if user has any vouches given or received */}
-                  {(profile.stats.vouch.given.count + profile.stats.vouch.received.count) > 0 && (
-                    <div className="border-t pt-6">
-                      <h3 className="mb-4 text-lg font-semibold">Vouches Network</h3>
-                      <VouchesMap
-                        userId={profile.id}
-                        profileId={profile.profileId}
-                        userName={profile.displayName}
-                        avatarUrl={profile.avatarUrl}
-                      />
-                    </div>
-                  )}
-
-                  {/* Invitation Map - show for any initialized profile */}
-                  <div className="border-t pt-6">
-                    <h3 className="mb-4 text-lg font-semibold">Invitation Network</h3>
-                    <InvitationMap
-                      userId={profile.id}
-                      profileId={profile.profileId}
-                      userName={profile.displayName}
-                      avatarUrl={profile.avatarUrl}
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="flex flex-col gap-2 pt-4">
-                <a
-                  href={profile.links.profile}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button variant="outline" className="w-full">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Full Profile
-                  </Button>
-                </a>
-                <a
-                  href={profile.links.scoreBreakdown}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button variant="outline" className="w-full">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Score Breakdown
-                  </Button>
-                </a>
-              </div>
-            </CardContent>
-          </Card>
+          <>
+            <Card>
+              <CardContent className="pt-6">
+                <ProfileHeader profile={profile} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <ProfileTabs profile={profile} />
+              </CardContent>
+            </Card>
+          </>
         )}
       </div>
     </div>
   );
 }
-

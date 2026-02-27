@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,10 +11,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Search, Loader2, X, Plus, ArrowLeft, Users, Share2, Check, Copy } from "lucide-react";
+import { Search, Loader2, X, Plus, Users, Share2, Check, Copy } from "lucide-react";
 import Link from "next/link";
 import { ClusterMap } from "@/components/cluster-map";
-import { ThemeToggle } from "@/components/theme-toggle";
 import {
   getCachedData,
   setCachedData,
@@ -117,7 +116,6 @@ const REVIEWS_BATCH_SIZE = 100; // Fetch reviews in batches of 100 to be gentle 
 const MAX_REVIEWS_PER_PROFILE = 300; // Maximum reviews to fetch per profile
 
 function ClusterPageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [input, setInput] = useState("");
   const [profiles, setProfiles] = useState<EthosProfile[]>([]); // Submitted profiles
@@ -722,22 +720,8 @@ function ClusterPageContent() {
   const negativeReviews = reviews.filter(r => r.data.score === "negative").length;
 
   return (
-    <div className="min-h-screen p-4 md:p-8 relative">
-      <div className="fixed top-4 right-4 md:top-8 md:right-8 z-10">
-        <ThemeToggle />
-      </div>
+    <div className="p-4 md:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        {/* Back button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/")}
-          className="gap-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Search
-        </Button>
-
         {/* Input Card */}
         <Card>
           <CardHeader>
