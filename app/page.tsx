@@ -79,6 +79,8 @@ export default function Home() {
   const [analyzing, setAnalyzing] = useState(false);
   const [savedInvestigations, setSavedInvestigations] = useState<SavedInvestigation[]>([]);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
+  const [loginPassphrase, setLoginPassphrase] = useState("");
+  const [loginError, setLoginError] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
@@ -403,9 +405,6 @@ export default function Home() {
 
   // Not logged in
   const bypassAuth = process.env.NEXT_PUBLIC_BYPASS_AUTH === "true";
-
-  const [loginPassphrase, setLoginPassphrase] = useState("");
-  const [loginError, setLoginError] = useState("");
 
   if (!session && !bypassAuth) {
     return (
