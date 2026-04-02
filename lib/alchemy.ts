@@ -1,4 +1,6 @@
-const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+function getAlchemyKey() {
+  return process.env.ALCHEMY_API_KEY || "";
+}
 
 // Chains to check for funding analysis (Base first since Ethos is on Base)
 export const CHAINS = [
@@ -40,7 +42,7 @@ async function alchemyRequest(
 ): Promise<unknown | null> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(`${chainRpcBase}/${ALCHEMY_API_KEY}`, {
+      const response = await fetch(`${chainRpcBase}/${getAlchemyKey()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -232,7 +234,7 @@ export async function batchGetCode(
       let resp: Response | null = null;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          resp = await fetch(`${chain.rpcBase}/${ALCHEMY_API_KEY}`, {
+          resp = await fetch(`${chain.rpcBase}/${getAlchemyKey()}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(batchPayload),

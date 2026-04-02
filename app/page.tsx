@@ -404,16 +404,7 @@ export default function Home() {
   // Not logged in
   const bypassAuth = process.env.NEXT_PUBLIC_BYPASS_AUTH === "true";
 
-  if (!session) {
-    if (bypassAuth) {
-      signIn("credentials", { redirect: false });
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      );
-    }
-
+  if (!session && !bypassAuth) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-full max-w-sm">
@@ -437,7 +428,7 @@ export default function Home() {
     );
   }
 
-  const twitterUsername = (session.user as { twitterUsername?: string })?.twitterUsername;
+  const twitterUsername = (session?.user as { twitterUsername?: string } | undefined)?.twitterUsername;
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
@@ -453,15 +444,19 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {session.user?.image && (
-              <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
-            )}
-            <span>{session.user?.name || twitterUsername}</span>
-          </div>
-          <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
-            Sign out
-          </Button>
+          {session && (
+            <>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {session.user?.image && (
+                  <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
+                )}
+                <span>{session.user?.name || twitterUsername}</span>
+              </div>
+              <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
+                Sign out
+              </Button>
+            </>
+          )}
           <ThemeToggle />
         </div>
       </div>
