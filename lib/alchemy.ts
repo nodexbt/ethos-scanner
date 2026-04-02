@@ -1,4 +1,4 @@
-const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
 
 // Chains to check for funding analysis (Base first since Ethos is on Base)
 export const CHAINS = [

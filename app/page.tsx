@@ -20,12 +20,10 @@ import {
   Trash2,
 } from "lucide-react";
 import {
-  runClusterScan,
   type ClusterScanResult,
   type LogEntry,
   type ScanProgress,
 } from "@/lib/cluster-scanner";
-import { isEthereumAddress } from "@/lib/ethos";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession, signIn, signOut } from "next-auth/react";
 
@@ -94,7 +92,7 @@ export default function Home() {
   const startScan = async (e: React.FormEvent) => {
     e.preventDefault();
     const addr = walletInput.trim();
-    if (!addr || !isEthereumAddress(addr)) {
+    if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
       setError("Please enter a valid EVM address (0x...)");
       return;
     }
@@ -106,12 +104,61 @@ export default function Home() {
     setError(null);
 
     try {
-      const result = await runClusterScan(
-        addr,
-        (entry) => setClusterLogs((prev) => [...prev, entry]),
-        (progress) => setScanProgress(progress)
-      );
-      setClusterResult(result);
+      const resp = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: addr }),
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json();
+        setError(data.error || "Scan failed");
+        return;
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        setError("Streaming not supported");
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.type === "log") {
+              setClusterLogs((prev) => [...prev, msg.data]);
+            } else if (msg.type === "progress") {
+              setScanProgress(msg.data);
+            } else if (msg.type === "result") {
+              // Restore Sets from arrays
+              const result = msg.data as ClusterScanResult;
+              result.strongCluster.forEach((c) => {
+                c.signalTypes = new Set(c.signalTypes as unknown as string[]);
+              });
+              result.possibleCluster.forEach((c) => {
+                c.signalTypes = new Set(c.signalTypes as unknown as string[]);
+              });
+              setClusterResult(result);
+            } else if (msg.type === "error") {
+              setError(msg.data);
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cluster scan failed");
     } finally {

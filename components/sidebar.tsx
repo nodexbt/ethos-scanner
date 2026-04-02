@@ -1,34 +1,67 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { Search, Home, Users, Menu, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
+import { Home, Menu, X, Plus } from "lucide-react";
 import Link from "next/link";
-import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { useRecentSearches } from "@/hooks/use-recent-searches";
+
+const RECENT_SEARCHES_KEY = "ethos-sybil-recent-searches";
+
+interface RecentSearch {
+  profileId: number;
+  displayName: string;
+  username: string | null;
+  avatarUrl: string;
+  score: number;
+  timestamp: number;
+}
 
 export function Sidebar() {
-  const router = useRouter();
   const pathname = usePathname();
-  const [input, setInput] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const { recentSearches, removeSearch } = useRecentSearches();
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = input.trim();
-    if (trimmed) {
-      router.push(`/${encodeURIComponent(trimmed)}`);
-      setInput("");
-      setIsOpen(false);
-    }
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+      if (saved) setRecentSearches(JSON.parse(saved));
+    } catch {}
+
+    // Listen for storage changes (from the main page)
+    const onStorage = () => {
+      try {
+        const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+        if (saved) setRecentSearches(JSON.parse(saved));
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+
+    // Also poll since storage events don't fire in the same tab
+    const interval = setInterval(onStorage, 1000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const removeSearch = (profileId: number) => {
+    try {
+      const filtered = recentSearches.filter((s) => s.profileId !== profileId);
+      localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(filtered));
+      setRecentSearches(filtered);
+    } catch {}
   };
 
-  const navLinks = [
-    { href: "/", label: "Home", icon: Home },
-    { href: "/cluster", label: "Cluster Investigation", icon: Users },
-  ];
+  const addToScan = (search: RecentSearch) => {
+    window.dispatchEvent(
+      new CustomEvent("ethos-add-profile", {
+        detail: { username: search.username, profileId: search.profileId },
+      })
+    );
+  };
+
+  const navLinks = [{ href: "/", label: "Home", icon: Home }];
 
   return (
     <>
@@ -65,24 +98,8 @@ export function Sidebar() {
           </Link>
         </div>
 
-        {/* Search */}
-        <div className="p-4">
-          <form onSubmit={handleSearch}>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search profile..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="pl-10 h-9 text-sm"
-              />
-            </div>
-          </form>
-        </div>
-
         {/* Recent searches */}
-        <div className="flex-1 overflow-y-auto px-3">
+        <div className="flex-1 overflow-y-auto px-3 py-3">
           {recentSearches.length > 0 && (
             <>
               <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">
@@ -90,15 +107,9 @@ export function Sidebar() {
               </div>
               <div className="space-y-0.5">
                 {recentSearches.map((search) => (
-                  <button
-                    key={search.query}
-                    onClick={() => {
-                      router.push(
-                        `/${encodeURIComponent(search.query)}`
-                      );
-                      setIsOpen(false);
-                    }}
-                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted cursor-pointer"
+                  <div
+                    key={search.profileId}
+                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
                   >
                     {search.avatarUrl && (
                       <img
@@ -120,22 +131,42 @@ export function Sidebar() {
                     <div
                       onClick={(e) => {
                         e.stopPropagation();
-                        removeSearch(search.query);
+                        addToScan(search);
                       }}
                       className="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted-foreground/10 cursor-pointer"
                       role="button"
                       tabIndex={0}
+                      title="Add to scan"
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           e.stopPropagation();
-                          removeSearch(search.query);
+                          addToScan(search);
+                        }
+                      }}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </div>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeSearch(search.profileId);
+                      }}
+                      className="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted-foreground/10 cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      title="Remove"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          removeSearch(search.profileId);
                         }
                       }}
                     >
                       <X className="h-3 w-3" />
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </>
