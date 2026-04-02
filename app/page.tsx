@@ -402,7 +402,18 @@ export default function Home() {
   }
 
   // Not logged in
+  const bypassAuth = process.env.NEXT_PUBLIC_BYPASS_AUTH === "true";
+
   if (!session) {
+    if (bypassAuth) {
+      signIn("credentials", { redirect: false });
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-full max-w-sm">
