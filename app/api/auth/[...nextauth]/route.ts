@@ -15,7 +15,6 @@ const ALLOWED_USERS = new Set(
 const providers: NextAuthOptions["providers"] = [];
 
 if (BYPASS_AUTH) {
-  // Local dev: auto-login without Twitter
   providers.push(
     CredentialsProvider({
       name: "Dev Login",
@@ -40,16 +39,44 @@ if (BYPASS_AUTH) {
   );
 }
 
+function extractTwitterUsername(profile: unknown): string | null {
+  if (!profile || typeof profile !== "object") return null;
+  const p = profile as Record<string, unknown>;
+
+  // Twitter OAuth 2.0 can return username at different paths
+  // depending on NextAuth version
+  if (typeof p.username === "string") return p.username.toLowerCase();
+  if (p.data && typeof p.data === "object") {
+    const data = p.data as Record<string, unknown>;
+    if (typeof data.username === "string") return data.username.toLowerCase();
+  }
+  // Fallback: check screen_name (OAuth 1.0a style)
+  if (typeof p.screen_name === "string") return p.screen_name.toLowerCase();
+
+  return null;
+}
+
 export const authOptions: NextAuthOptions = {
   providers,
+  debug: !BYPASS_AUTH, // Enable debug logging for OAuth on production
   callbacks: {
     async signIn({ profile, credentials }) {
       if (BYPASS_AUTH && credentials !== undefined) return true;
 
-      const username = (profile as { data?: { username?: string } })?.data?.username?.toLowerCase();
-      if (!username) return false;
+      console.log("[auth] signIn profile:", JSON.stringify(profile, null, 2));
+
+      const username = extractTwitterUsername(profile);
+      console.log("[auth] extracted username:", username);
+      console.log("[auth] allowed users:", [...ALLOWED_USERS]);
+
+      if (!username) {
+        console.log("[auth] rejected: no username found in profile");
+        return false;
+      }
       if (ALLOWED_USERS.size === 0) return true;
-      return ALLOWED_USERS.has(username);
+      const allowed = ALLOWED_USERS.has(username);
+      console.log("[auth] allowed:", allowed);
+      return allowed;
     },
     async session({ session, token }) {
       if (session.user) {
@@ -60,8 +87,7 @@ export const authOptions: NextAuthOptions = {
     },
     async jwt({ token, profile }) {
       if (profile) {
-        const twitterProfile = profile as { data?: { username?: string } };
-        token.twitterUsername = twitterProfile?.data?.username || null;
+        token.twitterUsername = extractTwitterUsername(profile);
       }
       return token;
     },
