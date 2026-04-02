@@ -404,6 +404,9 @@ export default function Home() {
   // Not logged in
   const bypassAuth = process.env.NEXT_PUBLIC_BYPASS_AUTH === "true";
 
+  const [loginPassphrase, setLoginPassphrase] = useState("");
+  const [loginError, setLoginError] = useState("");
+
   if (!session && !bypassAuth) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -412,13 +415,33 @@ export default function Home() {
             <Shield className="h-10 w-10 mx-auto mb-2" />
             <CardTitle>Ethos Sybil Scanner</CardTitle>
             <CardDescription>
-              Sign in with X to access the scanner.
+              Enter passphrase to access the scanner.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button onClick={() => signIn("twitter")} className="w-full" size="sm">
-              Sign in with X
-            </Button>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setLoginError("");
+              const res = await signIn("credentials", {
+                passphrase: loginPassphrase,
+                redirect: false,
+              });
+              if (res?.error) setLoginError("Invalid passphrase");
+            }}>
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  placeholder="Passphrase"
+                  value={loginPassphrase}
+                  onChange={(e) => setLoginPassphrase(e.target.value)}
+                  className="h-9 text-sm"
+                />
+                {loginError && <div className="text-xs text-red-500">{loginError}</div>}
+                <Button type="submit" className="w-full" size="sm" disabled={!loginPassphrase.trim()}>
+                  Sign in
+                </Button>
+              </div>
+            </form>
             <div className="flex justify-center">
               <ThemeToggle />
             </div>
@@ -427,8 +450,6 @@ export default function Home() {
       </div>
     );
   }
-
-  const twitterUsername = (session?.user as { twitterUsername?: string } | undefined)?.twitterUsername;
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
@@ -450,7 +471,7 @@ export default function Home() {
                 {session.user?.image && (
                   <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
                 )}
-                <span>{session.user?.name || twitterUsername}</span>
+                <span>{session.user?.name || "Admin"}</span>
               </div>
               <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
                 Sign out
