@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   type ClusterScanResult,
+  type ClusterCandidate,
   type LogEntry,
   type ScanProgress,
 } from "@/lib/cluster-scanner";
@@ -52,13 +53,11 @@ export default function Home() {
 
   // Screenshot state: address -> data URL
   const [screenshots, setScreenshots] = useState<Map<string, string>>(new Map());
-  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
   const [savedInvestigations, setSavedInvestigations] = useState<InvestigationSummary[]>([]);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
   const [loginPassphrase, setLoginPassphrase] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
@@ -189,7 +188,7 @@ export default function Home() {
         targetName: clusterResult.targetEthos?.displayName ?? null,
         clusterResult,
         screenshots: Object.fromEntries(screenshots),
-        aiAnalysis,
+        aiAnalysis: null,
       }),
     });
     setCurrentInvestigationId(id);
@@ -202,7 +201,6 @@ export default function Home() {
     const data = await resp.json();
     setClusterResult(data.clusterResult);
     setScreenshots(new Map(Object.entries(data.screenshots || {})));
-    setAiAnalysis(data.aiAnalysis);
     setCurrentInvestigationId(inv.id);
     setClusterLogs([]);
     setScanProgress(null);
@@ -251,45 +249,12 @@ export default function Home() {
     });
   };
 
-  const runAnalysis = async () => {
+  const exportInvestigation = () => {
     if (!clusterResult) return;
 
-    const prompt = buildPrompt();
-    setGeneratedPrompt(prompt);
-    setAiAnalysis(null);
-    setAnalyzing(true);
-
-    try {
-      const screenshotData = [...screenshots.entries()].map(([address, dataUrl]) => ({
-        address,
-        dataUrl,
-      }));
-
-      const resp = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, screenshots: screenshotData }),
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) {
-        setError(data.error || "Analysis failed");
-      } else {
-        setAiAnalysis(data.analysis);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis request failed");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  const buildPrompt = (): string => {
-    if (!clusterResult) return "";
-
     const allCandidates = [...clusterResult.strongCluster, ...clusterResult.possibleCluster];
-    const screenshotCount = screenshots.size;
 
+    // Build the prompt text
     let prompt = `Draft a slash report for the following subject based on the evidence provided.\n\n`;
 
     prompt += `## Subject\n`;
@@ -336,22 +301,52 @@ export default function Home() {
       }
     }
 
+    const screenshotCount = screenshots.size;
     if (screenshotCount > 0) {
       prompt += `\n## Social Evidence\n`;
-      prompt += `${screenshotCount} X/Twitter search screenshot(s) are attached.\n`;
-      prompt += `These show search results for the wallet addresses above. Examine whether multiple distinct X accounts have posted the same wallet address, which indicates coordinated behavior.\n`;
+      prompt += `${screenshotCount} X/Twitter search screenshot(s) are attached alongside this prompt.\n`;
+      prompt += `Examine whether multiple distinct X accounts have posted the same wallet address, which indicates coordinated behavior.\n`;
     }
 
-    if (screenshots.has(clusterResult.target)) {
-      prompt += `\nA screenshot for the subject's own wallet address is also attached.\n`;
+    // Save prompt as text file
+    const targetName = clusterResult.targetEthos?.username || clusterResult.target.slice(0, 10);
+    const timestamp = new Date().toISOString().slice(0, 10);
+
+    const promptBlob = new Blob([prompt], { type: "text/plain" });
+    const promptUrl = URL.createObjectURL(promptBlob);
+    const promptLink = document.createElement("a");
+    promptLink.href = promptUrl;
+    promptLink.download = `slash-evidence-${targetName}-${timestamp}.txt`;
+    promptLink.click();
+    URL.revokeObjectURL(promptUrl);
+
+    // Save each screenshot as a separate file
+    let imgIndex = 0;
+    for (const [address, dataUrl] of screenshots) {
+      imgIndex++;
+      const candidateName = allCandidates.find((c) => c.address === address)?.ethosProfile?.username
+        || address.slice(0, 10);
+
+      // Convert data URL to blob
+      const byteString = atob(dataUrl.split(",")[1]);
+      const mimeType = dataUrl.split(",")[0].split(":")[1].split(";")[0];
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const imgBlob = new Blob([ab], { type: mimeType });
+      const ext = mimeType.split("/")[1] || "png";
+
+      const imgUrl = URL.createObjectURL(imgBlob);
+      const imgLink = document.createElement("a");
+      imgLink.href = imgUrl;
+      imgLink.download = `screenshot-${imgIndex}-${candidateName}.${ext}`;
+
+      // Small delay between downloads so browser doesn't block them
+      setTimeout(() => {
+        imgLink.click();
+        URL.revokeObjectURL(imgUrl);
+      }, imgIndex * 200);
     }
-
-    return prompt;
-  };
-
-  const copyPromptToClipboard = () => {
-    if (!generatedPrompt) return;
-    navigator.clipboard.writeText(generatedPrompt);
   };
 
   const formatTime = (ms: number): string => {
@@ -360,23 +355,6 @@ export default function Home() {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  };
-
-  const formatMarkdown = (text: string): string => {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-      .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-      .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/^- (.+)$/gm, "<li>$1</li>")
-      .replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>")
-      .replace(/\n\n/g, "</p><p>")
-      .replace(/^(?!<[hul])/, "<p>")
-      .replace(/(?<![>])$/, "</p>");
   };
 
   const hasResults = clusterResult !== null && !scanning;
@@ -450,7 +428,13 @@ export default function Home() {
             Discover wallet clusters and sybil accounts on Ethos Network via on-chain transaction analysis.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {hasResults && (
+            <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              Export for Slash Report
+            </Button>
+          )}
           {session && (
             <>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -708,7 +692,8 @@ export default function Home() {
                     {clusterResult.strongCluster.map((candidate) => (
                       <div
                         key={candidate.address}
-                        className="rounded-lg border bg-red-500/5 border-red-500/20 p-3 space-y-2"
+                        onClick={() => setSelectedCandidate(candidate)}
+                        className="rounded-lg border bg-red-500/5 border-red-500/20 p-3 space-y-2 cursor-pointer hover:border-red-500/50 transition-colors"
                       >
                         <div className="flex items-start gap-3">
                           {candidate.ethosProfile?.avatarUrl && (
@@ -810,7 +795,8 @@ export default function Home() {
                     {clusterResult.possibleCluster.map((candidate) => (
                       <div
                         key={candidate.address}
-                        className="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 space-y-1.5"
+                        onClick={() => setSelectedCandidate(candidate)}
+                        className="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 space-y-1.5 cursor-pointer hover:border-amber-500/50 transition-colors"
                       >
                         <div className="flex items-start gap-3">
                           {candidate.ethosProfile?.avatarUrl && (
@@ -996,63 +982,7 @@ export default function Home() {
                       Click the search icon to open X, then paste or upload a screenshot. If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.
                     </div>
 
-                    {/* Run Analysis */}
-                    <Button
-                      onClick={runAnalysis}
-                      className="w-full"
-                      size="sm"
-                      disabled={analyzing}
-                      variant={screenshots.size > 0 ? "default" : "secondary"}
-                    >
-                      {analyzing ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Generating Slash Report...
-                        </>
-                      ) : (
-                        <>
-                          <FileText className="mr-2 h-4 w-4" />
-                          Generate Slash Report
-                          {screenshots.size > 0 && (
-                            <span className="ml-1 text-[10px] opacity-75">({screenshots.size} screenshot{screenshots.size !== 1 && "s"})</span>
-                          )}
-                        </>
-                      )}
-                    </Button>
                   </CardContent>
-                </Card>
-              )}
-
-              {/* AI Analysis Result */}
-              {(aiAnalysis || analyzing) && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      {analyzing ? (
-                        <>
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                          Analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <FileText className="h-5 w-5 text-muted-foreground" />
-                          AI Analysis
-                        </>
-                      )}
-                    </CardTitle>
-                    {analyzing && (
-                      <CardDescription className="text-xs">
-                        Claude is reviewing the on-chain findings{screenshots.size > 0 ? ` and ${screenshots.size} screenshot${screenshots.size !== 1 ? "s" : ""}` : ""}...
-                      </CardDescription>
-                    )}
-                  </CardHeader>
-                  {aiAnalysis && (
-                    <CardContent className="space-y-3">
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p]:text-sm [&_li]:text-sm">
-                        <div dangerouslySetInnerHTML={{ __html: formatMarkdown(aiAnalysis) }} />
-                      </div>
-                    </CardContent>
-                  )}
                 </Card>
               )}
             </>
@@ -1066,6 +996,224 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* Candidate Detail Modal */}
+      {selectedCandidate && clusterResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setSelectedCandidate(null)}
+        >
+          <div
+            className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start gap-3 p-5 border-b sticky top-0 bg-background rounded-t-xl z-10">
+              {selectedCandidate.ethosProfile?.avatarUrl && (
+                <img
+                  src={selectedCandidate.ethosProfile.avatarUrl}
+                  alt={selectedCandidate.ethosProfile.displayName}
+                  className={`h-12 w-12 rounded-full ring-2 ${getScoreBorderColor(selectedCandidate.ethosProfile.score)}`}
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-lg">
+                  {selectedCandidate.ethosProfile?.displayName || `${selectedCandidate.address.slice(0, 12)}...${selectedCandidate.address.slice(-6)}`}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {selectedCandidate.ethosProfile?.username && `@${selectedCandidate.ethosProfile.username} · `}
+                  {selectedCandidate.confidence === "high" ? "Strong" : "Possible"} match · Score: {selectedCandidate.score}
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedCandidate(null)}
+                className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Profile Links */}
+              <div className="flex flex-wrap gap-2">
+                {selectedCandidate.ethosProfile && (
+                  <a
+                    href={selectedCandidate.ethosProfile.profileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"
+                  >
+                    Ethos Profile <ExternalLink className="h-3 w-3 opacity-50" />
+                  </a>
+                )}
+                <a
+                  href={getExplorerAddressUrl(selectedCandidate.address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
+                >
+                  {selectedCandidate.address.slice(0, 8)}...{selectedCandidate.address.slice(-6)} <ExternalLink className="h-3 w-3 opacity-50" />
+                </a>
+              </div>
+
+              {/* Connection to Target */}
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Connection to {clusterResult.targetEthos?.displayName || clusterResult.target.slice(0, 10) + "..."}</h3>
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                  {/* Direct transfers */}
+                  {selectedCandidate.directCount > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Direct Transfers</div>
+                      <div className="text-xs text-muted-foreground">
+                        {selectedCandidate.directCount} transfer{selectedCandidate.directCount !== 1 && "s"} detected
+                        {" "}({selectedCandidate.incomingCount} incoming, {selectedCandidate.outgoingCount} outgoing)
+                        {selectedCandidate.bidirectional && (
+                          <span className="ml-1 text-amber-500 font-medium">-- funds flow both ways</span>
+                        )}
+                        {selectedCandidate.repeatTransfer && (
+                          <span className="ml-1 text-amber-500 font-medium">-- repeated pattern</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shared contracts */}
+                  {selectedCandidate.sharedContracts.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Shared Contract Interactions</div>
+                      <div className="text-xs text-muted-foreground">
+                        Both wallets interacted with {selectedCandidate.sharedContracts.length} of the same contract{selectedCandidate.sharedContracts.length !== 1 && "s"}:
+                      </div>
+                      <div className="space-y-0.5">
+                        {selectedCandidate.sharedContracts.map((addr) => (
+                          <a
+                            key={addr}
+                            href={getExplorerAddressUrl(addr)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-xs font-mono text-muted-foreground hover:underline"
+                          >
+                            {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shared funding sources */}
+                  {selectedCandidate.sharedFundingSources.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Shared Funding Sources</div>
+                      <div className="text-xs text-muted-foreground">
+                        Both wallets received funds from {selectedCandidate.sharedFundingSources.length} of the same source{selectedCandidate.sharedFundingSources.length !== 1 && "s"}:
+                      </div>
+                      <div className="space-y-0.5">
+                        {selectedCandidate.sharedFundingSources.map((addr) => (
+                          <a
+                            key={addr}
+                            href={getExplorerAddressUrl(addr)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-xs font-mono text-muted-foreground hover:underline"
+                          >
+                            {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Timing */}
+                  {selectedCandidate.timeProximityHits > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Transaction Timing</div>
+                      <div className="text-xs text-muted-foreground">
+                        {selectedCandidate.timeProximityHits} transaction{selectedCandidate.timeProximityHits !== 1 && "s"} occurred within a close time window of the target&apos;s transactions, suggesting coordinated activity.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Amount similarity */}
+                  {selectedCandidate.similarAmountHits > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Similar Amounts</div>
+                      <div className="text-xs text-muted-foreground">
+                        {selectedCandidate.similarAmountHits} outgoing transaction{selectedCandidate.similarAmountHits !== 1 && "s"} matched similar amounts (within 10%) to the target&apos;s transactions.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No connections found */}
+                  {selectedCandidate.directCount === 0 &&
+                    selectedCandidate.sharedContracts.length === 0 &&
+                    selectedCandidate.sharedFundingSources.length === 0 &&
+                    selectedCandidate.timeProximityHits === 0 &&
+                    selectedCandidate.similarAmountHits === 0 && (
+                    <div className="text-xs text-muted-foreground">No specific connection details available.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Signals Breakdown */}
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Signal Breakdown</h3>
+                <div className="space-y-1.5">
+                  {selectedCandidate.signals.map((signal, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs border rounded-md px-3 py-2">
+                      <span className="font-medium">{signal.type.replace(/_/g, " ")}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">{signal.details}</span>
+                        <span className={`font-bold ${signal.score > 0 ? "text-red-500" : "text-green-500"}`}>
+                          {signal.score > 0 ? "+" : ""}{signal.score}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-xs font-semibold border-t pt-2 mt-1 px-1">
+                    <span>Total Score</span>
+                    <span>{selectedCandidate.score}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Network Activity */}
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Active Networks</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedCandidate.networks.map((network) => (
+                    <span key={network} className="text-xs border rounded-md px-2.5 py-1">
+                      {network}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ethos Profile Details */}
+              {selectedCandidate.ethosProfile && (
+                <div>
+                  <h3 className="text-sm font-semibold mb-2">Ethos Profile</h3>
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Credibility Score</span>
+                      <span className="font-medium">{selectedCandidate.ethosProfile.score}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Profile ID</span>
+                      <span className="font-medium">{selectedCandidate.ethosProfile.profileId}</span>
+                    </div>
+                    {selectedCandidate.ethosProfile.username && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">X/Twitter</span>
+                        <span className="font-medium">@{selectedCandidate.ethosProfile.username}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
