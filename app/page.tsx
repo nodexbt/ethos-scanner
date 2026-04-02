@@ -662,6 +662,29 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+
+                  {/* Target first funders */}
+                  {clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
+                    <div className="rounded-lg border p-3 space-y-1.5">
+                      <div className="text-xs font-medium text-muted-foreground">Target First Funders</div>
+                      {clusterResult.targetFirstFunders.map((ff, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
+                            <a
+                              href={getExplorerAddressUrl(ff.funder)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono hover:underline"
+                            >
+                              {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                            </a>
+                          </div>
+                          <span className="text-muted-foreground">{ff.value} ETH</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -1097,6 +1120,42 @@ export default function Home() {
                           </a>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* First funders */}
+                  {selectedCandidate.firstFunders && selectedCandidate.firstFunders.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium flex items-center gap-1.5">
+                        First Funder{selectedCandidate.firstFunders.length > 1 ? "s" : ""}
+                        {selectedCandidate.sharedFirstFunder && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500 text-white font-medium">same as target</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        The first wallet to send ETH to this address on each chain:
+                      </div>
+                      {selectedCandidate.firstFunders.map((ff, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs border rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
+                            <a
+                              href={getExplorerAddressUrl(ff.funder)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono hover:underline"
+                            >
+                              {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                            </a>
+                          </div>
+                          <span className="text-muted-foreground">{ff.value} ETH</span>
+                        </div>
+                      ))}
+                      {selectedCandidate.sharedFirstFunder && clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
+                        <div className="text-xs text-red-500 dark:text-red-400 font-medium mt-1">
+                          The target wallet was also first funded by the same address -- this is a strong sybil indicator.
+                        </div>
+                      )}
                     </div>
                   )}
 

@@ -5,6 +5,7 @@ import {
   getAllTransactions,
   batchGetCode,
   parallel,
+  getFirstFunder,
 } from "./alchemy";
 import { fetchProfile, type EthosProfile, getWalletAddresses } from "./ethos";
 
@@ -53,6 +54,13 @@ export interface Signal {
   details: string;
 }
 
+export interface FirstFunderInfo {
+  chain: string;
+  funder: string;
+  txHash: string;
+  value: number;
+}
+
 export interface ClusterCandidate {
   address: string;
   score: number;
@@ -66,6 +74,8 @@ export interface ClusterCandidate {
   repeatTransfer: boolean;
   sharedContracts: string[];
   sharedFundingSources: string[];
+  sharedFirstFunder: boolean;
+  firstFunders: FirstFunderInfo[];
   timeProximityHits: number;
   similarAmountHits: number;
   ethosProfile?: {
@@ -89,6 +99,7 @@ export interface ClusterScanResult {
     score: number;
     profileUrl: string;
   };
+  targetFirstFunders: FirstFunderInfo[];
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
   networkStats: Record<string, { txCount: number; directWallets: number; contractClusters: number }>;
@@ -382,11 +393,15 @@ function estimateAmountSimilarity(
 
 // --- Scoring ---
 
+const W_SHARED_FIRST_FUNDER = 6;
+
 function scoreCandidate(
   address: string,
   directInfo: DirectWalletInfo | undefined,
   sharedContracts: { address: string; popularity: string }[],
   sharedFunders: string[],
+  sharedFirstFunder: boolean,
+  candidateFirstFunders: FirstFunderInfo[],
   timeProx: { hits1h: number; hits24h: number },
   amountHits: number,
   network: string
@@ -411,6 +426,10 @@ function scoreCandidate(
     else if (contract.popularity === "medium") score = W_SHARED_MEDIUM;
     else score = W_SHARED_POPULAR;
     addSignal("shared_contract", score, `${contract.address} popularity=${contract.popularity}`);
+  }
+
+  if (sharedFirstFunder) {
+    addSignal("shared_first_funder", W_SHARED_FIRST_FUNDER, "same first funder on at least one chain");
   }
 
   if (sharedFunders.length > 0) {
@@ -445,6 +464,8 @@ function scoreCandidate(
     repeatTransfer: directInfo?.repeatTransfer ?? false,
     sharedContracts: sharedContracts.map((c) => c.address),
     sharedFundingSources: sharedFunders,
+    sharedFirstFunder,
+    firstFunders: candidateFirstFunders,
     timeProximityHits: timeProx.hits1h + timeProx.hits24h,
     similarAmountHits: amountHits,
     networks: [network],
@@ -463,6 +484,7 @@ async function scanNetwork(
   contractClusterWallets: Map<string, Set<string>>;
   candidates: Map<string, ClusterCandidate>;
   txCount: number;
+  targetFirstFunder: FirstFunderInfo | null;
 }> {
   const network = chain.name;
 
@@ -480,6 +502,7 @@ async function scanNetwork(
       contractClusterWallets: new Map(),
       candidates: new Map(),
       txCount: 0,
+      targetFirstFunder: null,
     };
   }
 
@@ -561,7 +584,7 @@ async function scanNetwork(
   );
   stepDone?.(`${network}: Candidate transactions fetched`);
 
-  // Step 7: Shared funding + scoring
+  // Step 7: Shared funding sources
   log("info", `[${network}] Checking shared funding sources...`);
   const sharedFunding = findSharedFundingSources(
     target,
@@ -572,6 +595,47 @@ async function scanNetwork(
   );
   log("info", `[${network}] ${sharedFunding.size} wallets share funding sources`);
 
+  // Step 8: First funder analysis
+  log("info", `[${network}] Checking first funders for target + ${allCandidateAddrs.length} candidates...`);
+
+  // Fetch first funder for target
+  const targetFirstFunder = await getFirstFunder(target, chain);
+  if (targetFirstFunder) {
+    log("info", `[${network}] Target first funder: ${targetFirstFunder.funder.slice(0, 10)}... (${targetFirstFunder.value} ETH)`);
+  }
+
+  // Fetch first funders for all candidates in parallel
+  const candidateFirstFunders = new Map<string, FirstFunderInfo>();
+  await parallel(
+    allCandidateAddrs,
+    async (addr) => {
+      const ff = await getFirstFunder(addr, chain);
+      if (ff) {
+        candidateFirstFunders.set(addr, {
+          chain: network,
+          funder: ff.funder,
+          txHash: ff.txHash,
+          value: ff.value,
+        });
+      }
+    },
+    CONCURRENCY
+  );
+
+  // Check which candidates share first funder with target
+  const sharedFirstFunderAddrs = new Set<string>();
+  if (targetFirstFunder) {
+    for (const [addr, ff] of candidateFirstFunders) {
+      if (ff.funder === targetFirstFunder.funder) {
+        sharedFirstFunderAddrs.add(addr);
+        log("warn", `[${network}] Shared first funder! ${addr.slice(0, 10)}... and target both funded by ${ff.funder.slice(0, 10)}...`);
+      }
+    }
+  }
+
+  log("info", `[${network}] ${sharedFirstFunderAddrs.size} candidates share first funder with target`);
+
+  // Step 9: Scoring
   log("info", `[${network}] Scoring candidates...`);
   const contractPopMap = new Map(contractMetas.map((m) => [m.address, m]));
   const candidates = new Map<string, ClusterCandidate>();
@@ -586,6 +650,9 @@ async function scanNetwork(
         }))
       : [];
     const sharedFunders = sharedFunding.get(addr) ?? [];
+    const hasSharedFirstFunder = sharedFirstFunderAddrs.has(addr);
+    const candFF = candidateFirstFunders.get(addr);
+    const candFirstFunders: FirstFunderInfo[] = candFF ? [candFF] : [];
 
     const candTxs = candidateTxsMap.get(addr) ?? [];
     const timeProx = estimateTimeProximity(target, addr, txs, candTxs);
@@ -596,6 +663,8 @@ async function scanNetwork(
       directInfo,
       sharedContracts,
       sharedFunders,
+      hasSharedFirstFunder,
+      candFirstFunders,
       timeProx,
       amountHits,
       network
@@ -611,7 +680,11 @@ async function scanNetwork(
   log("success", `[${network}] Scoring complete: ${strong} strong, ${possible} possible`);
   stepDone?.(`${network}: Scoring complete`);
 
-  return { directWallets, contractClusterWallets, candidates, txCount: txs.length };
+  const targetFF: FirstFunderInfo | null = targetFirstFunder
+    ? { chain: network, funder: targetFirstFunder.funder, txHash: targetFirstFunder.txHash, value: targetFirstFunder.value }
+    : null;
+
+  return { directWallets, contractClusterWallets, candidates, txCount: txs.length, targetFirstFunder: targetFF };
 }
 
 // --- Main Entry Point ---
@@ -625,7 +698,7 @@ export interface ScanProgress {
   phase: string;
 }
 
-const STEPS_PER_NETWORK = 7;
+const STEPS_PER_NETWORK = 8;
 const ETHOS_STEPS = 1;
 
 export async function runClusterScan(
@@ -688,6 +761,7 @@ export async function runClusterScan(
   // Merge candidates across networks
   const mergedCandidates = new Map<string, ClusterCandidate>();
   const networkStats: ClusterScanResult["networkStats"] = {};
+  const allTargetFirstFunders: FirstFunderInfo[] = [];
 
   for (const { chain, result } of networkResults) {
     if (!result) {
@@ -701,15 +775,23 @@ export async function runClusterScan(
       contractClusters: result.contractClusterWallets.size,
     };
 
+    if (result.targetFirstFunder) {
+      allTargetFirstFunders.push(result.targetFirstFunder);
+    }
+
     for (const [addr, candidate] of result.candidates) {
       const existing = mergedCandidates.get(addr);
       if (existing) {
-        // Merge: take highest score, combine signals and networks
+        // Merge: take highest score, combine signals, networks, and first funders
         if (candidate.score > existing.score) {
           const networks = [...new Set([...existing.networks, ...candidate.networks])];
-          mergedCandidates.set(addr, { ...candidate, networks });
+          const firstFunders = [...existing.firstFunders, ...candidate.firstFunders];
+          const sharedFF = existing.sharedFirstFunder || candidate.sharedFirstFunder;
+          mergedCandidates.set(addr, { ...candidate, networks, firstFunders, sharedFirstFunder: sharedFF });
         } else {
           existing.networks = [...new Set([...existing.networks, ...candidate.networks])];
+          existing.firstFunders = [...existing.firstFunders, ...candidate.firstFunders];
+          existing.sharedFirstFunder = existing.sharedFirstFunder || candidate.sharedFirstFunder;
         }
       } else {
         mergedCandidates.set(addr, candidate);
@@ -782,6 +864,7 @@ export async function runClusterScan(
   return {
     target,
     targetEthos,
+    targetFirstFunders: allTargetFirstFunders,
     strongCluster: strongWithEthos,
     possibleCluster: possibleWithEthos,
     networkStats,

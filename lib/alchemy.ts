@@ -91,8 +91,9 @@ export async function getFirstFunder(
         withMetadata: false,
         excludeZeroValue: true,
       },
-    ])) as AssetTransfersResponse;
+    ])) as AssetTransfersResponse | null;
 
+    if (!data) return null;
     const transfers = data.result?.transfers;
     if (!transfers || transfers.length === 0) return null;
 
@@ -102,8 +103,7 @@ export async function getFirstFunder(
       txHash: first.hash,
       value: first.value || 0,
     };
-  } catch (err) {
-    // Silently return null on failure
+  } catch {
     return null;
   }
 }
