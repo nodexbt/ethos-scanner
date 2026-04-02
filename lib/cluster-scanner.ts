@@ -16,7 +16,7 @@ const CANDIDATE_MAX_TXS = 4000;
 const MAX_CANDIDATES_PER_NETWORK = 150;
 const MAX_EXCHANGE_CONTRACTS = 10;
 const HUGE_TX_THRESHOLD = 15000;
-const CONCURRENCY = 3;
+const CONCURRENCY = 8;
 
 // Scoring weights
 const W_DIRECT = 4;
@@ -273,7 +273,7 @@ async function findWalletsSharingContracts(
         // Skip failed contracts
       }
     },
-    2
+    5
   );
 
   return candidates;
@@ -516,7 +516,7 @@ async function scanNetwork(
     const metas = await parallel(
       contractDests.slice(0, MAX_EXCHANGE_CONTRACTS),
       (addr) => estimateContractPopularity(addr, chain),
-      2
+      5
     );
     contractMetas.push(...metas);
     for (const m of contractMetas) {
@@ -682,7 +682,7 @@ export async function runClusterScan(
         return { chain, result: null, error: err };
       }
     },
-    2
+    5
   );
 
   // Merge candidates across networks
@@ -742,7 +742,7 @@ export async function runClusterScan(
         return { addr, profile: null };
       }
     },
-    5
+    10
   );
 
   let targetEthos: ClusterScanResult["targetEthos"];

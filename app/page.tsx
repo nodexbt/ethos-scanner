@@ -29,37 +29,15 @@ import { useSession, signIn, signOut } from "next-auth/react";
 
 // --- Saved Investigations ---
 
-const INVESTIGATIONS_KEY = "ethos-investigations";
-
-interface SavedInvestigation {
+interface InvestigationSummary {
   id: string;
   target: string;
   targetName: string | null;
   savedAt: number;
-  clusterResult: ClusterScanResult;
-  screenshots: Record<string, string>; // address -> dataUrl
-  aiAnalysis: string | null;
-}
-
-function loadInvestigations(): SavedInvestigation[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(INVESTIGATIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveInvestigation(inv: SavedInvestigation) {
-  const investigations = loadInvestigations().filter((i) => i.id !== inv.id);
-  investigations.unshift(inv);
-  localStorage.setItem(INVESTIGATIONS_KEY, JSON.stringify(investigations.slice(0, 50)));
-}
-
-function deleteInvestigation(id: string) {
-  const investigations = loadInvestigations().filter((i) => i.id !== id);
-  localStorage.setItem(INVESTIGATIONS_KEY, JSON.stringify(investigations));
+  strongCount: number;
+  possibleCount: number;
+  hasAnalysis: boolean;
+  screenshotCount: number;
 }
 
 export default function Home() {
@@ -77,14 +55,14 @@ export default function Home() {
   const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [savedInvestigations, setSavedInvestigations] = useState<SavedInvestigation[]>([]);
+  const [savedInvestigations, setSavedInvestigations] = useState<InvestigationSummary[]>([]);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
   const [loginPassphrase, setLoginPassphrase] = useState("");
   const [loginError, setLoginError] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
-    setSavedInvestigations(loadInvestigations());
+    fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -195,27 +173,36 @@ export default function Home() {
     return `https://etherscan.io/address/${address}`;
   };
 
-  const handleSaveInvestigation = () => {
-    if (!clusterResult) return;
-    const id = currentInvestigationId || `inv-${Date.now()}`;
-    const inv: SavedInvestigation = {
-      id,
-      target: clusterResult.target,
-      targetName: clusterResult.targetEthos?.displayName ?? null,
-      savedAt: Date.now(),
-      clusterResult,
-      screenshots: Object.fromEntries(screenshots),
-      aiAnalysis,
-    };
-    saveInvestigation(inv);
-    setCurrentInvestigationId(id);
-    setSavedInvestigations(loadInvestigations());
+  const refreshInvestigations = () => {
+    fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
   };
 
-  const handleLoadInvestigation = (inv: SavedInvestigation) => {
-    setClusterResult(inv.clusterResult);
-    setScreenshots(new Map(Object.entries(inv.screenshots)));
-    setAiAnalysis(inv.aiAnalysis);
+  const handleSaveInvestigation = async () => {
+    if (!clusterResult) return;
+    const id = currentInvestigationId || `inv-${Date.now()}`;
+    await fetch("/api/investigations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        target: clusterResult.target,
+        targetName: clusterResult.targetEthos?.displayName ?? null,
+        clusterResult,
+        screenshots: Object.fromEntries(screenshots),
+        aiAnalysis,
+      }),
+    });
+    setCurrentInvestigationId(id);
+    refreshInvestigations();
+  };
+
+  const handleLoadInvestigation = async (inv: InvestigationSummary) => {
+    const resp = await fetch(`/api/investigations/${inv.id}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    setClusterResult(data.clusterResult);
+    setScreenshots(new Map(Object.entries(data.screenshots || {})));
+    setAiAnalysis(data.aiAnalysis);
     setCurrentInvestigationId(inv.id);
     setClusterLogs([]);
     setScanProgress(null);
@@ -223,9 +210,9 @@ export default function Home() {
     setError(null);
   };
 
-  const handleDeleteInvestigation = (id: string) => {
-    deleteInvestigation(id);
-    setSavedInvestigations(loadInvestigations());
+  const handleDeleteInvestigation = async (id: string) => {
+    await fetch(`/api/investigations/${id}`, { method: "DELETE" });
+    refreshInvestigations();
     if (currentInvestigationId === id) setCurrentInvestigationId(null);
   };
 
@@ -585,9 +572,10 @@ export default function Home() {
                         {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
                       </div>
                       <div className="text-[10px] text-muted-foreground">
-                        {inv.clusterResult.strongCluster.length} strong
-                        {" / "}{inv.clusterResult.possibleCluster.length} possible
-                        {inv.aiAnalysis && " / report"}
+                        {inv.strongCount} strong
+                        {" / "}{inv.possibleCount} possible
+                        {inv.hasAnalysis && " / report"}
+                        {inv.screenshotCount > 0 && ` / ${inv.screenshotCount} img`}
                         {" / "}{new Date(inv.savedAt).toLocaleDateString()}
                       </div>
                     </button>
