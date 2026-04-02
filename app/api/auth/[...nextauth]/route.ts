@@ -4,7 +4,6 @@ import CredentialsProvider from "next-auth/providers/credentials";
 
 const BYPASS_AUTH = process.env.BYPASS_AUTH === "true";
 
-// Allowed Twitter usernames (lowercase). Add more as needed.
 const ALLOWED_USERS = new Set(
   (process.env.ALLOWED_TWITTER_USERS || "")
     .split(",")
@@ -42,41 +41,88 @@ if (BYPASS_AUTH) {
 function extractTwitterUsername(profile: unknown): string | null {
   if (!profile || typeof profile !== "object") return null;
   const p = profile as Record<string, unknown>;
-
-  // Twitter OAuth 2.0 can return username at different paths
-  // depending on NextAuth version
   if (typeof p.username === "string") return p.username.toLowerCase();
   if (p.data && typeof p.data === "object") {
     const data = p.data as Record<string, unknown>;
     if (typeof data.username === "string") return data.username.toLowerCase();
   }
-  // Fallback: check screen_name (OAuth 1.0a style)
   if (typeof p.screen_name === "string") return p.screen_name.toLowerCase();
-
   return null;
 }
 
+// Fix for Vercel serverless: ensure cookies work across invocations
+const useSecureCookies = !BYPASS_AUTH;
+const hostName = process.env.NEXTAUTH_URL
+  ? new URL(process.env.NEXTAUTH_URL).hostname
+  : "localhost";
+
 export const authOptions: NextAuthOptions = {
   providers,
-  debug: !BYPASS_AUTH, // Enable debug logging for OAuth on production
+  debug: !BYPASS_AUTH,
+  cookies: {
+    sessionToken: {
+      name: useSecureCookies ? `__Secure-next-auth.session-token` : `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        domain: undefined,
+      },
+    },
+    callbackUrl: {
+      name: useSecureCookies ? `__Secure-next-auth.callback-url` : `next-auth.callback-url`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        domain: undefined,
+      },
+    },
+    csrfToken: {
+      name: useSecureCookies ? `__Host-next-auth.csrf-token` : `next-auth.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
+    pkceCodeVerifier: {
+      name: useSecureCookies ? `__Secure-next-auth.pkce.code_verifier` : `next-auth.pkce.code_verifier`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        maxAge: 900,
+      },
+    },
+    state: {
+      name: useSecureCookies ? `__Secure-next-auth.state` : `next-auth.state`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        maxAge: 900,
+      },
+    },
+  },
   callbacks: {
     async signIn({ profile, credentials }) {
       if (BYPASS_AUTH && credentials !== undefined) return true;
 
-      console.log("[auth] signIn profile:", JSON.stringify(profile, null, 2));
+      console.log("[auth] signIn callback reached");
+      console.log("[auth] profile:", JSON.stringify(profile, null, 2));
 
       const username = extractTwitterUsername(profile);
-      console.log("[auth] extracted username:", username);
-      console.log("[auth] allowed users:", [...ALLOWED_USERS]);
+      console.log("[auth] username:", username, "allowed:", [...ALLOWED_USERS]);
 
-      if (!username) {
-        console.log("[auth] rejected: no username found in profile");
-        return false;
-      }
+      if (!username) return false;
       if (ALLOWED_USERS.size === 0) return true;
-      const allowed = ALLOWED_USERS.has(username);
-      console.log("[auth] allowed:", allowed);
-      return allowed;
+      return ALLOWED_USERS.has(username);
     },
     async session({ session, token }) {
       if (session.user) {
