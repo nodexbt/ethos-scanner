@@ -451,6 +451,28 @@ export default function Home() {
     return lines;
   };
 
+  // Render a wallet address with its Ethos profile name if available
+  const renderAddress = (addr: string) => {
+    const name = resolveAddressName(addr);
+    const isResolved = name !== `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+    const funderProfile = clusterResult?.funderProfiles?.[addr];
+    return (
+      <span className="inline-flex items-center gap-1">
+        {isResolved && (
+          <span className="font-medium not-italic">{name}</span>
+        )}
+        <a
+          href={funderProfile?.profileUrl || getExplorerAddressUrl(addr)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-muted-foreground hover:underline"
+        >
+          {addr.slice(0, 8)}...{addr.slice(-4)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+        </a>
+      </span>
+    );
+  };
+
   const hasResults = clusterResult !== null && !scanning;
 
   // Loading state
@@ -801,7 +823,7 @@ export default function Home() {
                                 </a>
                               )}
                             </div>
-                            <span className="text-muted-foreground">{ff.value} ETH</span>
+                            <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
                           </div>
                         );
                       })}
@@ -873,8 +895,8 @@ export default function Home() {
                         </div>
                         <div className="space-y-1 text-xs text-muted-foreground">
                           {buildConnectionSummary(candidate).map((line, i) => (
-                            <div key={i} className="flex items-start gap-1.5">
-                              <span className="text-muted-foreground shrink-0 mt-0.5">-</span>
+                            <div key={i} className="flex gap-1.5">
+                              <span className="text-muted-foreground shrink-0">-</span>
                               <span>{line}</span>
                             </div>
                           ))}
@@ -934,11 +956,54 @@ export default function Home() {
                         </div>
                         <div className="space-y-1 text-xs text-muted-foreground">
                           {buildConnectionSummary(candidate).map((line, i) => (
-                            <div key={i} className="flex items-start gap-1.5">
-                              <span className="text-muted-foreground shrink-0 mt-0.5">-</span>
+                            <div key={i} className="flex gap-1.5">
+                              <span className="text-muted-foreground shrink-0">-</span>
                               <span>{line}</span>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Cross-cluster shared deposits */}
+              {clusterResult.sharedDeposits && clusterResult.sharedDeposits.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Cross-Cluster Connections</CardTitle>
+                    <CardDescription className="text-xs">
+                      Contracts that 2 or more cluster members deposited to independently.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {clusterResult.sharedDeposits.map((dep, i) => (
+                      <div key={i} className="rounded-lg border border-border p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <a
+                            href={getExplorerAddressUrl(dep.contract)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono hover:underline inline-flex items-center gap-1"
+                          >
+                            {dep.contract.slice(0, 12)}...{dep.contract.slice(-6)}
+                            <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                          </a>
+                          <span className="text-muted-foreground">{dep.network}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {dep.wallets.length} cluster members deposited to this contract:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {dep.wallets.map((wallet) => {
+                            const name = resolveAddressName(wallet);
+                            return (
+                              <span key={wallet} className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30">
+                                {name}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
@@ -1132,9 +1197,22 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* Connection to Target */}
+              {/* Summary */}
               <div>
-                <h3 className="text-sm font-semibold mb-2">Connection to {clusterResult.targetEthos?.displayName || clusterResult.target.slice(0, 10) + "..."}</h3>
+                <h3 className="text-sm font-semibold mb-2">Summary</h3>
+                <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+                  {buildConnectionSummary(selectedCandidate).map((line, i) => (
+                    <div key={i} className="flex gap-1.5 text-xs text-muted-foreground">
+                      <span className="shrink-0">-</span>
+                      <span>{line}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Connection to Target — Details */}
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Connection Details</h3>
                 <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                   {/* Direct transfers */}
                   {selectedCandidate.directCount > 0 && (
@@ -1162,15 +1240,9 @@ export default function Home() {
                       </div>
                       <div className="space-y-0.5">
                         {selectedCandidate.sharedContracts.map((addr) => (
-                          <a
-                            key={addr}
-                            href={getExplorerAddressUrl(addr)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block text-xs font-mono text-muted-foreground hover:underline"
-                          >
-                            {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                          </a>
+                          <div key={addr} className="text-xs">
+                            {renderAddress(addr)}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -1192,16 +1264,9 @@ export default function Home() {
                         <div key={i} className="flex items-center justify-between text-xs border border-border rounded px-2 py-1.5">
                           <div className="flex items-center gap-2">
                             <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                            <a
-                              href={getExplorerAddressUrl(ff.funder)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono hover:underline"
-                            >
-                              {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                            </a>
+                            {renderAddress(ff.funder)}
                           </div>
-                          <span className="text-muted-foreground">{ff.value} ETH</span>
+                          <span className="text-muted-foreground shrink-0">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
                         </div>
                       ))}
                       {selectedCandidate.sharedFirstFunder && clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
@@ -1232,15 +1297,8 @@ export default function Home() {
                         </div>
                         <div className="space-y-0.5">
                           {senders.slice(0, MAX_SHOWN).map((addr) => (
-                            <div key={addr} className="flex items-center gap-1.5">
-                              <a
-                                href={getExplorerAddressUrl(addr)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs font-mono text-muted-foreground hover:underline"
-                              >
-                                {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                              </a>
+                            <div key={addr} className="flex items-center gap-1.5 text-xs">
+                              {renderAddress(addr)}
                               {isFirstFunder(addr) && (
                                 <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-500 font-medium">first funder</span>
                               )}
