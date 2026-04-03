@@ -859,7 +859,11 @@ export async function runClusterScan(
   const possibleWithEthos = possibleCluster.filter((c) => c.ethosProfile);
   log("info", `${strongWithEthos.length} strong and ${possibleWithEthos.length} possible candidates have Ethos profiles`);
   stepDone("Ethos lookup complete");
-  log("success", `Cluster scan complete`);
+  const totalElapsed = Date.now() - progress.start;
+  const mins = Math.floor(totalElapsed / 60000);
+  const secs = Math.round((totalElapsed % 60000) / 1000);
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  log("success", `Cluster scan complete in ${timeStr}`);
 
   return {
     target,

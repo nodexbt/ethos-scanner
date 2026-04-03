@@ -430,10 +430,26 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2">
           {hasResults && (
-            <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
-              <FileText className="h-3.5 w-3.5" />
-              Export for Slash Report
-            </Button>
+            <>
+              <Button
+                onClick={() => {
+                  const wallets = [
+                    clusterResult!.target,
+                    ...clusterResult!.strongCluster.map((c) => c.address),
+                    ...clusterResult!.possibleCluster.map((c) => c.address),
+                  ];
+                  navigator.clipboard.writeText(wallets.join("\n"));
+                }}
+                size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Copy Wallets
+              </Button>
+              <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                Export for Slash Report
+              </Button>
+            </>
           )}
           {session && (
             <>
