@@ -81,6 +81,8 @@ export default function Home() {
     setClusterLogs([]);
     setScanProgress(null);
     setError(null);
+    setScreenshots(new Map());
+    setCurrentInvestigationId(null);
 
     try {
       const resp = await fetch("/api/scan", {
@@ -294,7 +296,7 @@ export default function Home() {
           if (c.repeatTransfer) prompt += ` -- repeated`;
           prompt += `\n`;
         }
-        if (c.sharedFundingSources.length > 0) prompt += `- Shared funding sources: ${c.sharedFundingSources.length}\n`;
+        if (c.sharedFundingSources.length > 0) prompt += `- Shared incoming senders (not first funders): ${c.sharedFundingSources.length}\n`;
         if (c.timeProximityHits > 0) prompt += `- Transaction timing correlations: ${c.timeProximityHits}\n`;
         if (c.similarAmountHits > 0) prompt += `- Similar transaction amounts: ${c.similarAmountHits}\n`;
         if (screenshots.has(c.address)) prompt += `- X/Twitter search screenshot attached (see image)\n`;
@@ -435,10 +437,10 @@ export default function Home() {
                 onClick={() => {
                   const wallets = [
                     clusterResult!.target,
-                    ...clusterResult!.strongCluster.map((c) => c.address),
-                    ...clusterResult!.possibleCluster.map((c) => c.address),
+                    ...clusterResult!.strongCluster.flatMap((c) => c.wallets || [c.address]),
+                    ...clusterResult!.possibleCluster.flatMap((c) => c.wallets || [c.address]),
                   ];
-                  navigator.clipboard.writeText(wallets.join("\n"));
+                  navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
                 }}
                 size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
               >
@@ -780,15 +782,20 @@ export default function Home() {
                               <div className="text-xs text-muted-foreground mt-0.5">
                                 {candidate.ethosProfile.username && `@${candidate.ethosProfile.username} · `}
                                 Ethos score: {candidate.ethosProfile.score}
-                                {" · "}
-                                <a
-                                  href={getExplorerAddressUrl(candidate.address)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono hover:underline"
-                                >
-                                  {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
-                                </a>
+                                {candidate.wallets && candidate.wallets.length > 1
+                                  ? ` · ${candidate.wallets.length} wallets`
+                                  : <>
+                                      {" · "}
+                                      <a
+                                        href={getExplorerAddressUrl(candidate.address)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-mono hover:underline"
+                                      >
+                                        {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
+                                      </a>
+                                    </>
+                                }
                               </div>
                             )}
                           </div>
@@ -811,7 +818,7 @@ export default function Home() {
                           direct={candidate.directCount} in={candidate.incomingCount} out={candidate.outgoingCount}
                           {candidate.bidirectional && " · bidirectional"}
                           {candidate.repeatTransfer && " · repeat"}
-                          {candidate.sharedFundingSources.length > 0 && ` · ${candidate.sharedFundingSources.length} shared funder(s)`}
+                          {candidate.sharedFundingSources.length > 0 && ` · ${candidate.sharedFundingSources.length} shared sender(s)`}
                           {candidate.timeProximityHits > 0 && ` · ${candidate.timeProximityHits} timing hits`}
                           {candidate.similarAmountHits > 0 && ` · ${candidate.similarAmountHits} amount matches`}
                         </div>
@@ -883,15 +890,20 @@ export default function Home() {
                               <div className="text-xs text-muted-foreground mt-0.5">
                                 {candidate.ethosProfile.username && `@${candidate.ethosProfile.username} · `}
                                 Ethos score: {candidate.ethosProfile.score}
-                                {" · "}
-                                <a
-                                  href={getExplorerAddressUrl(candidate.address)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono hover:underline"
-                                >
-                                  {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
-                                </a>
+                                {candidate.wallets && candidate.wallets.length > 1
+                                  ? ` · ${candidate.wallets.length} wallets`
+                                  : <>
+                                      {" · "}
+                                      <a
+                                        href={getExplorerAddressUrl(candidate.address)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-mono hover:underline"
+                                      >
+                                        {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
+                                      </a>
+                                    </>
+                                }
                               </div>
                             )}
                           </div>
@@ -1085,14 +1097,17 @@ export default function Home() {
                     Ethos Profile <ExternalLink className="h-3 w-3 opacity-50" />
                   </a>
                 )}
-                <a
-                  href={getExplorerAddressUrl(selectedCandidate.address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
-                >
-                  {selectedCandidate.address.slice(0, 8)}...{selectedCandidate.address.slice(-6)} <ExternalLink className="h-3 w-3 opacity-50" />
-                </a>
+                {(selectedCandidate.wallets || [selectedCandidate.address]).map((wallet) => (
+                  <a
+                    key={wallet}
+                    href={getExplorerAddressUrl(wallet)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
+                  >
+                    {wallet.slice(0, 8)}...{wallet.slice(-6)} <ExternalLink className="h-3 w-3 opacity-50" />
+                  </a>
+                ))}
               </div>
 
               {/* Connection to Target */}
@@ -1175,28 +1190,49 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Shared funding sources */}
-                  {selectedCandidate.sharedFundingSources.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium">Shared Funding Sources</div>
-                      <div className="text-xs text-muted-foreground">
-                        Both wallets received funds from {selectedCandidate.sharedFundingSources.length} of the same source{selectedCandidate.sharedFundingSources.length !== 1 && "s"}:
+                  {/* Shared incoming senders */}
+                  {selectedCandidate.sharedFundingSources.length > 0 && (() => {
+                    const firstFunderAddrs = new Set(
+                      (selectedCandidate.firstFunders || []).map((f) => f.funder)
+                    );
+                    const targetFFAddrs = new Set(
+                      (clusterResult.targetFirstFunders || []).map((f) => f.funder)
+                    );
+                    const senders = selectedCandidate.sharedFundingSources;
+                    const isFirstFunder = (addr: string) => firstFunderAddrs.has(addr) || targetFFAddrs.has(addr);
+                    const MAX_SHOWN = 5;
+
+                    return (
+                      <div className="space-y-1">
+                        <div className="text-xs font-medium">Shared Incoming Senders</div>
+                        <div className="text-xs text-muted-foreground">
+                          {senders.length} address{senders.length !== 1 && "es"} sent tokens to both the target and this wallet. This does not mean they funded the wallet — it only indicates shared incoming transaction sources.
+                        </div>
+                        <div className="space-y-0.5">
+                          {senders.slice(0, MAX_SHOWN).map((addr) => (
+                            <div key={addr} className="flex items-center gap-1.5">
+                              <a
+                                href={getExplorerAddressUrl(addr)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs font-mono text-muted-foreground hover:underline"
+                              >
+                                {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                              </a>
+                              {isFirstFunder(addr) && (
+                                <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-500 font-medium">first funder</span>
+                              )}
+                            </div>
+                          ))}
+                          {senders.length > MAX_SHOWN && (
+                            <div className="text-[10px] text-muted-foreground">
+                              + {senders.length - MAX_SHOWN} more shared sender{senders.length - MAX_SHOWN !== 1 && "s"}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="space-y-0.5">
-                        {selectedCandidate.sharedFundingSources.map((addr) => (
-                          <a
-                            key={addr}
-                            href={getExplorerAddressUrl(addr)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block text-xs font-mono text-muted-foreground hover:underline"
-                          >
-                            {addr.slice(0, 14)}...{addr.slice(-8)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Timing */}
                   {selectedCandidate.timeProximityHits > 0 && (

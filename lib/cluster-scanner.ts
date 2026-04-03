@@ -62,7 +62,8 @@ export interface FirstFunderInfo {
 }
 
 export interface ClusterCandidate {
-  address: string;
+  address: string; // primary address
+  wallets: string[]; // all wallet addresses for this candidate (may be multiple if same Ethos profile)
   score: number;
   confidence: "high" | "medium" | "low";
   signals: Signal[];
@@ -433,7 +434,7 @@ function scoreCandidate(
   }
 
   if (sharedFunders.length > 0) {
-    addSignal("shared_funding_source", W_SHARED_FUNDER, `sources=${sharedFunders.length}`);
+    addSignal("shared_incoming_sender", W_SHARED_FUNDER, `senders=${sharedFunders.length}`);
   }
 
   if (timeProx.hits1h > 0) {
@@ -453,6 +454,7 @@ function scoreCandidate(
 
   return {
     address,
+    wallets: [address],
     score: totalScore,
     confidence,
     signals,
@@ -854,10 +856,50 @@ export async function runClusterScan(
     }
   }
 
-  // Filter to only candidates with Ethos profiles
-  const strongWithEthos = strongCluster.filter((c) => c.ethosProfile);
-  const possibleWithEthos = possibleCluster.filter((c) => c.ethosProfile);
-  log("info", `${strongWithEthos.length} strong and ${possibleWithEthos.length} possible candidates have Ethos profiles`);
+  // Filter to only candidates with Ethos profiles, exclude target's own profile,
+  // and merge candidates that belong to the same Ethos profile
+  const targetProfileId = targetEthos?.profileId;
+
+  function dedupeByProfile(candidates: ClusterCandidate[]): ClusterCandidate[] {
+    const withEthos = candidates.filter(
+      (c) => c.ethosProfile && c.ethosProfile.profileId !== targetProfileId
+    );
+    const byProfileId = new Map<number, ClusterCandidate>();
+    for (const c of withEthos) {
+      const pid = c.ethosProfile!.profileId;
+      const existing = byProfileId.get(pid);
+      if (existing) {
+        // Merge into existing: combine wallets, take highest score, merge signals
+        existing.wallets = [...new Set([...existing.wallets, ...c.wallets])];
+        existing.networks = [...new Set([...existing.networks, ...c.networks])];
+        existing.firstFunders = [...existing.firstFunders, ...c.firstFunders];
+        existing.sharedFundingSources = [...new Set([...existing.sharedFundingSources, ...c.sharedFundingSources])];
+        existing.sharedContracts = [...new Set([...existing.sharedContracts, ...c.sharedContracts])];
+        existing.sharedFirstFunder = existing.sharedFirstFunder || c.sharedFirstFunder;
+        existing.directCount += c.directCount;
+        existing.incomingCount += c.incomingCount;
+        existing.outgoingCount += c.outgoingCount;
+        existing.bidirectional = existing.bidirectional || c.bidirectional;
+        existing.repeatTransfer = existing.repeatTransfer || c.repeatTransfer;
+        existing.timeProximityHits += c.timeProximityHits;
+        existing.similarAmountHits += c.similarAmountHits;
+        // Keep highest scoring signals
+        if (c.score > existing.score) {
+          existing.score = c.score;
+          existing.confidence = c.confidence;
+          existing.signals = c.signals;
+          existing.signalTypes = c.signalTypes;
+        }
+      } else {
+        byProfileId.set(pid, { ...c });
+      }
+    }
+    return [...byProfileId.values()].sort((a, b) => b.score - a.score);
+  }
+
+  const strongWithEthos = dedupeByProfile(strongCluster);
+  const possibleWithEthos = dedupeByProfile(possibleCluster);
+  log("info", `${strongWithEthos.length} strong and ${possibleWithEthos.length} possible candidates have Ethos profiles (deduped)`);
   stepDone("Ethos lookup complete");
   const totalElapsed = Date.now() - progress.start;
   const mins = Math.floor(totalElapsed / 60000);
