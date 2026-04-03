@@ -46,6 +46,7 @@ export interface InvestigationSummary {
   id: string;
   target: string;
   targetName: string | null;
+  targetAvatar: string | null;
   savedAt: number;
   strongCount: number;
   possibleCount: number;
@@ -75,16 +76,19 @@ export function listInvestigations(): InvestigationSummary[] {
   return rows.map((row) => {
     let strongCount = 0;
     let possibleCount = 0;
+    let targetAvatar: string | null = null;
     try {
       const result = JSON.parse(row.cluster_result);
       strongCount = result.strongCluster?.length ?? 0;
       possibleCount = result.possibleCluster?.length ?? 0;
+      targetAvatar = result.targetEthos?.avatarUrl ?? null;
     } catch {}
 
     return {
       id: row.id,
       target: row.target,
       targetName: row.target_name,
+      targetAvatar,
       savedAt: row.saved_at,
       strongCount,
       possibleCount,

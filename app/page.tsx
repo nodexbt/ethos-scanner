@@ -34,6 +34,7 @@ interface InvestigationSummary {
   id: string;
   target: string;
   targetName: string | null;
+  targetAvatar: string | null;
   savedAt: number;
   strongCount: number;
   possibleCount: number;
@@ -359,6 +360,97 @@ export default function Home() {
     return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
   };
 
+  const targetName = clusterResult?.targetEthos?.displayName || clusterResult?.target.slice(0, 10) + "...";
+
+  // Collect all first funder addresses across all candidates to detect shared funders
+  const allCandidateFirstFunderAddrs = new Set<string>();
+  if (clusterResult) {
+    for (const c of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
+      for (const ff of c.firstFunders || []) {
+        allCandidateFirstFunderAddrs.add(ff.funder);
+      }
+    }
+  }
+
+  // Resolve a wallet address to a display name (check target, candidates, then funder profiles)
+  const resolveAddressName = (addr: string): string => {
+    if (!clusterResult) return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+    if (addr === clusterResult.target) {
+      return clusterResult.targetEthos?.displayName || `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+    }
+    for (const c of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
+      if (c.wallets?.includes(addr) || c.address === addr) {
+        return c.ethosProfile?.displayName || `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+      }
+    }
+    const funderProfile = clusterResult.funderProfiles?.[addr];
+    if (funderProfile) return funderProfile.displayName;
+    return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+  };
+
+  const buildConnectionSummary = (candidate: ClusterCandidate): string[] => {
+    const name = candidate.ethosProfile?.displayName || candidate.address.slice(0, 10) + "...";
+    const lines: string[] = [];
+
+    // First funder - only show if it's meaningful:
+    // 1. Same first funder as target
+    // 2. Funder also funded other candidates in the results
+    if (candidate.sharedFirstFunder) {
+      lines.push(`Same first funder as ${targetName} on at least one chain.`);
+    } else if (candidate.firstFunders && candidate.firstFunders.length > 0) {
+      for (const ff of candidate.firstFunders) {
+        const funderName = resolveAddressName(ff.funder);
+        let fundedOthers = 0;
+        if (clusterResult) {
+          for (const other of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
+            if (other.address === candidate.address) continue;
+            if (other.firstFunders?.some((f) => f.funder === ff.funder)) fundedOthers++;
+          }
+        }
+        if (fundedOthers > 0) {
+          lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
+        }
+      }
+    }
+
+    // Direct transfers
+    if (candidate.directCount > 0) {
+      const parts: string[] = [];
+      if (candidate.incomingCount > 0 && candidate.outgoingCount > 0) {
+        parts.push(`Sent ${candidate.outgoingCount} and received ${candidate.incomingCount} transaction${candidate.directCount > 1 ? "s" : ""} with ${targetName}`);
+      } else if (candidate.outgoingCount > 0) {
+        parts.push(`Sent ${candidate.outgoingCount} transaction${candidate.outgoingCount > 1 ? "s" : ""} to ${targetName}`);
+      } else {
+        parts.push(`Received ${candidate.incomingCount} transaction${candidate.incomingCount > 1 ? "s" : ""} from ${targetName}`);
+      }
+      if (candidate.bidirectional) parts.push("funds flow both ways");
+      if (candidate.repeatTransfer) parts.push("repeated pattern");
+      lines.push(parts.join(", ") + ".");
+    }
+
+    // Shared incoming senders
+    if (candidate.sharedFundingSources.length > 0) {
+      lines.push(`${candidate.sharedFundingSources.length} address${candidate.sharedFundingSources.length > 1 ? "es" : ""} sent tokens to both ${name} and ${targetName}.`);
+    }
+
+    // Timing
+    if (candidate.timeProximityHits > 0) {
+      lines.push(`${candidate.timeProximityHits} transaction${candidate.timeProximityHits > 1 ? "s" : ""} occurred close in time to ${targetName}'s activity.`);
+    }
+
+    // Similar amounts
+    if (candidate.similarAmountHits > 0) {
+      lines.push(`${candidate.similarAmountHits} outgoing transaction${candidate.similarAmountHits > 1 ? "s" : ""} matched similar amounts.`);
+    }
+
+    // Shared contracts
+    if (candidate.sharedContracts.length > 0) {
+      lines.push(`Both interacted with ${candidate.sharedContracts.length} of the same contract${candidate.sharedContracts.length > 1 ? "s" : ""}.`);
+    }
+
+    return lines;
+  };
+
   const hasResults = clusterResult !== null && !scanning;
 
   // Loading state
@@ -562,10 +654,17 @@ export default function Home() {
                 {savedInvestigations.map((inv) => (
                   <div
                     key={inv.id}
-                    className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${
-                      currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                    className={`group flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2 text-xs ${
+                      currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
                     }`}
                   >
+                    {inv.targetAvatar && (
+                      <img
+                        src={inv.targetAvatar}
+                        alt={inv.targetName || ""}
+                        className="h-8 w-8 rounded-full shrink-0"
+                      />
+                    )}
                     <button
                       onClick={() => handleLoadInvestigation(inv)}
                       className="flex-1 min-w-0 text-left cursor-pointer"
@@ -576,7 +675,6 @@ export default function Home() {
                       <div className="text-[10px] text-muted-foreground">
                         {inv.strongCount} strong
                         {" / "}{inv.possibleCount} possible
-                        {inv.hasAnalysis && " / report"}
                         {inv.screenshotCount > 0 && ` / ${inv.screenshotCount} img`}
                         {" / "}{new Date(inv.savedAt).toLocaleDateString()}
                       </div>
@@ -617,40 +715,28 @@ export default function Home() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-4 gap-2">
-                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
                       <div className="text-xl font-bold">{Object.keys(clusterResult.networkStats).length}</div>
                       <div className="text-[10px] text-muted-foreground">Networks</div>
                     </div>
-                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
                       <div className="text-xl font-bold">
                         {Object.values(clusterResult.networkStats).reduce((s, n) => s + n.txCount, 0)}
                       </div>
                       <div className="text-[10px] text-muted-foreground">Transactions</div>
                     </div>
-                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
                       <div className="text-xl font-bold text-red-500">{clusterResult.strongCluster.length}</div>
                       <div className="text-[10px] text-red-500">Strong</div>
                     </div>
-                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
                       <div className="text-xl font-bold text-amber-500">{clusterResult.possibleCluster.length}</div>
                       <div className="text-[10px] text-amber-500">Possible</div>
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Per-network breakdown</div>
-                    {Object.entries(clusterResult.networkStats).map(([network, stats]) => (
-                      <div key={network} className="flex items-center justify-between text-xs py-1 border-b border-muted last:border-0">
-                        <span className="font-medium">{network}</span>
-                        <span className="text-muted-foreground">
-                          {stats.txCount} txs &middot; {stats.directWallets} direct &middot; {stats.contractClusters} contracts
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-
                   {clusterResult.targetEthos && (
-                    <div className="rounded-lg border p-3 space-y-1">
+                    <div className="rounded-lg border border-border p-3 space-y-1">
                       <div className="text-xs font-medium text-muted-foreground">Target Ethos Profile</div>
                       <div className="flex items-center gap-3">
                         {clusterResult.targetEthos.avatarUrl && (
@@ -683,24 +769,42 @@ export default function Home() {
 
                   {/* Target first funders */}
                   {clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
-                    <div className="rounded-lg border p-3 space-y-1.5">
+                    <div className="rounded-lg border border-border p-3 space-y-1.5">
                       <div className="text-xs font-medium text-muted-foreground">Target First Funders</div>
-                      {clusterResult.targetFirstFunders.map((ff, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                            <a
-                              href={getExplorerAddressUrl(ff.funder)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono hover:underline"
-                            >
-                              {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                            </a>
+                      {clusterResult.targetFirstFunders.map((ff, i) => {
+                        const funderProfile = clusterResult.funderProfiles?.[ff.funder];
+                        return (
+                          <div key={i} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
+                              {funderProfile ? (
+                                <a
+                                  href={funderProfile.profileUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:underline inline-flex items-center gap-1"
+                                >
+                                  {funderProfile.avatarUrl && (
+                                    <img src={funderProfile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
+                                  )}
+                                  {funderProfile.displayName}
+                                  <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                </a>
+                              ) : (
+                                <a
+                                  href={getExplorerAddressUrl(ff.funder)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono hover:underline"
+                                >
+                                  {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                </a>
+                              )}
+                            </div>
+                            <span className="text-muted-foreground">{ff.value} ETH</span>
                           </div>
-                          <span className="text-muted-foreground">{ff.value} ETH</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -734,42 +838,22 @@ export default function Home() {
                       <div
                         key={candidate.address}
                         onClick={() => setSelectedCandidate(candidate)}
-                        className="rounded-lg border bg-red-500/5 border-red-500/20 p-3 space-y-2 cursor-pointer hover:border-red-500/50 transition-colors"
+                        className="rounded-lg border border-border p-3 space-y-2.5 cursor-pointer hover:bg-muted/30 transition-colors"
                       >
                         <div className="flex items-start gap-3">
                           {candidate.ethosProfile?.avatarUrl && (
-                            <a href={candidate.ethosProfile.profileUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                              <img
-                                src={candidate.ethosProfile.avatarUrl}
-                                alt={candidate.ethosProfile.displayName}
-                                className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
-                              />
-                            </a>
+                            <img
+                              src={candidate.ethosProfile.avatarUrl}
+                              alt={candidate.ethosProfile.displayName}
+                              className={`h-10 w-10 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
+                            />
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
-                                {candidate.ethosProfile ? (
-                                  <a
-                                    href={candidate.ethosProfile.profileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-medium text-sm hover:underline inline-flex items-center gap-1"
-                                  >
-                                    {candidate.ethosProfile.displayName}
-                                    <ExternalLink className="h-3 w-3 opacity-50" />
-                                  </a>
-                                ) : (
-                                  <a
-                                    href={getExplorerAddressUrl(candidate.address)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-mono text-sm hover:underline inline-flex items-center gap-1"
-                                  >
-                                    {candidate.address.slice(0, 10)}...{candidate.address.slice(-6)}
-                                    <ExternalLink className="h-3 w-3 opacity-50" />
-                                  </a>
-                                )}
+                                <span className="font-medium text-sm">
+                                  {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 10)}...${candidate.address.slice(-6)}`}
+                                </span>
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-red-500 text-white">
                                   score: {candidate.score}
                                 </span>
@@ -779,48 +863,21 @@ export default function Home() {
                               </div>
                             </div>
                             {candidate.ethosProfile && (
-                              <div className="text-xs text-muted-foreground mt-0.5">
+                              <div className="text-xs text-muted-foreground">
                                 {candidate.ethosProfile.username && `@${candidate.ethosProfile.username} · `}
                                 Ethos score: {candidate.ethosProfile.score}
-                                {candidate.wallets && candidate.wallets.length > 1
-                                  ? ` · ${candidate.wallets.length} wallets`
-                                  : <>
-                                      {" · "}
-                                      <a
-                                        href={getExplorerAddressUrl(candidate.address)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="font-mono hover:underline"
-                                      >
-                                        {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
-                                      </a>
-                                    </>
-                                }
+                                {candidate.wallets && candidate.wallets.length > 1 && ` · ${candidate.wallets.length} wallets`}
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {candidate.signals.map((signal, i) => (
-                            <span
-                              key={i}
-                              className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
-                                signal.score > 0
-                                  ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400"
-                                  : "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400"
-                              }`}
-                            >
-                              {signal.type} ({signal.score > 0 ? "+" : ""}{signal.score})
-                            </span>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          {buildConnectionSummary(candidate).map((line, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="text-muted-foreground shrink-0 mt-0.5">-</span>
+                              <span>{line}</span>
+                            </div>
                           ))}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground">
-                          direct={candidate.directCount} in={candidate.incomingCount} out={candidate.outgoingCount}
-                          {candidate.bidirectional && " · bidirectional"}
-                          {candidate.repeatTransfer && " · repeat"}
-                          {candidate.sharedFundingSources.length > 0 && ` · ${candidate.sharedFundingSources.length} shared sender(s)`}
-                          {candidate.timeProximityHits > 0 && ` · ${candidate.timeProximityHits} timing hits`}
-                          {candidate.similarAmountHits > 0 && ` · ${candidate.similarAmountHits} amount matches`}
                         </div>
                       </div>
                     ))}
@@ -842,42 +899,22 @@ export default function Home() {
                       <div
                         key={candidate.address}
                         onClick={() => setSelectedCandidate(candidate)}
-                        className="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 space-y-1.5 cursor-pointer hover:border-amber-500/50 transition-colors"
+                        className="rounded-lg border border-border p-3 space-y-2.5 cursor-pointer hover:bg-muted/30 transition-colors"
                       >
                         <div className="flex items-start gap-3">
                           {candidate.ethosProfile?.avatarUrl && (
-                            <a href={candidate.ethosProfile.profileUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                              <img
-                                src={candidate.ethosProfile.avatarUrl}
-                                alt={candidate.ethosProfile.displayName}
-                                className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
-                              />
-                            </a>
+                            <img
+                              src={candidate.ethosProfile.avatarUrl}
+                              alt={candidate.ethosProfile.displayName}
+                              className={`h-10 w-10 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
+                            />
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
-                                {candidate.ethosProfile ? (
-                                  <a
-                                    href={candidate.ethosProfile.profileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-medium text-sm hover:underline inline-flex items-center gap-1"
-                                  >
-                                    {candidate.ethosProfile.displayName}
-                                    <ExternalLink className="h-3 w-3 opacity-50" />
-                                  </a>
-                                ) : (
-                                  <a
-                                    href={getExplorerAddressUrl(candidate.address)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-mono text-sm hover:underline inline-flex items-center gap-1"
-                                  >
-                                    {candidate.address.slice(0, 10)}...{candidate.address.slice(-6)}
-                                    <ExternalLink className="h-3 w-3 opacity-50" />
-                                  </a>
-                                )}
+                                <span className="font-medium text-sm">
+                                  {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 10)}...${candidate.address.slice(-6)}`}
+                                </span>
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-500 text-white">
                                   score: {candidate.score}
                                 </span>
@@ -887,35 +924,20 @@ export default function Home() {
                               </div>
                             </div>
                             {candidate.ethosProfile && (
-                              <div className="text-xs text-muted-foreground mt-0.5">
+                              <div className="text-xs text-muted-foreground">
                                 {candidate.ethosProfile.username && `@${candidate.ethosProfile.username} · `}
                                 Ethos score: {candidate.ethosProfile.score}
-                                {candidate.wallets && candidate.wallets.length > 1
-                                  ? ` · ${candidate.wallets.length} wallets`
-                                  : <>
-                                      {" · "}
-                                      <a
-                                        href={getExplorerAddressUrl(candidate.address)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="font-mono hover:underline"
-                                      >
-                                        {candidate.address.slice(0, 6)}...{candidate.address.slice(-4)}
-                                      </a>
-                                    </>
-                                }
+                                {candidate.wallets && candidate.wallets.length > 1 && ` · ${candidate.wallets.length} wallets`}
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {candidate.signals.map((signal, i) => (
-                            <span
-                              key={i}
-                              className="text-[10px] px-1.5 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400"
-                            >
-                              {signal.type} ({signal.score > 0 ? "+" : ""}{signal.score})
-                            </span>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          {buildConnectionSummary(candidate).map((line, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="text-muted-foreground shrink-0 mt-0.5">-</span>
+                              <span>{line}</span>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -948,7 +970,7 @@ export default function Home() {
                         score: c.score,
                       })),
                     ].map((entry) => (
-                      <div key={entry.address} className="rounded-lg border p-2.5 space-y-2">
+                      <div key={entry.address} className="rounded-lg border border-border p-2.5 space-y-2">
                         <div className="flex items-center gap-2">
                           <a
                             href={`https://x.com/search?q=%22${entry.address}%22&f=live`}
@@ -1019,7 +1041,7 @@ export default function Home() {
                             <img
                               src={screenshots.get(entry.address)}
                               alt={`X search results for ${entry.address}`}
-                              className="rounded border w-full max-h-48 object-cover object-top"
+                              className="rounded border border-border w-full max-h-48 object-cover object-top"
                             />
                             <div className="absolute top-1 right-1 bg-green-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-medium">
                               attached
@@ -1055,7 +1077,7 @@ export default function Home() {
           onClick={() => setSelectedCandidate(null)}
         >
           <div
-            className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+            className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -1092,7 +1114,7 @@ export default function Home() {
                     href={selectedCandidate.ethosProfile.profileUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"
                   >
                     Ethos Profile <ExternalLink className="h-3 w-3 opacity-50" />
                   </a>
@@ -1103,7 +1125,7 @@ export default function Home() {
                     href={getExplorerAddressUrl(wallet)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
+                    className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
                   >
                     {wallet.slice(0, 8)}...{wallet.slice(-6)} <ExternalLink className="h-3 w-3 opacity-50" />
                   </a>
@@ -1113,7 +1135,7 @@ export default function Home() {
               {/* Connection to Target */}
               <div>
                 <h3 className="text-sm font-semibold mb-2">Connection to {clusterResult.targetEthos?.displayName || clusterResult.target.slice(0, 10) + "..."}</h3>
-                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                   {/* Direct transfers */}
                   {selectedCandidate.directCount > 0 && (
                     <div className="space-y-1">
@@ -1167,7 +1189,7 @@ export default function Home() {
                         The first wallet to send ETH to this address on each chain:
                       </div>
                       {selectedCandidate.firstFunders.map((ff, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs border rounded px-2 py-1.5">
+                        <div key={i} className="flex items-center justify-between text-xs border border-border rounded px-2 py-1.5">
                           <div className="flex items-center gap-2">
                             <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
                             <a
@@ -1270,7 +1292,7 @@ export default function Home() {
                 <h3 className="text-sm font-semibold mb-2">Signal Breakdown</h3>
                 <div className="space-y-1.5">
                   {selectedCandidate.signals.map((signal, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs border rounded-md px-3 py-2">
+                    <div key={i} className="flex items-center justify-between text-xs border border-border rounded-md px-3 py-2">
                       <span className="font-medium">{signal.type.replace(/_/g, " ")}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-muted-foreground">{signal.details}</span>
@@ -1292,7 +1314,7 @@ export default function Home() {
                 <h3 className="text-sm font-semibold mb-2">Active Networks</h3>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedCandidate.networks.map((network) => (
-                    <span key={network} className="text-xs border rounded-md px-2.5 py-1">
+                    <span key={network} className="text-xs border border-border rounded-md px-2.5 py-1">
                       {network}
                     </span>
                   ))}
@@ -1303,7 +1325,7 @@ export default function Home() {
               {selectedCandidate.ethosProfile && (
                 <div>
                   <h3 className="text-sm font-semibold mb-2">Ethos Profile</h3>
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                  <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Credibility Score</span>
                       <span className="font-medium">{selectedCandidate.ethosProfile.score}</span>

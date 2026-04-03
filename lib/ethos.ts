@@ -126,6 +126,64 @@ export async function fetchProfile(
   return response.json();
 }
 
+/** Bulk lookup Ethos profiles by wallet addresses (up to 500 at a time) */
+export async function fetchProfilesByAddresses(
+  addresses: string[]
+): Promise<Map<string, EthosProfile>> {
+  const result = new Map<string, EthosProfile>();
+  const unique = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
+  if (unique.length === 0) return result;
+
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const chunk = unique.slice(i, i + BATCH_SIZE);
+    try {
+      const response = await fetch(`${ETHOS_API}/users/by/address`, {
+        method: "POST",
+        headers: { ...HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify({ addresses: chunk }),
+      });
+
+      if (!response.ok) {
+        // Fallback: try individual lookups for this chunk
+        for (const addr of chunk) {
+          try {
+            const profile = await fetchProfile(addr);
+            if (profile && profile.profileId) {
+              // Find which address this profile belongs to
+              const wallets = getWalletAddresses(profile);
+              for (const w of wallets) {
+                if (chunk.includes(w)) result.set(w, profile);
+              }
+              // Also map by the queried address
+              result.set(addr, profile);
+            }
+          } catch {
+            // Skip
+          }
+        }
+        continue;
+      }
+
+      const data = await response.json();
+      const profiles: EthosProfile[] = Array.isArray(data) ? data : (data.values || []);
+
+      for (const profile of profiles) {
+        if (!profile || !profile.profileId) continue;
+        // Map by all wallet addresses in userkeys
+        const wallets = getWalletAddresses(profile);
+        for (const w of wallets) {
+          result.set(w, profile);
+        }
+      }
+    } catch {
+      // Silently skip failed batches
+    }
+  }
+
+  return result;
+}
+
 export async function fetchInvitationTree(
   profileId: number
 ): Promise<Invitation[]> {

@@ -7,7 +7,7 @@ import {
   parallel,
   getFirstFunder,
 } from "./alchemy";
-import { fetchProfile, type EthosProfile, getWalletAddresses } from "./ethos";
+import { fetchProfilesByAddresses, type EthosProfile } from "./ethos";
 
 // --- Config ---
 
@@ -101,6 +101,7 @@ export interface ClusterScanResult {
     profileUrl: string;
   };
   targetFirstFunders: FirstFunderInfo[];
+  funderProfiles: Record<string, { displayName: string; username: string | null; avatarUrl: string; score: number; profileUrl: string }>;
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
   networkStats: Record<string, { txCount: number; directWallets: number; contractClusters: number }>;
@@ -811,30 +812,21 @@ export async function runClusterScan(
 
   log("info", `Total: ${strongCluster.length} strong, ${possibleCluster.length} possible candidates`);
 
-  // Ethos lookup for target + all candidates
+  // Bulk Ethos lookup for target + all candidates + all first funders
   const allCandidateAddrs = [...strongCluster, ...possibleCluster].map((c) => c.address);
-  const ethosAddresses = [target, ...allCandidateAddrs];
-  log("info", `Checking ${ethosAddresses.length} addresses on Ethos Network...`);
+  const allFirstFunderAddrs = [
+    ...allTargetFirstFunders.map((f) => f.funder),
+    ...[...strongCluster, ...possibleCluster].flatMap((c) => (c.firstFunders || []).map((f) => f.funder)),
+  ];
+  const ethosAddresses = [...new Set([target, ...allCandidateAddrs, ...allFirstFunderAddrs])];
+  log("info", `Checking ${ethosAddresses.length} addresses on Ethos Network (bulk)...`);
 
-  const ethosResults = await parallel(
-    ethosAddresses,
-    async (addr) => {
-      try {
-        const profile = await fetchProfile(addr);
-        return { addr, profile };
-      } catch {
-        return { addr, profile: null };
-      }
-    },
-    10
-  );
+  const ethosMap = await fetchProfilesByAddresses(ethosAddresses);
+  log("info", `Found ${ethosMap.size} Ethos profiles`);
 
-  let targetEthos: ClusterScanResult["targetEthos"];
-  for (const { addr, profile } of ethosResults) {
-    if (!profile || !profile.profileId) continue;
-
-    const ethosData = {
-      profileId: profile.profileId,
+  function toEthosData(profile: EthosProfile) {
+    return {
+      profileId: profile.profileId!,
       displayName: profile.displayName,
       username: profile.username,
       avatarUrl: profile.avatarUrl,
@@ -843,16 +835,40 @@ export async function runClusterScan(
         ? `https://app.ethos.network/profile/x/${profile.username}`
         : `https://app.ethos.network/profile/${profile.profileId}`,
     };
+  }
 
-    if (addr === target) {
-      targetEthos = ethosData;
-      log("success", `Target has Ethos profile: ${profile.displayName} (score: ${profile.score})`);
-    } else {
-      const candidate = mergedCandidates.get(addr);
-      if (candidate) {
-        candidate.ethosProfile = ethosData;
-        log("warn", `Cluster wallet ${addr.slice(0, 10)}... is Ethos user: ${profile.displayName} (score: ${profile.score})`);
-      }
+  let targetEthos: ClusterScanResult["targetEthos"];
+  const targetProfile = ethosMap.get(target);
+  if (targetProfile && targetProfile.profileId) {
+    targetEthos = toEthosData(targetProfile);
+    log("success", `Target has Ethos profile: ${targetProfile.displayName} (score: ${targetProfile.score})`);
+  }
+
+  for (const addr of allCandidateAddrs) {
+    const profile = ethosMap.get(addr);
+    if (!profile || !profile.profileId) continue;
+    const candidate = mergedCandidates.get(addr);
+    if (candidate) {
+      candidate.ethosProfile = toEthosData(profile);
+      log("warn", `Cluster wallet ${addr.slice(0, 10)}... is Ethos user: ${profile.displayName} (score: ${profile.score})`);
+    }
+  }
+
+  // Build funder profiles map for any first funder that has an Ethos profile
+  const funderProfiles: ClusterScanResult["funderProfiles"] = {};
+  for (const funderAddr of allFirstFunderAddrs) {
+    if (funderProfiles[funderAddr]) continue;
+    const profile = ethosMap.get(funderAddr);
+    if (profile && profile.profileId) {
+      const data = toEthosData(profile);
+      funderProfiles[funderAddr] = {
+        displayName: data.displayName,
+        username: data.username,
+        avatarUrl: data.avatarUrl,
+        score: data.score,
+        profileUrl: data.profileUrl,
+      };
+      log("info", `First funder ${funderAddr.slice(0, 10)}... is Ethos user: ${profile.displayName}`);
     }
   }
 
@@ -911,6 +927,7 @@ export async function runClusterScan(
     target,
     targetEthos,
     targetFirstFunders: allTargetFirstFunders,
+    funderProfiles,
     strongCluster: strongWithEthos,
     possibleCluster: possibleWithEthos,
     networkStats,
