@@ -18,6 +18,8 @@ import {
   Save,
   FolderOpen,
   Trash2,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -60,6 +62,7 @@ export default function Home() {
   const [loginPassphrase, setLoginPassphrase] = useState("");
   const [loginError, setLoginError] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
+  const [showFirstFunders, setShowFirstFunders] = useState(false);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
@@ -430,6 +433,13 @@ export default function Home() {
             lines.push(`First funded by the same ${exchangeLabel} address on ${ff.chain} as ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""} (likely same ${exchangeLabel} account).`);
           } else {
             lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
+          }
+        } else {
+          // Always show first funder even if no special connection
+          if (exchangeLabel) {
+            lines.push(`First funded by ${exchangeLabel} (${ff.funder.slice(0, 8)}...${ff.funder.slice(-4)}) on ${ff.chain}.`);
+          } else {
+            lines.push(`First funded by ${funderName} on ${ff.chain}.`);
           }
         }
       }
@@ -864,44 +874,117 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Target first funders */}
+                  {/* Key Findings */}
+                  {(clusterResult.strongCluster.length > 0 || clusterResult.possibleCluster.length > 0) && (() => {
+                    const tName = clusterResult.targetEthos?.displayName || "Target";
+                    const allResults = [...clusterResult.strongCluster, ...clusterResult.possibleCluster];
+                    const fundedByTarget = allResults.filter((c) => c.signals.some((s) => s.type === "funded_by_target"));
+                    const sharedFF = allResults.filter((c) => c.sharedFirstFunder && !c.signals.some((s) => s.type === "funded_by_target"));
+                    const invitedBy = allResults.filter((c) => c.invitedByTarget);
+                    const mutualRev = allResults.filter((c) => c.mutualReviews);
+                    const mutualVou = allResults.filter((c) => c.mutualVouches);
+                    const withCex = allResults.filter((c) => c.sharedCexDeposits && c.sharedCexDeposits.length > 0);
+                    const multiHop = allResults.filter((c) => c.signals.some((s) => s.type === "multi_hop_funding"));
+                    const hasFindings = fundedByTarget.length > 0 || sharedFF.length > 0 || invitedBy.length > 0 || mutualRev.length > 0 || mutualVou.length > 0 || withCex.length > 0 || multiHop.length > 0;
+                    if (!hasFindings) return null;
+                    const names = (list: typeof allResults) => list.map((c) => c.ethosProfile?.displayName || c.address.slice(0, 10) + "...").join(", ");
+                    return (
+                      <div className="rounded-lg border border-border p-3 space-y-1.5">
+                        <div className="text-xs font-medium text-muted-foreground">Key Findings</div>
+                        {fundedByTarget.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>{tName} first funded: <span className="text-foreground font-medium">{names(fundedByTarget)}</span></span>
+                          </div>
+                        )}
+                        {sharedFF.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>Share the same first funder as {tName}: <span className="text-foreground font-medium">{names(sharedFF)}</span></span>
+                          </div>
+                        )}
+                        {invitedBy.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>{tName} invited on Ethos: <span className="text-foreground font-medium">{names(invitedBy)}</span></span>
+                          </div>
+                        )}
+                        {mutualRev.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>Mutual reviews with {tName}: <span className="text-foreground font-medium">{names(mutualRev)}</span></span>
+                          </div>
+                        )}
+                        {mutualVou.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>Mutual vouches with {tName}: <span className="text-foreground font-medium">{names(mutualVou)}</span></span>
+                          </div>
+                        )}
+                        {withCex.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>Share exchange deposit address: <span className="text-foreground font-medium">{names(withCex)}</span></span>
+                          </div>
+                        )}
+                        {multiHop.length > 0 && (
+                          <div className="text-xs text-muted-foreground flex gap-1.5">
+                            <span className="shrink-0">-</span>
+                            <span>Discovered via funding chain analysis: <span className="text-foreground font-medium">{names(multiHop)}</span></span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Target first funders (collapsible) */}
                   {clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
                     <div className="rounded-lg border border-border p-3 space-y-1.5">
-                      <div className="text-xs font-medium text-muted-foreground">Target First Funders</div>
-                      {clusterResult.targetFirstFunders.map((ff, i) => {
-                        const funderProfile = clusterResult.funderProfiles?.[ff.funder];
-                        return (
-                          <div key={i} className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                              {funderProfile ? (
-                                <a
-                                  href={funderProfile.profileUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="hover:underline inline-flex items-center gap-1"
-                                >
-                                  {funderProfile.avatarUrl && (
-                                    <img src={funderProfile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
+                      <button
+                        onClick={() => setShowFirstFunders(!showFirstFunders)}
+                        className="flex items-center gap-1 text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground transition-colors w-full"
+                      >
+                        {showFirstFunders ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                        {clusterResult.targetEthos?.displayName || "Target"}&apos;s First Funders
+                      </button>
+                      {showFirstFunders && (
+                        <div className="space-y-1 pt-1">
+                          {clusterResult.targetFirstFunders.map((ff, i) => {
+                            const funderProfile = clusterResult.funderProfiles?.[ff.funder];
+                            return (
+                              <div key={i} className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
+                                  {funderProfile ? (
+                                    <a
+                                      href={funderProfile.profileUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="hover:underline inline-flex items-center gap-1"
+                                    >
+                                      {funderProfile.avatarUrl && (
+                                        <img src={funderProfile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
+                                      )}
+                                      {funderProfile.displayName}
+                                      <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                    </a>
+                                  ) : (
+                                    <a
+                                      href={getExplorerAddressUrl(ff.funder, ff.chain)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-mono hover:underline"
+                                    >
+                                      {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                    </a>
                                   )}
-                                  {funderProfile.displayName}
-                                  <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                                </a>
-                              ) : (
-                                <a
-                                  href={getExplorerAddressUrl(ff.funder, ff.chain)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono hover:underline"
-                                >
-                                  {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                                </a>
-                              )}
-                            </div>
-                            <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
-                          </div>
-                        );
-                      })}
+                                </div>
+                                <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
