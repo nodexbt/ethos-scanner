@@ -1,46 +1,5 @@
-import Database from "better-sqlite3";
-import path from "path";
-
-const DB_PATH = path.join(process.cwd(), "investigations.db");
-
-let _db: Database.Database | null = null;
-
-function getDb(): Database.Database {
-  if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.exec(`
-      CREATE TABLE IF NOT EXISTS investigations (
-        id TEXT PRIMARY KEY,
-        target TEXT NOT NULL,
-        target_name TEXT,
-        saved_at INTEGER NOT NULL,
-        cluster_result TEXT NOT NULL,
-        ai_analysis TEXT,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS screenshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        investigation_id TEXT NOT NULL,
-        address TEXT NOT NULL,
-        data TEXT NOT NULL,
-        FOREIGN KEY (investigation_id) REFERENCES investigations(id) ON DELETE CASCADE
-      );
-      CREATE INDEX IF NOT EXISTS idx_screenshots_inv ON screenshots(investigation_id);
-    `);
-  }
-  return _db;
-}
-
-export interface InvestigationRow {
-  id: string;
-  target: string;
-  targetName: string | null;
-  savedAt: number;
-  clusterResult: unknown;
-  aiAnalysis: string | null;
-  screenshots: Record<string, string>;
-}
+import { getSupabase } from "./supabase";
+import { nanoid } from "../utils";
 
 export interface InvestigationSummary {
   id: string;
@@ -51,37 +10,44 @@ export interface InvestigationSummary {
   strongCount: number;
   possibleCount: number;
   hasAnalysis: boolean;
-  screenshotCount: number;
+  shareId: string | null;
+  isPublic: boolean;
 }
 
-export function listInvestigations(): InvestigationSummary[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT
-      i.id, i.target, i.target_name, i.saved_at, i.cluster_result, i.ai_analysis,
-      (SELECT COUNT(*) FROM screenshots s WHERE s.investigation_id = i.id) as screenshot_count
-    FROM investigations i
-    ORDER BY i.updated_at DESC
-    LIMIT 100
-  `).all() as {
-    id: string;
-    target: string;
-    target_name: string | null;
-    saved_at: number;
-    cluster_result: string;
-    ai_analysis: string | null;
-    screenshot_count: number;
-  }[];
+export interface InvestigationRow {
+  id: string;
+  target: string;
+  targetName: string | null;
+  clusterResult: unknown;
+  aiAnalysis: string | null;
+  shareId: string | null;
+  isPublic: boolean;
+}
 
-  return rows.map((row) => {
+export async function listInvestigations(): Promise<InvestigationSummary[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("investigations")
+    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error("listInvestigations error:", error);
+    return [];
+  }
+
+  return (data || []).map((row) => {
     let strongCount = 0;
     let possibleCount = 0;
     let targetAvatar: string | null = null;
     try {
-      const result = JSON.parse(row.cluster_result);
-      strongCount = result.strongCluster?.length ?? 0;
-      possibleCount = result.possibleCluster?.length ?? 0;
-      targetAvatar = result.targetEthos?.avatarUrl ?? null;
+      const result = typeof row.cluster_result === "string"
+        ? JSON.parse(row.cluster_result)
+        : row.cluster_result;
+      strongCount = result?.strongCluster?.length ?? 0;
+      possibleCount = result?.possibleCluster?.length ?? 0;
+      targetAvatar = result?.targetEthos?.avatarUrl ?? row.target_avatar ?? null;
     } catch {}
 
     return {
@@ -89,98 +55,133 @@ export function listInvestigations(): InvestigationSummary[] {
       target: row.target,
       targetName: row.target_name,
       targetAvatar,
-      savedAt: row.saved_at,
+      savedAt: new Date(row.updated_at).getTime(),
       strongCount,
       possibleCount,
       hasAnalysis: !!row.ai_analysis,
-      screenshotCount: row.screenshot_count,
+      shareId: row.share_id,
+      isPublic: row.is_public ?? false,
     };
   });
 }
 
-export function getInvestigation(id: string): InvestigationRow | null {
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT id, target, target_name, saved_at, cluster_result, ai_analysis
-    FROM investigations WHERE id = ?
-  `).get(id) as {
-    id: string;
-    target: string;
-    target_name: string | null;
-    saved_at: number;
-    cluster_result: string;
-    ai_analysis: string | null;
-  } | undefined;
+export async function getInvestigation(id: string): Promise<InvestigationRow | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("investigations")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-  if (!row) return null;
-
-  const screenshotRows = db.prepare(`
-    SELECT address, data FROM screenshots WHERE investigation_id = ?
-  `).all(id) as { address: string; data: string }[];
-
-  const screenshots: Record<string, string> = {};
-  for (const s of screenshotRows) {
-    screenshots[s.address] = s.data;
-  }
+  if (error || !data) return null;
 
   return {
-    id: row.id,
-    target: row.target,
-    targetName: row.target_name,
-    savedAt: row.saved_at,
-    clusterResult: JSON.parse(row.cluster_result),
-    aiAnalysis: row.ai_analysis,
-    screenshots,
+    id: data.id,
+    target: data.target,
+    targetName: data.target_name,
+    clusterResult: typeof data.cluster_result === "string"
+      ? JSON.parse(data.cluster_result)
+      : data.cluster_result,
+    aiAnalysis: data.ai_analysis,
+    shareId: data.share_id,
+    isPublic: data.is_public ?? false,
   };
 }
 
-export function saveInvestigation(data: {
+export async function getInvestigationByShareId(shareId: string): Promise<InvestigationRow | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("investigations")
+    .select("*")
+    .eq("share_id", shareId)
+    .eq("is_public", true)
+    .single();
+
+  if (error || !data) return null;
+
+  return {
+    id: data.id,
+    target: data.target,
+    targetName: data.target_name,
+    clusterResult: typeof data.cluster_result === "string"
+      ? JSON.parse(data.cluster_result)
+      : data.cluster_result,
+    aiAnalysis: data.ai_analysis,
+    shareId: data.share_id,
+    isPublic: data.is_public ?? false,
+  };
+}
+
+export async function saveInvestigation(data: {
   id: string;
   target: string;
   targetName: string | null;
   clusterResult: unknown;
   aiAnalysis: string | null;
-  screenshots: Record<string, string>;
-}): void {
-  const db = getDb();
-  const now = Date.now();
+}): Promise<void> {
+  const supabase = getSupabase();
+  const result = data.clusterResult as { targetEthos?: { avatarUrl?: string } };
 
-  const upsert = db.prepare(`
-    INSERT INTO investigations (id, target, target_name, saved_at, cluster_result, ai_analysis, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      cluster_result = excluded.cluster_result,
-      ai_analysis = excluded.ai_analysis,
-      updated_at = excluded.updated_at
-  `);
+  const { error } = await supabase
+    .from("investigations")
+    .upsert({
+      id: data.id,
+      target: data.target,
+      target_name: data.targetName,
+      target_avatar: result?.targetEthos?.avatarUrl ?? null,
+      cluster_result: data.clusterResult,
+      ai_analysis: data.aiAnalysis,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
 
-  const deleteScreenshots = db.prepare(`DELETE FROM screenshots WHERE investigation_id = ?`);
-  const insertScreenshot = db.prepare(`
-    INSERT INTO screenshots (investigation_id, address, data) VALUES (?, ?, ?)
-  `);
-
-  const transaction = db.transaction(() => {
-    upsert.run(
-      data.id,
-      data.target,
-      data.targetName,
-      now,
-      JSON.stringify(data.clusterResult),
-      data.aiAnalysis,
-      now
-    );
-
-    deleteScreenshots.run(data.id);
-    for (const [address, dataUrl] of Object.entries(data.screenshots)) {
-      insertScreenshot.run(data.id, address, dataUrl);
-    }
-  });
-
-  transaction();
+  if (error) {
+    console.error("saveInvestigation error:", error);
+    throw new Error(error.message);
+  }
 }
 
-export function deleteInvestigation(id: string): void {
-  const db = getDb();
-  db.prepare(`DELETE FROM screenshots WHERE investigation_id = ?`).run(id);
-  db.prepare(`DELETE FROM investigations WHERE id = ?`).run(id);
+export async function deleteInvestigation(id: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("investigations")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error("deleteInvestigation error:", error);
+  }
+}
+
+export async function shareInvestigation(id: string): Promise<string | null> {
+  const supabase = getSupabase();
+
+  // Check if already has a share ID
+  const { data: existing } = await supabase
+    .from("investigations")
+    .select("share_id")
+    .eq("id", id)
+    .single();
+
+  if (existing?.share_id) {
+    // Just make sure it's public
+    await supabase
+      .from("investigations")
+      .update({ is_public: true })
+      .eq("id", id);
+    return existing.share_id;
+  }
+
+  // Generate a new share ID
+  const shareId = nanoid(10);
+  const { error } = await supabase
+    .from("investigations")
+    .update({ share_id: shareId, is_public: true })
+    .eq("id", id);
+
+  if (error) {
+    console.error("shareInvestigation error:", error);
+    return null;
+  }
+
+  return shareId;
 }

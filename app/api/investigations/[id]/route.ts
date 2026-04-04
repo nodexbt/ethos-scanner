@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getInvestigation,
-  deleteInvestigation,
-} from "@/lib/db/investigations";
+import { getInvestigation, deleteInvestigation, shareInvestigation } from "@/lib/db/investigations";
 
-// GET /api/investigations/[id] — load one with screenshots
+// GET /api/investigations/[id] — load one
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const investigation = getInvestigation(id);
+  const investigation = await getInvestigation(id);
   if (!investigation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -23,6 +20,19 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  deleteInvestigation(id);
+  await deleteInvestigation(id);
   return NextResponse.json({ ok: true });
+}
+
+// PATCH /api/investigations/[id] — share
+export async function PATCH(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const shareId = await shareInvestigation(id);
+  if (!shareId) {
+    return NextResponse.json({ error: "Failed to share" }, { status: 500 });
+  }
+  return NextResponse.json({ shareId });
 }

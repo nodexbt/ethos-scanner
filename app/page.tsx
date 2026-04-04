@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Share2,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -43,7 +44,8 @@ interface InvestigationSummary {
   strongCount: number;
   possibleCount: number;
   hasAnalysis: boolean;
-  screenshotCount: number;
+  shareId: string | null;
+  isPublic: boolean;
 }
 
 export default function Home() {
@@ -226,6 +228,15 @@ export default function Home() {
     await fetch(`/api/investigations/${id}`, { method: "DELETE" });
     refreshInvestigations();
     if (currentInvestigationId === id) setCurrentInvestigationId(null);
+  };
+
+  const handleShareInvestigation = async (id: string) => {
+    const resp = await fetch(`/api/investigations/${id}`, { method: "PATCH" });
+    if (!resp.ok) return;
+    const { shareId } = await resp.json();
+    const shareUrl = `${window.location.origin}/s/${shareId}`;
+    navigator.clipboard.writeText(shareUrl);
+    refreshInvestigations();
   };
 
   const handleScreenshotUpload = (address: string, file: File) => {
@@ -759,7 +770,7 @@ export default function Home() {
                       <div className="text-[10px] text-muted-foreground">
                         {inv.strongCount} strong
                         {" / "}{inv.possibleCount} possible
-                        {inv.screenshotCount > 0 && ` / ${inv.screenshotCount} img`}
+                        {inv.isPublic && " / shared"}
                         {" / "}{new Date(inv.savedAt).toLocaleDateString()}
                       </div>
                     </button>
@@ -785,10 +796,21 @@ export default function Home() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-                    <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
-                      <Save className="h-3.5 w-3.5" />
-                      {currentInvestigationId ? "Update" : "Save"}
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {currentInvestigationId && (
+                        <Button
+                          onClick={() => handleShareInvestigation(currentInvestigationId)}
+                          size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                          Share
+                        </Button>
+                      )}
+                      <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
+                        <Save className="h-3.5 w-3.5" />
+                        {currentInvestigationId ? "Update" : "Save"}
+                      </Button>
+                    </div>
                   </div>
                   <CardDescription className="text-xs flex items-center gap-1.5">
                     <span>Target:</span>
