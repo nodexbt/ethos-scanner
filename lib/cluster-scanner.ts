@@ -400,7 +400,8 @@ function scoreCandidate(
 
   const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
   let confidence: "high" | "medium" | "low" = "low";
-  if (totalScore >= FINAL_SCORE_THRESHOLD && signalTypes.size >= 2) confidence = "high";
+  if (fundedByTarget || fundedByClusterWallet) confidence = "high";
+  else if (totalScore >= FINAL_SCORE_THRESHOLD && signalTypes.size >= 2) confidence = "high";
   else if (totalScore >= POSSIBLE_SCORE_THRESHOLD) confidence = "medium";
 
   return {

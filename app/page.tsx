@@ -1452,28 +1452,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Signals Breakdown */}
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Signal Breakdown</h3>
-                <div className="space-y-1.5">
-                  {selectedCandidate.signals.map((signal, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs border border-border rounded-md px-3 py-2">
-                      <span className="font-medium">{signal.type.replace(/_/g, " ")}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">{signal.details}</span>
-                        <span className={`font-bold ${signal.score > 0 ? "text-red-500" : "text-green-500"}`}>
-                          {signal.score > 0 ? "+" : ""}{signal.score}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between text-xs font-semibold border-t pt-2 mt-1 px-1">
-                    <span>Total Score</span>
-                    <span>{selectedCandidate.score}</span>
-                  </div>
-                </div>
-              </div>
-
               {/* Network Activity */}
               <div>
                 <h3 className="text-sm font-semibold mb-2">Active Networks</h3>
