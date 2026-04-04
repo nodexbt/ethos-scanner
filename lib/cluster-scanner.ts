@@ -17,7 +17,7 @@ import { getAddressLabel, isExchangeAddress } from "./known-addresses";
 const MAX_PAGES = 50;
 const CANDIDATE_MAX_PAGES = 6;
 const CANDIDATE_MAX_TXS = 4000;
-const MAX_CANDIDATES_PER_NETWORK = 150;
+const MAX_CANDIDATES_PER_NETWORK = 50;
 const MAX_EXCHANGE_CONTRACTS = 10;
 const HUGE_TX_THRESHOLD = 15000;
 const CONCURRENCY = 8;
@@ -523,12 +523,42 @@ async function scanNetwork(
   log("success", `[${network}] ${contractClusterWallets.size} wallets found via shared contracts`);
   stepDone?.(`${network}: Shared contracts scanned`);
 
-  // Step 6: Fetch candidate transactions
-  const allCandidateAddrs = [
+  // Step 6: Pre-score candidates using direct transfer + shared contract data only
+  const allCandidateAddrsRaw = [
     ...new Set([...directWallets.keys(), ...contractClusterWallets.keys()]),
   ].slice(0, MAX_CANDIDATES_PER_NETWORK);
 
-  log("info", `[${network}] Fetching transactions for ${allCandidateAddrs.length} candidates...`);
+  const contractPopMap = new Map(contractMetas.map((m) => [m.address, m]));
+  const PRE_SCORE_THRESHOLD = 3; // minimum to warrant deep scan
+
+  const promisingCandidates: string[] = [];
+  for (const addr of allCandidateAddrsRaw) {
+    let preScore = 0;
+    const directInfo = directWallets.get(addr);
+    if (directInfo) {
+      preScore += W_DIRECT;
+      if (directInfo.repeatTransfer) preScore += W_REPEAT;
+      if (directInfo.bidirectional) preScore += W_BIDIRECTIONAL;
+    }
+    const sharedContractAddrs = contractClusterWallets.get(addr);
+    if (sharedContractAddrs) {
+      for (const ca of sharedContractAddrs) {
+        const pop = contractPopMap.get(ca)?.popularity ?? "medium";
+        if (pop === "rare") preScore += W_SHARED_RARE;
+        else if (pop === "medium") preScore += W_SHARED_MEDIUM;
+      }
+    }
+    if (preScore >= PRE_SCORE_THRESHOLD) {
+      promisingCandidates.push(addr);
+    }
+  }
+
+  log("info", `[${network}] Pre-scored ${allCandidateAddrsRaw.length} candidates, ${promisingCandidates.length} promising (pre-score >= ${PRE_SCORE_THRESHOLD})`);
+  const allCandidateAddrs = promisingCandidates;
+  stepDone?.(`${network}: Pre-scoring complete`);
+
+  // Step 7: Fetch candidate transactions (only for promising candidates)
+  log("info", `[${network}] Fetching transactions for ${allCandidateAddrs.length} promising candidates...`);
   const candidateTxsMap = new Map<string, AssetTransfer[]>();
   candidateTxsMap.set(target, txs);
 
@@ -545,7 +575,7 @@ async function scanNetwork(
   );
   stepDone?.(`${network}: Candidate transactions fetched`);
 
-  // Step 7: Shared funding sources
+  // Step 8: Shared funding sources
   log("info", `[${network}] Checking shared funding sources...`);
   const sharedFunding = findSharedFundingSources(
     target,
@@ -556,16 +586,14 @@ async function scanNetwork(
   );
   log("info", `[${network}] ${sharedFunding.size} wallets share funding sources`);
 
-  // Step 8: First funder analysis
+  // Step 9: First funder analysis (only for promising candidates)
   log("info", `[${network}] Checking first funders for target + ${allCandidateAddrs.length} candidates...`);
 
-  // Fetch first funder for target
   const targetFirstFunder = await getFirstFunder(target, chain);
   if (targetFirstFunder) {
     log("info", `[${network}] Target first funder: ${targetFirstFunder.funder.slice(0, 10)}... (${targetFirstFunder.value} ETH)`);
   }
 
-  // Fetch first funders for all candidates in parallel
   const candidateFirstFunders = new Map<string, FirstFunderInfo>();
   await parallel(
     allCandidateAddrs,
@@ -584,7 +612,6 @@ async function scanNetwork(
     CONCURRENCY
   );
 
-  // Check which candidates share first funder with target
   const sharedFirstFunderAddrs = new Set<string>();
   if (targetFirstFunder) {
     for (const [addr, ff] of candidateFirstFunders) {
@@ -597,13 +624,11 @@ async function scanNetwork(
 
   log("info", `[${network}] ${sharedFirstFunderAddrs.size} candidates share first funder with target`);
 
-  // Step 9: Scoring
+  // Step 10: Final scoring
   log("info", `[${network}] Scoring candidates...`);
-  const contractPopMap = new Map(contractMetas.map((m) => [m.address, m]));
   const candidates = new Map<string, ClusterCandidate>();
 
-  // Build set of all candidate first funder addresses for cross-reference
-  const allCandFirstFunderAddrs = new Map<string, string>(); // funder -> candidate addr
+  const allCandFirstFunderAddrs = new Map<string, string>();
   for (const [addr, ff] of candidateFirstFunders) {
     allCandFirstFunderAddrs.set(ff.funder, addr);
   }
@@ -622,9 +647,7 @@ async function scanNetwork(
     const candFF = candidateFirstFunders.get(addr);
     const candFirstFunders: FirstFunderInfo[] = candFF ? [candFF] : [];
 
-    // Check if first funded by the target wallet
     const isFundedByTarget = candFF?.funder === target;
-    // Check if first funded by another candidate in the results
     const isFundedByCluster = !isFundedByTarget && candFF
       ? allCandidateAddrs.some((other) => other !== addr && other === candFF.funder)
       : false;
@@ -827,7 +850,7 @@ export interface ScanProgress {
   phase: string;
 }
 
-const STEPS_PER_NETWORK = 8;
+const STEPS_PER_NETWORK = 9;
 const ETHOS_STEPS = 1;
 
 export async function runClusterScan(
