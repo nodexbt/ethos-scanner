@@ -434,13 +434,6 @@ export default function Home() {
           } else {
             lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
           }
-        } else {
-          // Always show first funder even if no special connection
-          if (exchangeLabel) {
-            lines.push(`First funded by ${exchangeLabel} (${ff.funder.slice(0, 8)}...${ff.funder.slice(-4)}) on ${ff.chain}.`);
-          } else {
-            lines.push(`First funded by ${funderName} on ${ff.chain}.`);
-          }
         }
       }
     } else if (candidate.sharedFirstFunder) {
