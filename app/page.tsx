@@ -460,12 +460,6 @@ export default function Home() {
       lines.push(`${candidate.sharedFundingSources.length} address${candidate.sharedFundingSources.length > 1 ? "es" : ""} sent tokens to both ${name} and ${targetName}.`);
     }
 
-    // Timing
-    // Shared contracts
-    if (candidate.sharedContracts.length > 0) {
-      lines.push(`Both interacted with ${candidate.sharedContracts.length} of the same contract${candidate.sharedContracts.length > 1 ? "s" : ""}.`);
-    }
-
     // Shared CEX deposit addresses
     if (candidate.sharedCexDeposits && candidate.sharedCexDeposits.length > 0) {
       for (const dep of candidate.sharedCexDeposits) {
@@ -499,22 +493,6 @@ export default function Home() {
 
     if (candidate.mutualVouches) {
       lines.push(`${name} and ${targetName} vouched for each other on Ethos.`);
-    }
-
-    // Cross-cluster connections
-    if (candidate.crossClusterContracts && candidate.crossClusterContracts.length > 0) {
-      const uniqueSharedWith = new Set<string>();
-      const contractLabels: string[] = [];
-      for (const cc of candidate.crossClusterContracts) {
-        for (const w of cc.sharedWith) uniqueSharedWith.add(resolveAddressName(w));
-        if (cc.contractName) contractLabels.push(cc.contractName);
-      }
-      const names = [...uniqueSharedWith].slice(0, 3);
-      const more = uniqueSharedWith.size > 3 ? ` and ${uniqueSharedWith.size - 3} more` : "";
-      const contractInfo = contractLabels.length > 0
-        ? ` (${[...new Set(contractLabels)].slice(0, 2).join(", ")})`
-        : "";
-      lines.push(`Deposited to the same contract${candidate.crossClusterContracts.length > 1 ? "s" : ""}${contractInfo} as ${names.join(", ")}${more}.`);
     }
 
     return lines;
@@ -1340,22 +1318,6 @@ export default function Home() {
                   )}
 
                   {/* Shared contracts */}
-                  {selectedCandidate.sharedContracts.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium">Shared Contract Interactions</div>
-                      <div className="text-xs text-muted-foreground">
-                        Both wallets interacted with {selectedCandidate.sharedContracts.length} of the same contract{selectedCandidate.sharedContracts.length !== 1 && "s"}:
-                      </div>
-                      <div className="space-y-0.5">
-                        {selectedCandidate.sharedContracts.map((addr) => (
-                          <div key={addr} className="text-xs">
-                            {renderAddress(addr)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   {/* First funders */}
                   {selectedCandidate.firstFunders && selectedCandidate.firstFunders.length > 0 && (
                     <div className="space-y-1">
@@ -1479,50 +1441,13 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Cross-cluster deposits */}
-                  {selectedCandidate.crossClusterContracts && selectedCandidate.crossClusterContracts.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium">Shared Deposits with Other Results</div>
-                      <div className="text-xs text-muted-foreground">
-                        This wallet deposited to the same contract{selectedCandidate.crossClusterContracts.length > 1 ? "s" : ""} as other cluster members:
-                      </div>
-                      <div className="space-y-1.5">
-                        {selectedCandidate.crossClusterContracts.map((cc, i) => (
-                          <div key={i} className="text-xs border border-border rounded px-2.5 py-2 space-y-1">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                {cc.contractName && (
-                                  <span className="font-medium">{cc.contractName}</span>
-                                )}
-                                <a
-                                  href={getExplorerAddressUrl(cc.contract, cc.network)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono text-muted-foreground hover:underline"
-                                >
-                                  {cc.contract.slice(0, 10)}...{cc.contract.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                                </a>
-                              </div>
-                              <span className="text-muted-foreground">{cc.network}</span>
-                            </div>
-                            <div className="text-muted-foreground">
-                              Also deposited by: {cc.sharedWith.map((w) => resolveAddressName(w)).join(", ")}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   {/* No connections found */}
                   {selectedCandidate.directCount === 0 &&
-                    selectedCandidate.sharedContracts.length === 0 &&
                     selectedCandidate.sharedFundingSources.length === 0 &&
                     !selectedCandidate.invitedByTarget &&
                     !selectedCandidate.invitedTarget &&
                     !selectedCandidate.mutualReviews &&
-                    !selectedCandidate.mutualVouches &&
-                    (!selectedCandidate.crossClusterContracts || selectedCandidate.crossClusterContracts.length === 0) && (
+                    !selectedCandidate.mutualVouches && (
                     <div className="text-xs text-muted-foreground">No specific connection details available.</div>
                   )}
                 </div>

@@ -7,7 +7,6 @@ import {
   parallel,
   getFirstFunder,
   getOutgoingTransfers,
-  getContractName,
 } from "./alchemy";
 import { fetchProfilesByAddresses, fetchInvitationTree, fetchActivities, type EthosProfile, type Invitation, type ReviewActivity } from "./ethos";
 import { getAddressLabel, isExchangeAddress } from "./known-addresses";
@@ -18,21 +17,13 @@ const MAX_PAGES = 50;
 const CANDIDATE_MAX_PAGES = 6;
 const CANDIDATE_MAX_TXS = 4000;
 const MAX_CANDIDATES_PER_NETWORK = 50;
-const MAX_EXCHANGE_CONTRACTS = 10;
-const HUGE_TX_THRESHOLD = 15000;
 const CONCURRENCY = 8;
 
 // Scoring weights
 const W_DIRECT = 4;
 const W_REPEAT = 4;
 const W_BIDIRECTIONAL = 3;
-const W_SHARED_RARE = 3;
-const W_SHARED_MEDIUM = 1;
-const W_SHARED_POPULAR = -2;
 const W_SHARED_FUNDER = 5;
-
-const POPULAR_THRESHOLD = 100;
-const VERY_POPULAR_THRESHOLD = 1000;
 const FINAL_SCORE_THRESHOLD = 15;
 const POSSIBLE_SCORE_THRESHOLD = 8;
 
@@ -74,11 +65,9 @@ export interface ClusterCandidate {
   outgoingCount: number;
   bidirectional: boolean;
   repeatTransfer: boolean;
-  sharedContracts: string[];
   sharedFundingSources: string[];
   sharedFirstFunder: boolean;
   firstFunders: FirstFunderInfo[];
-  crossClusterContracts: { contract: string; contractName: string | null; sharedWith: string[]; network: string }[];
   sharedCexDeposits: SharedCexDeposit[];
   invitedByTarget: boolean;
   invitedTarget: boolean;
@@ -107,11 +96,10 @@ export interface ClusterScanResult {
   };
   targetFirstFunders: FirstFunderInfo[];
   funderProfiles: Record<string, { displayName: string; username: string | null; avatarUrl: string; score: number; profileUrl: string }>;
-  sharedDeposits: { contract: string; contractName: string | null; wallets: string[]; network: string }[];
   sharedCexDeposits: SharedCexDeposit[];
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
-  networkStats: Record<string, { txCount: number; directWallets: number; contractClusters: number }>;
+  networkStats: Record<string, { txCount: number; directWallets: number }>;
   logs: LogEntry[];
 }
 
@@ -126,11 +114,7 @@ interface DirectWalletInfo {
   repeatTransfer: boolean;
 }
 
-interface ContractMeta {
-  address: string;
-  uniqueSenders: number;
-  popularity: "rare" | "medium" | "popular" | "very_popular";
-}
+
 
 // --- Helpers ---
 
@@ -207,97 +191,6 @@ function analyzeDirectTransfers(
   return result;
 }
 
-function getContractDestinations(
-  target: string,
-  txs: AssetTransfer[],
-  contractCache: Map<string, boolean>
-): string[] {
-  const contracts = new Set<string>();
-  for (const tx of txs) {
-    const from = normalizeAddress(tx.from);
-    const to = normalizeAddress(tx.to);
-    if (from !== target || !to || to === target || to === ZERO_ADDRESS) continue;
-    if (transferValue(tx) === 0) continue;
-    if (contractCache.get(to)) contracts.add(to);
-  }
-  return [...contracts];
-}
-
-async function estimateContractPopularity(
-  contractAddr: string,
-  chain: Chain
-): Promise<ContractMeta> {
-  const senders = new Set<string>();
-  try {
-    const txs = await getAllTransactions(contractAddr, chain, { maxPages: 3, maxTxs: 3000 });
-    for (const tx of txs) {
-      const from = normalizeAddress(tx.from);
-      const to = normalizeAddress(tx.to);
-      if (to === contractAddr && from) senders.add(from);
-      if (senders.size >= VERY_POPULAR_THRESHOLD) break;
-    }
-  } catch {
-    // If we can't fetch, assume medium
-  }
-
-  const count = senders.size;
-  let popularity: ContractMeta["popularity"] = "rare";
-  if (count >= VERY_POPULAR_THRESHOLD) popularity = "very_popular";
-  else if (count >= POPULAR_THRESHOLD) popularity = "popular";
-  else if (count >= 10) popularity = "medium";
-
-  return { address: contractAddr, uniqueSenders: count, popularity };
-}
-
-async function findWalletsSharingContracts(
-  target: string,
-  contracts: ContractMeta[],
-  chain: Chain,
-  contractCache: Map<string, boolean>
-): Promise<Map<string, Set<string>>> {
-  // Map: wallet -> set of shared contract addresses
-  const candidates = new Map<string, Set<string>>();
-
-  const scannableContracts = contracts
-    .filter((c) => c.popularity !== "popular" && c.popularity !== "very_popular")
-    .slice(0, MAX_EXCHANGE_CONTRACTS);
-
-  await parallel(
-    scannableContracts,
-    async (contract) => {
-      try {
-        const txs = await getAllTransactions(contract.address, chain, {
-          maxPages: 6,
-          maxTxs: HUGE_TX_THRESHOLD,
-        });
-
-        if (txs.length >= HUGE_TX_THRESHOLD) return;
-
-        let added = 0;
-        for (const tx of txs) {
-          const from = normalizeAddress(tx.from);
-          const to = normalizeAddress(tx.to);
-          if (to !== contract.address || !from || from === target) continue;
-          if (contractCache.get(from)) continue;
-
-          let set = candidates.get(from);
-          if (!set) {
-            set = new Set();
-            candidates.set(from, set);
-          }
-          set.add(contract.address);
-          added++;
-          if (added >= 100) break;
-        }
-      } catch {
-        // Skip failed contracts
-      }
-    },
-    5
-  );
-
-  return candidates;
-}
 
 function findSharedFundingSources(
   target: string,
@@ -348,7 +241,6 @@ function scoreCandidate(
   address: string,
   target: string,
   directInfo: DirectWalletInfo | undefined,
-  sharedContracts: { address: string; popularity: string }[],
   sharedFunders: string[],
   sharedFirstFunder: boolean,
   fundedByTarget: boolean,
@@ -368,14 +260,6 @@ function scoreCandidate(
     addSignal("direct_transfer", W_DIRECT, `count=${directInfo.count}`);
     if (directInfo.repeatTransfer) addSignal("repeat_transfer", W_REPEAT, "count>1");
     if (directInfo.bidirectional) addSignal("bidirectional", W_BIDIRECTIONAL, "in>0 and out>0");
-  }
-
-  for (const contract of sharedContracts) {
-    let score: number;
-    if (contract.popularity === "rare") score = W_SHARED_RARE;
-    else if (contract.popularity === "medium") score = W_SHARED_MEDIUM;
-    else score = W_SHARED_POPULAR;
-    addSignal("shared_contract", score, `${contract.address} popularity=${contract.popularity}`);
   }
 
   if (fundedByTarget) {
@@ -416,11 +300,9 @@ function scoreCandidate(
     outgoingCount: directInfo?.outgoingCount ?? 0,
     bidirectional: directInfo?.bidirectional ?? false,
     repeatTransfer: directInfo?.repeatTransfer ?? false,
-    sharedContracts: sharedContracts.map((c) => c.address),
     sharedFundingSources: sharedFunders,
     sharedFirstFunder,
     firstFunders: candidateFirstFunders,
-    crossClusterContracts: [],
     sharedCexDeposits: [],
     invitedByTarget: false,
     invitedTarget: false,
@@ -439,7 +321,6 @@ async function scanNetwork(
   stepDone?: (phase: string) => void
 ): Promise<{
   directWallets: Map<string, DirectWalletInfo>;
-  contractClusterWallets: Map<string, Set<string>>;
   candidates: Map<string, ClusterCandidate>;
   candidateTxs: Map<string, AssetTransfer[]>;
   contractCache: Map<string, boolean>;
@@ -459,7 +340,6 @@ async function scanNetwork(
     for (let i = 0; i < STEPS_PER_NETWORK - 1; i++) stepDone?.(`${network}: Skipped (no txs)`);
     return {
       directWallets: new Map(),
-      contractClusterWallets: new Map(),
       candidates: new Map(),
       candidateTxs: new Map(),
       contractCache: new Map(),
@@ -490,47 +370,9 @@ async function scanNetwork(
   log("success", `[${network}] ${directWallets.size} direct EOA wallets found`);
   stepDone?.(`${network}: Direct transfers analyzed`);
 
-  // Step 4: Find contract destinations + popularity
-  log("info", `[${network}] Analyzing contract destinations...`);
-  const contractDests = getContractDestinations(target, txs, contractCache);
-  log("info", `[${network}] ${contractDests.length} contract destinations found`);
-
-  const contractMetas: ContractMeta[] = [];
-  if (contractDests.length > 0) {
-    log("info", `[${network}] Estimating contract popularity...`);
-    const metas = await parallel(
-      contractDests.slice(0, MAX_EXCHANGE_CONTRACTS),
-      (addr) => estimateContractPopularity(addr, chain),
-      5
-    );
-    contractMetas.push(...metas);
-    for (const m of contractMetas) {
-      log("info", `[${network}] ${m.address.slice(0, 10)}... senders=${m.uniqueSenders} popularity=${m.popularity}`);
-    }
-  }
-  stepDone?.(`${network}: Contract popularity estimated`);
-
-  // Step 5: Find wallets sharing contracts
-  log("info", `[${network}] Scanning for wallets sharing contracts...`);
-  const contractClusterWallets = await findWalletsSharingContracts(
-    target,
-    contractMetas,
-    chain,
-    contractCache
-  );
-  for (const addr of directWallets.keys()) {
-    contractClusterWallets.delete(addr);
-  }
-  log("success", `[${network}] ${contractClusterWallets.size} wallets found via shared contracts`);
-  stepDone?.(`${network}: Shared contracts scanned`);
-
-  // Step 6: Pre-score candidates using direct transfer + shared contract data only
-  const allCandidateAddrsRaw = [
-    ...new Set([...directWallets.keys(), ...contractClusterWallets.keys()]),
-  ].slice(0, MAX_CANDIDATES_PER_NETWORK);
-
-  const contractPopMap = new Map(contractMetas.map((m) => [m.address, m]));
-  const PRE_SCORE_THRESHOLD = 3; // minimum to warrant deep scan
+  // Step 4: Pre-score candidates from direct transfers
+  const allCandidateAddrsRaw = [...directWallets.keys()].slice(0, MAX_CANDIDATES_PER_NETWORK);
+  const PRE_SCORE_THRESHOLD = 3;
 
   const promisingCandidates: string[] = [];
   for (const addr of allCandidateAddrsRaw) {
@@ -540,14 +382,6 @@ async function scanNetwork(
       preScore += W_DIRECT;
       if (directInfo.repeatTransfer) preScore += W_REPEAT;
       if (directInfo.bidirectional) preScore += W_BIDIRECTIONAL;
-    }
-    const sharedContractAddrs = contractClusterWallets.get(addr);
-    if (sharedContractAddrs) {
-      for (const ca of sharedContractAddrs) {
-        const pop = contractPopMap.get(ca)?.popularity ?? "medium";
-        if (pop === "rare") preScore += W_SHARED_RARE;
-        else if (pop === "medium") preScore += W_SHARED_MEDIUM;
-      }
     }
     if (preScore >= PRE_SCORE_THRESHOLD) {
       promisingCandidates.push(addr);
@@ -636,13 +470,6 @@ async function scanNetwork(
 
   for (const addr of allCandidateAddrs) {
     const directInfo = directWallets.get(addr);
-    const sharedContractAddrs = contractClusterWallets.get(addr);
-    const sharedContracts = sharedContractAddrs
-      ? [...sharedContractAddrs].map((ca) => ({
-          address: ca,
-          popularity: contractPopMap.get(ca)?.popularity ?? "medium",
-        }))
-      : [];
     const sharedFunders = sharedFunding.get(addr) ?? [];
     const hasSharedFirstFunder = sharedFirstFunderAddrs.has(addr);
     const candFF = candidateFirstFunders.get(addr);
@@ -657,7 +484,6 @@ async function scanNetwork(
       addr,
       target,
       directInfo,
-      sharedContracts,
       sharedFunders,
       hasSharedFirstFunder,
       isFundedByTarget,
@@ -680,7 +506,7 @@ async function scanNetwork(
     ? { chain: network, funder: targetFirstFunder.funder, funderLabel: getAddressLabel(targetFirstFunder.funder), txHash: targetFirstFunder.txHash, value: targetFirstFunder.value }
     : null;
 
-  return { directWallets, contractClusterWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunder: targetFF };
+  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunder: targetFF };
 }
 
 // --- Shared CEX deposit address detection ---
@@ -787,59 +613,6 @@ async function verifyCexDepositAddresses(
   return results;
 }
 
-// --- Cross-cluster shared deposit analysis ---
-
-function findSharedDeposits(
-  clusterWallets: string[],
-  txsByNetwork: Map<string, Map<string, AssetTransfer[]>>,
-  contractCacheByNetwork: Map<string, Map<string, boolean>>,
-): { contract: string; contractName: string | null; wallets: string[]; network: string }[] {
-  const results: { contract: string; contractName: string | null; wallets: string[]; network: string }[] = [];
-
-  for (const [network, txsMap] of txsByNetwork) {
-    const contractCache = contractCacheByNetwork.get(network) || new Map();
-
-    // For each cluster wallet, collect contracts they deposited to
-    const walletContracts = new Map<string, Set<string>>(); // contract -> set of wallets
-
-    for (const wallet of clusterWallets) {
-      const txs = txsMap.get(wallet);
-      if (!txs) continue;
-
-      for (const tx of txs) {
-        const from = normalizeAddress(tx.from);
-        const to = normalizeAddress(tx.to);
-        if (from !== wallet || !to || to === wallet) continue;
-        if (to === ZERO_ADDRESS) continue;
-        if (!contractCache.get(to)) continue; // only contracts
-
-        let set = walletContracts.get(to);
-        if (!set) {
-          set = new Set();
-          walletContracts.set(to, set);
-        }
-        set.add(wallet);
-      }
-    }
-
-    // Filter to contracts used by 2+ cluster members
-    for (const [contract, wallets] of walletContracts) {
-      if (wallets.size >= 2) {
-        results.push({ contract, contractName: null, wallets: [...wallets].sort(), network });
-      }
-    }
-  }
-
-  // Dedupe by contract (might appear on multiple networks)
-  const seen = new Set<string>();
-  return results.filter((r) => {
-    const key = `${r.contract}:${r.network}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).sort((a, b) => b.wallets.length - a.wallets.length);
-}
-
 // --- Main Entry Point ---
 
 export interface ScanProgress {
@@ -851,7 +624,7 @@ export interface ScanProgress {
   phase: string;
 }
 
-const STEPS_PER_NETWORK = 9;
+const STEPS_PER_NETWORK = 7;
 const ETHOS_STEPS = 1;
 
 export async function runClusterScan(
@@ -920,14 +693,13 @@ export async function runClusterScan(
 
   for (const { chain, result } of networkResults) {
     if (!result) {
-      networkStats[chain.name] = { txCount: 0, directWallets: 0, contractClusters: 0 };
+      networkStats[chain.name] = { txCount: 0, directWallets: 0 };
       continue;
     }
 
     networkStats[chain.name] = {
       txCount: result.txCount,
       directWallets: result.directWallets.size,
-      contractClusters: result.contractClusterWallets.size,
     };
 
     txsByNetwork.set(chain.name, result.candidateTxs);
@@ -1045,7 +817,6 @@ export async function runClusterScan(
         existing.networks = [...new Set([...existing.networks, ...c.networks])];
         existing.firstFunders = [...existing.firstFunders, ...c.firstFunders];
         existing.sharedFundingSources = [...new Set([...existing.sharedFundingSources, ...c.sharedFundingSources])];
-        existing.sharedContracts = [...new Set([...existing.sharedContracts, ...c.sharedContracts])];
         existing.sharedFirstFunder = existing.sharedFirstFunder || c.sharedFirstFunder;
         existing.directCount += c.directCount;
         existing.incomingCount += c.incomingCount;
@@ -1244,12 +1015,10 @@ export async function runClusterScan(
           outgoingCount: 0,
           bidirectional: false,
           repeatTransfer: false,
-          sharedContracts: [],
           sharedFundingSources: [],
           sharedFirstFunder: false,
           firstFunders: [{ chain, funder: funderAddress, funderLabel: getAddressLabel(funderAddress), txHash: "", value: 0 }],
-          crossClusterContracts: [],
-          sharedCexDeposits: [],
+                sharedCexDeposits: [],
           invitedByTarget: false,
           invitedTarget: false,
           mutualReviews: false,
@@ -1266,51 +1035,12 @@ export async function runClusterScan(
     }
   }
 
-  // Cross-cluster shared deposit analysis
+  // Shared CEX deposit address detection
   const allClusterWallets = [
     target,
     ...strongWithEthos.flatMap((c) => c.wallets || [c.address]),
     ...possibleWithEthos.flatMap((c) => c.wallets || [c.address]),
   ];
-  log("info", `Analyzing cross-cluster deposits for ${allClusterWallets.length} wallets...`);
-  const sharedDeposits = findSharedDeposits(allClusterWallets, txsByNetwork, contractCacheByNetwork);
-  if (sharedDeposits.length > 0) {
-    log("warn", `Found ${sharedDeposits.length} contract${sharedDeposits.length > 1 ? "s" : ""} used by 2+ cluster members`);
-
-    // Resolve contract names (best effort, use Base or first available chain)
-    const chainForLookup = CHAINS[0]; // Base
-    await parallel(
-      sharedDeposits.slice(0, 20),
-      async (dep) => {
-        const name = await getContractName(dep.contract, chainForLookup);
-        if (name) dep.contractName = name;
-      },
-      5
-    );
-
-    // Attach cross-cluster data to each candidate
-    const allCandidates = [...strongWithEthos, ...possibleWithEthos];
-    for (const dep of sharedDeposits) {
-      for (const candidate of allCandidates) {
-        const candidateWallets = candidate.wallets || [candidate.address];
-        if (dep.wallets.some((w) => candidateWallets.includes(w))) {
-          const sharedWith = dep.wallets.filter((w) => !candidateWallets.includes(w));
-          if (sharedWith.length > 0) {
-            candidate.crossClusterContracts.push({
-              contract: dep.contract,
-              contractName: dep.contractName,
-              sharedWith,
-              network: dep.network,
-            });
-          }
-        }
-      }
-    }
-  } else {
-    log("info", `No shared contract deposits found between cluster members`);
-  }
-
-  // Shared CEX deposit address detection
   log("info", `Checking for shared CEX deposit addresses...`);
   const sharedEoaDests = findSharedEoaDestinations(allClusterWallets, txsByNetwork, contractCacheByNetwork);
   let sharedCexDeposits: SharedCexDeposit[] = [];
@@ -1365,7 +1095,6 @@ export async function runClusterScan(
     targetEthos,
     targetFirstFunders: allTargetFirstFunders,
     funderProfiles,
-    sharedDeposits,
     sharedCexDeposits,
     strongCluster: strongWithEthos,
     possibleCluster: possibleWithEthos,
