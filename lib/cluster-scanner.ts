@@ -6,8 +6,11 @@ import {
   batchGetCode,
   parallel,
   getFirstFunder,
+  getOutgoingTransfers,
+  getContractName,
 } from "./alchemy";
-import { fetchProfilesByAddresses, type EthosProfile } from "./ethos";
+import { fetchProfilesByAddresses, fetchInvitationTree, fetchActivities, type EthosProfile, type Invitation, type ReviewActivity } from "./ethos";
+import { getAddressLabel, isExchangeAddress } from "./known-addresses";
 
 // --- Config ---
 
@@ -27,14 +30,11 @@ const W_SHARED_RARE = 3;
 const W_SHARED_MEDIUM = 1;
 const W_SHARED_POPULAR = -2;
 const W_SHARED_FUNDER = 5;
-const W_TIME_1H = 3;
-const W_TIME_24H = 1;
-const W_SIMILAR_AMOUNT = 2;
 
 const POPULAR_THRESHOLD = 100;
 const VERY_POPULAR_THRESHOLD = 1000;
-const FINAL_SCORE_THRESHOLD = 8;
-const POSSIBLE_SCORE_THRESHOLD = 4;
+const FINAL_SCORE_THRESHOLD = 15;
+const POSSIBLE_SCORE_THRESHOLD = 8;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -57,6 +57,7 @@ export interface Signal {
 export interface FirstFunderInfo {
   chain: string;
   funder: string;
+  funderLabel: string | null; // e.g. "Kraken", "Binance", "Base Bridge"
   txHash: string;
   value: number;
 }
@@ -77,8 +78,12 @@ export interface ClusterCandidate {
   sharedFundingSources: string[];
   sharedFirstFunder: boolean;
   firstFunders: FirstFunderInfo[];
-  timeProximityHits: number;
-  similarAmountHits: number;
+  crossClusterContracts: { contract: string; contractName: string | null; sharedWith: string[]; network: string }[];
+  sharedCexDeposits: SharedCexDeposit[];
+  invitedByTarget: boolean;
+  invitedTarget: boolean;
+  mutualReviews: boolean;
+  mutualVouches: boolean;
   ethosProfile?: {
     profileId: number;
     displayName: string;
@@ -102,7 +107,8 @@ export interface ClusterScanResult {
   };
   targetFirstFunders: FirstFunderInfo[];
   funderProfiles: Record<string, { displayName: string; username: string | null; avatarUrl: string; score: number; profileUrl: string }>;
-  sharedDeposits: { contract: string; wallets: string[]; network: string }[];
+  sharedDeposits: { contract: string; contractName: string | null; wallets: string[]; network: string }[];
+  sharedCexDeposits: SharedCexDeposit[];
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
   networkStats: Record<string, { txCount: number; directWallets: number; contractClusters: number }>;
@@ -329,84 +335,25 @@ function findSharedFundingSources(
   return result;
 }
 
-function estimateTimeProximity(
-  target: string,
-  candidate: string,
-  targetTxs: AssetTransfer[],
-  candidateTxs: AssetTransfer[]
-): { hits1h: number; hits24h: number } {
-  function outgoingTimestamps(wallet: string, txs: AssetTransfer[]): number[] {
-    return txs
-      .filter((tx) => normalizeAddress(tx.from) === wallet)
-      .map(transferTimestamp)
-      .filter((ts) => ts > 0)
-      .sort((a, b) => a - b);
-  }
 
-  const t1 = outgoingTimestamps(target, targetTxs);
-  const t2 = outgoingTimestamps(candidate, candidateTxs);
-  let hits1h = 0;
-  let hits24h = 0;
-
-  let j = 0;
-  for (const x of t1) {
-    while (j < t2.length && t2[j] < x - 86400) j++;
-    let k = j;
-    while (k < t2.length && t2[k] <= x + 86400) {
-      const diff = Math.abs(t2[k] - x);
-      if (diff <= 3600) hits1h++;
-      else hits24h++;
-      k++;
-    }
-  }
-
-  return { hits1h, hits24h };
-}
-
-function estimateAmountSimilarity(
-  target: string,
-  candidate: string,
-  targetTxs: AssetTransfer[],
-  candidateTxs: AssetTransfer[]
-): number {
-  function outgoingValues(wallet: string, txs: AssetTransfer[]): number[] {
-    return txs
-      .filter((tx) => normalizeAddress(tx.from) === wallet)
-      .map(transferValue)
-      .filter((v) => v > 0);
-  }
-
-  const a = outgoingValues(target, targetTxs).slice(0, 50);
-  const b = outgoingValues(candidate, candidateTxs).slice(0, 50);
-  let hits = 0;
-
-  for (const x of a) {
-    for (const y of b) {
-      if (x === 0 || y === 0) continue;
-      const rel = Math.abs(x - y) / Math.max(x, y);
-      if (rel <= 0.10) {
-        hits++;
-        break;
-      }
-    }
-  }
-
-  return hits;
-}
 
 // --- Scoring ---
 
-const W_SHARED_FIRST_FUNDER = 6;
+const W_SHARED_FIRST_FUNDER = 8;
+const W_SHARED_EXCHANGE_FUNDER = 5; // same exact exchange hot wallet funded both
+const W_FUNDED_BY_TARGET = 10;
+const W_FUNDED_BY_CLUSTER = 10;
 
 function scoreCandidate(
   address: string,
+  target: string,
   directInfo: DirectWalletInfo | undefined,
   sharedContracts: { address: string; popularity: string }[],
   sharedFunders: string[],
   sharedFirstFunder: boolean,
+  fundedByTarget: boolean,
+  fundedByClusterWallet: boolean,
   candidateFirstFunders: FirstFunderInfo[],
-  timeProx: { hits1h: number; hits24h: number },
-  amountHits: number,
   network: string
 ): ClusterCandidate {
   const signals: Signal[] = [];
@@ -431,22 +378,24 @@ function scoreCandidate(
     addSignal("shared_contract", score, `${contract.address} popularity=${contract.popularity}`);
   }
 
-  if (sharedFirstFunder) {
-    addSignal("shared_first_funder", W_SHARED_FIRST_FUNDER, "same first funder on at least one chain");
+  if (fundedByTarget) {
+    addSignal("funded_by_target", W_FUNDED_BY_TARGET, "first funded by the scanned wallet");
+  } else if (fundedByClusterWallet) {
+    addSignal("funded_by_cluster", W_FUNDED_BY_CLUSTER, "first funded by another wallet in the results");
+  } else if (sharedFirstFunder) {
+    // Check if the shared funder is an exchange hot wallet
+    const sharedFunderAddr = candidateFirstFunders.find(() => true)?.funder;
+    const isExchange = sharedFunderAddr ? isExchangeAddress(sharedFunderAddr) : false;
+    if (isExchange) {
+      const label = getAddressLabel(sharedFunderAddr!) || "exchange";
+      addSignal("shared_exchange_funder", W_SHARED_EXCHANGE_FUNDER, `same ${label} withdrawal address`);
+    } else {
+      addSignal("shared_first_funder", W_SHARED_FIRST_FUNDER, "same first funder on at least one chain");
+    }
   }
 
   if (sharedFunders.length > 0) {
     addSignal("shared_incoming_sender", W_SHARED_FUNDER, `senders=${sharedFunders.length}`);
-  }
-
-  if (timeProx.hits1h > 0) {
-    addSignal("time_proximity_1h", W_TIME_1H, `hits=${timeProx.hits1h}`);
-  } else if (timeProx.hits24h > 0) {
-    addSignal("time_proximity_24h", W_TIME_24H, `hits=${timeProx.hits24h}`);
-  }
-
-  if (amountHits > 0) {
-    addSignal("similar_amount", W_SIMILAR_AMOUNT, `hits=${amountHits}`);
   }
 
   const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
@@ -470,8 +419,12 @@ function scoreCandidate(
     sharedFundingSources: sharedFunders,
     sharedFirstFunder,
     firstFunders: candidateFirstFunders,
-    timeProximityHits: timeProx.hits1h + timeProx.hits24h,
-    similarAmountHits: amountHits,
+    crossClusterContracts: [],
+    sharedCexDeposits: [],
+    invitedByTarget: false,
+    invitedTarget: false,
+    mutualReviews: false,
+    mutualVouches: false,
     networks: [network],
   };
 }
@@ -622,6 +575,7 @@ async function scanNetwork(
         candidateFirstFunders.set(addr, {
           chain: network,
           funder: ff.funder,
+          funderLabel: getAddressLabel(ff.funder),
           txHash: ff.txHash,
           value: ff.value,
         });
@@ -648,6 +602,12 @@ async function scanNetwork(
   const contractPopMap = new Map(contractMetas.map((m) => [m.address, m]));
   const candidates = new Map<string, ClusterCandidate>();
 
+  // Build set of all candidate first funder addresses for cross-reference
+  const allCandFirstFunderAddrs = new Map<string, string>(); // funder -> candidate addr
+  for (const [addr, ff] of candidateFirstFunders) {
+    allCandFirstFunderAddrs.set(ff.funder, addr);
+  }
+
   for (const addr of allCandidateAddrs) {
     const directInfo = directWallets.get(addr);
     const sharedContractAddrs = contractClusterWallets.get(addr);
@@ -662,19 +622,23 @@ async function scanNetwork(
     const candFF = candidateFirstFunders.get(addr);
     const candFirstFunders: FirstFunderInfo[] = candFF ? [candFF] : [];
 
-    const candTxs = candidateTxsMap.get(addr) ?? [];
-    const timeProx = estimateTimeProximity(target, addr, txs, candTxs);
-    const amountHits = estimateAmountSimilarity(target, addr, txs, candTxs);
+    // Check if first funded by the target wallet
+    const isFundedByTarget = candFF?.funder === target;
+    // Check if first funded by another candidate in the results
+    const isFundedByCluster = !isFundedByTarget && candFF
+      ? allCandidateAddrs.some((other) => other !== addr && other === candFF.funder)
+      : false;
 
     const candidate = scoreCandidate(
       addr,
+      target,
       directInfo,
       sharedContracts,
       sharedFunders,
       hasSharedFirstFunder,
+      isFundedByTarget,
+      isFundedByCluster,
       candFirstFunders,
-      timeProx,
-      amountHits,
       network
     );
 
@@ -689,10 +653,114 @@ async function scanNetwork(
   stepDone?.(`${network}: Scoring complete`);
 
   const targetFF: FirstFunderInfo | null = targetFirstFunder
-    ? { chain: network, funder: targetFirstFunder.funder, txHash: targetFirstFunder.txHash, value: targetFirstFunder.value }
+    ? { chain: network, funder: targetFirstFunder.funder, funderLabel: getAddressLabel(targetFirstFunder.funder), txHash: targetFirstFunder.txHash, value: targetFirstFunder.value }
     : null;
 
   return { directWallets, contractClusterWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunder: targetFF };
+}
+
+// --- Shared CEX deposit address detection ---
+
+export interface SharedCexDeposit {
+  depositAddress: string;
+  exchange: string;
+  wallets: string[];
+  network: string;
+}
+
+function findSharedEoaDestinations(
+  clusterWallets: string[],
+  txsByNetwork: Map<string, Map<string, AssetTransfer[]>>,
+  contractCacheByNetwork: Map<string, Map<string, boolean>>,
+): Map<string, { wallets: Set<string>; network: string }> {
+  // Find EOA addresses that 2+ cluster wallets sent to
+  const sharedDests = new Map<string, { wallets: Set<string>; network: string }>();
+
+  for (const [network, txsMap] of txsByNetwork) {
+    const contractCache = contractCacheByNetwork.get(network) || new Map();
+    const destToWallets = new Map<string, Set<string>>();
+
+    for (const wallet of clusterWallets) {
+      const txs = txsMap.get(wallet);
+      if (!txs) continue;
+
+      for (const tx of txs) {
+        const from = normalizeAddress(tx.from);
+        const to = normalizeAddress(tx.to);
+        if (from !== wallet || !to || to === wallet) continue;
+        if (to === ZERO_ADDRESS) continue;
+        if (contractCache.get(to)) continue; // skip contracts, we want EOAs only
+        if (clusterWallets.includes(to)) continue; // skip other cluster wallets
+
+        let set = destToWallets.get(to);
+        if (!set) {
+          set = new Set();
+          destToWallets.set(to, set);
+        }
+        set.add(wallet);
+      }
+    }
+
+    for (const [dest, wallets] of destToWallets) {
+      if (wallets.size >= 2) {
+        const existing = sharedDests.get(dest);
+        if (existing) {
+          for (const w of wallets) existing.wallets.add(w);
+        } else {
+          sharedDests.set(dest, { wallets: new Set(wallets), network });
+        }
+      }
+    }
+  }
+
+  return sharedDests;
+}
+
+async function verifyCexDepositAddresses(
+  sharedDests: Map<string, { wallets: Set<string>; network: string }>,
+  log: (level: LogLevel, message: string) => void,
+): Promise<SharedCexDeposit[]> {
+  const results: SharedCexDeposit[] = [];
+  const destsToCheck = [...sharedDests.entries()].slice(0, 30); // limit API calls
+
+  await parallel(
+    destsToCheck,
+    async ([destAddr, { wallets, network }]) => {
+      // First check if the dest itself is a known exchange address
+      const directLabel = getAddressLabel(destAddr);
+      if (directLabel && !directLabel.includes("Bridge")) {
+        results.push({
+          depositAddress: destAddr,
+          exchange: directLabel,
+          wallets: [...wallets].sort(),
+          network,
+        });
+        return;
+      }
+
+      // Check if this address forwarded funds to a known exchange
+      // Fetch outgoing transfers from this address on Base
+      const chain = CHAINS.find((c) => c.name === network) || CHAINS[0];
+      try {
+        const outgoing = await getOutgoingTransfers(destAddr, chain, 20);
+        for (const tx of outgoing) {
+          const label = getAddressLabel(tx.to);
+          if (label && !label.includes("Bridge")) {
+            results.push({
+              depositAddress: destAddr,
+              exchange: label,
+              wallets: [...wallets].sort(),
+              network,
+            });
+            return; // found exchange, done with this address
+          }
+        }
+      } catch {}
+    },
+    5
+  );
+
+  return results;
 }
 
 // --- Cross-cluster shared deposit analysis ---
@@ -701,8 +769,8 @@ function findSharedDeposits(
   clusterWallets: string[],
   txsByNetwork: Map<string, Map<string, AssetTransfer[]>>,
   contractCacheByNetwork: Map<string, Map<string, boolean>>,
-): { contract: string; wallets: string[]; network: string }[] {
-  const results: { contract: string; wallets: string[]; network: string }[] = [];
+): { contract: string; contractName: string | null; wallets: string[]; network: string }[] {
+  const results: { contract: string; contractName: string | null; wallets: string[]; network: string }[] = [];
 
   for (const [network, txsMap] of txsByNetwork) {
     const contractCache = contractCacheByNetwork.get(network) || new Map();
@@ -733,7 +801,7 @@ function findSharedDeposits(
     // Filter to contracts used by 2+ cluster members
     for (const [contract, wallets] of walletContracts) {
       if (wallets.size >= 2) {
-        results.push({ contract, wallets: [...wallets].sort(), network });
+        results.push({ contract, contractName: null, wallets: [...wallets].sort(), network });
       }
     }
   }
@@ -960,8 +1028,6 @@ export async function runClusterScan(
         existing.outgoingCount += c.outgoingCount;
         existing.bidirectional = existing.bidirectional || c.bidirectional;
         existing.repeatTransfer = existing.repeatTransfer || c.repeatTransfer;
-        existing.timeProximityHits += c.timeProximityHits;
-        existing.similarAmountHits += c.similarAmountHits;
         // Keep highest scoring signals
         if (c.score > existing.score) {
           existing.score = c.score;
@@ -980,6 +1046,202 @@ export async function runClusterScan(
   const possibleWithEthos = dedupeByProfile(possibleCluster);
   log("info", `${strongWithEthos.length} strong and ${possibleWithEthos.length} possible candidates have Ethos profiles (deduped)`);
   stepDone("Ethos lookup complete");
+
+  // Ethos social analysis: invitations, reviews, vouches
+  const allWithEthos = [...strongWithEthos, ...possibleWithEthos];
+  const candidateProfileIds = new Set(
+    allWithEthos.map((c) => c.ethosProfile?.profileId).filter((id): id is number => !!id)
+  );
+
+  const targetDisplayName = targetEthos?.displayName || target.slice(0, 10) + "...";
+
+  if (targetProfileId && candidateProfileIds.size > 0) {
+    log("info", `Checking Ethos social connections (invitations, reviews, vouches)...`);
+
+    try {
+      // Fetch target's invitation tree
+      const targetInvitations = await fetchInvitationTree(targetProfileId);
+      const invitedByTargetIds = new Set(targetInvitations.map((inv) => inv.acceptedProfileId));
+
+      // Check which candidates were invited by target or invited the target
+      for (const candidate of allWithEthos) {
+        const pid = candidate.ethosProfile?.profileId;
+        if (!pid) continue;
+
+        if (invitedByTargetIds.has(pid)) {
+          candidate.invitedByTarget = true;
+          candidate.score += 2;
+          candidate.signals.push({ type: "invited_by_target", score: 2, details: "target invited this profile on Ethos" });
+          candidate.signalTypes.add("invited_by_target");
+          log("warn", `${candidate.ethosProfile?.displayName} was invited by ${targetDisplayName} on Ethos`);
+        }
+      }
+
+      // Fetch candidate invitation trees to check if any invited the target
+      await parallel(
+        allWithEthos.filter((c) => c.ethosProfile?.profileId),
+        async (candidate) => {
+          const pid = candidate.ethosProfile!.profileId;
+          try {
+            const invitations = await fetchInvitationTree(pid);
+            if (invitations.some((inv) => inv.acceptedProfileId === targetProfileId)) {
+              candidate.invitedTarget = true;
+              candidate.score += 2;
+              candidate.signals.push({ type: "invited_target", score: 2, details: "this profile invited the target on Ethos" });
+              candidate.signalTypes.add("invited_target");
+              log("warn", `${candidate.ethosProfile?.displayName} invited ${targetDisplayName} on Ethos`);
+            }
+          } catch {}
+        },
+        5
+      );
+
+      // Check mutual reviews
+      const [targetReviewsGiven, targetReviewsReceived] = await Promise.all([
+        fetchActivities(targetProfileId, "given", ["review"], 200),
+        fetchActivities(targetProfileId, "received", ["review"], 200),
+      ]);
+
+      const targetReviewedIds = new Set(targetReviewsGiven.map((r) => r.subject.profileId));
+      const reviewedTargetIds = new Set(targetReviewsReceived.map((r) => r.author.profileId));
+
+      for (const candidate of allWithEthos) {
+        const pid = candidate.ethosProfile?.profileId;
+        if (!pid) continue;
+
+        const targetReviewedCandidate = targetReviewedIds.has(pid);
+        const candidateReviewedTarget = reviewedTargetIds.has(pid);
+
+        if (targetReviewedCandidate && candidateReviewedTarget) {
+          candidate.mutualReviews = true;
+          candidate.score += 2;
+          candidate.signals.push({ type: "mutual_reviews", score: 2, details: "reviewed each other on Ethos" });
+          candidate.signalTypes.add("mutual_reviews");
+          log("warn", `Mutual reviews between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
+        }
+      }
+
+      // Check mutual vouches
+      const [targetVouchesGiven, targetVouchesReceived] = await Promise.all([
+        fetchActivities(targetProfileId, "given", ["vouch"], 200),
+        fetchActivities(targetProfileId, "received", ["vouch"], 200),
+      ]);
+
+      const targetVouchedIds = new Set(targetVouchesGiven.map((r) => r.subject.profileId));
+      const vouchedTargetIds = new Set(targetVouchesReceived.map((r) => r.author.profileId));
+
+      for (const candidate of allWithEthos) {
+        const pid = candidate.ethosProfile?.profileId;
+        if (!pid) continue;
+
+        const targetVouchedCandidate = targetVouchedIds.has(pid);
+        const candidateVouchedTarget = vouchedTargetIds.has(pid);
+
+        if (targetVouchedCandidate && candidateVouchedTarget) {
+          candidate.mutualVouches = true;
+          candidate.score += 2;
+          candidate.signals.push({ type: "mutual_vouches", score: 2, details: "vouched for each other on Ethos" });
+          candidate.signalTypes.add("mutual_vouches");
+          log("warn", `Mutual vouches between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
+        }
+      }
+
+      // Recalculate confidence after adding social signals
+      for (const c of allWithEthos) {
+        if (c.score >= FINAL_SCORE_THRESHOLD && c.signalTypes.size >= 2) c.confidence = "high";
+        else if (c.score >= POSSIBLE_SCORE_THRESHOLD) c.confidence = "medium";
+      }
+    } catch (err) {
+      log("error", `Ethos social analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Multi-hop funding: trace funder wallets to discover additional Ethos profiles
+  const knownAddresses = new Set([target, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
+  const uniqueFunderAddrs = new Set<string>();
+  for (const ff of allTargetFirstFunders) {
+    if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);
+  }
+  for (const c of allWithEthos) {
+    for (const ff of c.firstFunders || []) {
+      if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);
+    }
+  }
+
+  if (uniqueFunderAddrs.size > 0) {
+    log("info", `Multi-hop: tracing ${uniqueFunderAddrs.size} funder wallet(s) for additional Ethos profiles...`);
+
+    const discoveredWallets = new Map<string, { funderAddress: string; chain: string }>();
+
+    await parallel(
+      [...uniqueFunderAddrs],
+      async (funderAddr) => {
+        // Check outgoing transfers on Base (most common for Ethos)
+        const chain = CHAINS[0]; // Base
+        try {
+          const outgoing = await getOutgoingTransfers(funderAddr, chain, 50);
+          for (const tx of outgoing) {
+            const dest = tx.to.toLowerCase();
+            if (!knownAddresses.has(dest) && !discoveredWallets.has(dest)) {
+              discoveredWallets.set(dest, { funderAddress: funderAddr, chain: chain.name });
+            }
+          }
+        } catch {}
+      },
+      5
+    );
+
+    if (discoveredWallets.size > 0) {
+      log("info", `Multi-hop: found ${discoveredWallets.size} new wallet(s), checking Ethos...`);
+      const newAddrs = [...discoveredWallets.keys()].slice(0, 200);
+      const newProfiles = await fetchProfilesByAddresses(newAddrs);
+
+      let discovered = 0;
+      for (const [addr, { funderAddress, chain }] of discoveredWallets) {
+        const profile = newProfiles.get(addr);
+        if (!profile || !profile.profileId) continue;
+        if (profile.profileId === targetProfileId) continue;
+        if (candidateProfileIds.has(profile.profileId)) continue;
+
+        discovered++;
+        const ethosData = toEthosData(profile);
+        log("warn", `Multi-hop: discovered ${profile.displayName} (@${profile.username || "?"}) via funder ${funderAddress.slice(0, 10)}...`);
+
+        // Add as a new possible candidate
+        const newCandidate: ClusterCandidate = {
+          address: addr,
+          wallets: [addr],
+          score: 6,
+          confidence: "medium",
+          signals: [{ type: "multi_hop_funding", score: 6, details: `discovered via shared funder ${funderAddress.slice(0, 10)}... on ${chain}` }],
+          signalTypes: new Set(["multi_hop_funding"]),
+          directCount: 0,
+          incomingCount: 0,
+          outgoingCount: 0,
+          bidirectional: false,
+          repeatTransfer: false,
+          sharedContracts: [],
+          sharedFundingSources: [],
+          sharedFirstFunder: false,
+          firstFunders: [{ chain, funder: funderAddress, funderLabel: getAddressLabel(funderAddress), txHash: "", value: 0 }],
+          crossClusterContracts: [],
+          sharedCexDeposits: [],
+          invitedByTarget: false,
+          invitedTarget: false,
+          mutualReviews: false,
+          mutualVouches: false,
+          ethosProfile: ethosData,
+          networks: [chain],
+        };
+
+        possibleWithEthos.push(newCandidate);
+        candidateProfileIds.add(profile.profileId);
+      }
+
+      log("info", `Multi-hop: discovered ${discovered} additional Ethos profile(s)`);
+    }
+  }
+
   // Cross-cluster shared deposit analysis
   const allClusterWallets = [
     target,
@@ -990,8 +1252,82 @@ export async function runClusterScan(
   const sharedDeposits = findSharedDeposits(allClusterWallets, txsByNetwork, contractCacheByNetwork);
   if (sharedDeposits.length > 0) {
     log("warn", `Found ${sharedDeposits.length} contract${sharedDeposits.length > 1 ? "s" : ""} used by 2+ cluster members`);
+
+    // Resolve contract names (best effort, use Base or first available chain)
+    const chainForLookup = CHAINS[0]; // Base
+    await parallel(
+      sharedDeposits.slice(0, 20),
+      async (dep) => {
+        const name = await getContractName(dep.contract, chainForLookup);
+        if (name) dep.contractName = name;
+      },
+      5
+    );
+
+    // Attach cross-cluster data to each candidate
+    const allCandidates = [...strongWithEthos, ...possibleWithEthos];
+    for (const dep of sharedDeposits) {
+      for (const candidate of allCandidates) {
+        const candidateWallets = candidate.wallets || [candidate.address];
+        if (dep.wallets.some((w) => candidateWallets.includes(w))) {
+          const sharedWith = dep.wallets.filter((w) => !candidateWallets.includes(w));
+          if (sharedWith.length > 0) {
+            candidate.crossClusterContracts.push({
+              contract: dep.contract,
+              contractName: dep.contractName,
+              sharedWith,
+              network: dep.network,
+            });
+          }
+        }
+      }
+    }
   } else {
     log("info", `No shared contract deposits found between cluster members`);
+  }
+
+  // Shared CEX deposit address detection
+  log("info", `Checking for shared CEX deposit addresses...`);
+  const sharedEoaDests = findSharedEoaDestinations(allClusterWallets, txsByNetwork, contractCacheByNetwork);
+  let sharedCexDeposits: SharedCexDeposit[] = [];
+
+  if (sharedEoaDests.size > 0) {
+    log("info", `Found ${sharedEoaDests.size} shared EOA destination(s), verifying CEX connections...`);
+    sharedCexDeposits = await verifyCexDepositAddresses(sharedEoaDests, log);
+
+    if (sharedCexDeposits.length > 0) {
+      log("warn", `Found ${sharedCexDeposits.length} shared CEX deposit address(es)!`);
+      for (const dep of sharedCexDeposits) {
+        log("warn", `  ${dep.exchange} deposit: ${dep.depositAddress.slice(0, 10)}... used by ${dep.wallets.length} wallets`);
+      }
+
+      // Attach to candidates and add score
+      for (const dep of sharedCexDeposits) {
+        for (const candidate of [...strongWithEthos, ...possibleWithEthos]) {
+          const candidateWallets = candidate.wallets || [candidate.address];
+          if (dep.wallets.some((w) => candidateWallets.includes(w))) {
+            candidate.sharedCexDeposits.push(dep);
+            // Only add the signal once per candidate
+            if (!candidate.signals.some((s) => s.type === "shared_cex_deposit")) {
+              candidate.score += 8;
+              candidate.signals.push({
+                type: "shared_cex_deposit",
+                score: 8,
+                details: `same ${dep.exchange} deposit address as other cluster members`,
+              });
+              candidate.signalTypes.add("shared_cex_deposit");
+              // Recalculate confidence
+              if (candidate.score >= FINAL_SCORE_THRESHOLD && candidate.signalTypes.size >= 2) candidate.confidence = "high";
+              else if (candidate.score >= POSSIBLE_SCORE_THRESHOLD) candidate.confidence = "medium";
+            }
+          }
+        }
+      }
+    } else {
+      log("info", `No shared CEX deposit addresses found`);
+    }
+  } else {
+    log("info", `No shared EOA destinations found between cluster members`);
   }
 
   const totalElapsed = Date.now() - progress.start;
@@ -1006,6 +1342,7 @@ export async function runClusterScan(
     targetFirstFunders: allTargetFirstFunders,
     funderProfiles,
     sharedDeposits,
+    sharedCexDeposits,
     strongCluster: strongWithEthos,
     possibleCluster: possibleWithEthos,
     networkStats,

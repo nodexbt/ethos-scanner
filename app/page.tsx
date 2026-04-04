@@ -25,6 +25,7 @@ import {
   type LogEntry,
   type ScanProgress,
 } from "@/lib/cluster-scanner";
+import { getAddressLabel } from "@/lib/known-addresses";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession, signIn, signOut } from "next-auth/react";
 
@@ -171,8 +172,14 @@ export default function Home() {
     }
   };
 
-  const getExplorerAddressUrl = (address: string) => {
-    return `https://etherscan.io/address/${address}`;
+  const getExplorerAddressUrl = (address: string, chain?: string) => {
+    switch (chain) {
+      case "Base": return `https://basescan.org/address/${address}`;
+      case "Arbitrum": return `https://arbiscan.io/address/${address}`;
+      case "Optimism": return `https://optimistic.etherscan.io/address/${address}`;
+      case "Polygon": return `https://polygonscan.com/address/${address}`;
+      default: return `https://etherscan.io/address/${address}`;
+    }
   };
 
   const refreshInvestigations = () => {
@@ -298,8 +305,6 @@ export default function Home() {
           prompt += `\n`;
         }
         if (c.sharedFundingSources.length > 0) prompt += `- Shared incoming senders (not first funders): ${c.sharedFundingSources.length}\n`;
-        if (c.timeProximityHits > 0) prompt += `- Transaction timing correlations: ${c.timeProximityHits}\n`;
-        if (c.similarAmountHits > 0) prompt += `- Similar transaction amounts: ${c.similarAmountHits}\n`;
         if (screenshots.has(c.address)) prompt += `- X/Twitter search screenshot attached (see image)\n`;
       }
     }
@@ -385,6 +390,8 @@ export default function Home() {
     }
     const funderProfile = clusterResult.funderProfiles?.[addr];
     if (funderProfile) return funderProfile.displayName;
+    const knownLabel = getAddressLabel(addr);
+    if (knownLabel) return knownLabel;
     return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
   };
 
@@ -392,25 +399,42 @@ export default function Home() {
     const name = candidate.ethosProfile?.displayName || candidate.address.slice(0, 10) + "...";
     const lines: string[] = [];
 
-    // First funder - only show if it's meaningful:
-    // 1. Same first funder as target
-    // 2. Funder also funded other candidates in the results
-    if (candidate.sharedFirstFunder) {
-      lines.push(`Same first funder as ${targetName} on at least one chain.`);
-    } else if (candidate.firstFunders && candidate.firstFunders.length > 0) {
+    // First funder - show if meaningful
+    if (candidate.firstFunders && candidate.firstFunders.length > 0 && clusterResult) {
       for (const ff of candidate.firstFunders) {
         const funderName = resolveAddressName(ff.funder);
+        const isFundedByTarget = ff.funder === clusterResult.target;
+        const isFundedByResult = !isFundedByTarget && [...clusterResult.strongCluster, ...clusterResult.possibleCluster]
+          .some((c) => c.address !== candidate.address && (c.wallets?.includes(ff.funder) || c.address === ff.funder));
+
         let fundedOthers = 0;
-        if (clusterResult) {
-          for (const other of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
-            if (other.address === candidate.address) continue;
-            if (other.firstFunders?.some((f) => f.funder === ff.funder)) fundedOthers++;
+        for (const other of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
+          if (other.address === candidate.address) continue;
+          if (other.firstFunders?.some((f) => f.funder === ff.funder)) fundedOthers++;
+        }
+
+        const exchangeLabel = ff.funderLabel || getAddressLabel(ff.funder);
+
+        if (isFundedByTarget) {
+          lines.push(`First funded by ${targetName} on ${ff.chain}.`);
+        } else if (isFundedByResult) {
+          lines.push(`First funded by ${funderName} (another result) on ${ff.chain}.`);
+        } else if (candidate.sharedFirstFunder && ff.funder === clusterResult.targetFirstFunders?.find((f) => f.funder === ff.funder)?.funder) {
+          if (exchangeLabel) {
+            lines.push(`Same ${exchangeLabel} withdrawal address as ${targetName} on ${ff.chain} (likely same ${exchangeLabel} account).`);
+          } else {
+            lines.push(`Same first funder as ${targetName} on ${ff.chain}.`);
+          }
+        } else if (fundedOthers > 0) {
+          if (exchangeLabel) {
+            lines.push(`First funded by the same ${exchangeLabel} address on ${ff.chain} as ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""} (likely same ${exchangeLabel} account).`);
+          } else {
+            lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
           }
         }
-        if (fundedOthers > 0) {
-          lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
-        }
       }
+    } else if (candidate.sharedFirstFunder) {
+      lines.push(`Same first funder as ${targetName} on at least one chain.`);
     }
 
     // Direct transfers
@@ -434,35 +458,86 @@ export default function Home() {
     }
 
     // Timing
-    if (candidate.timeProximityHits > 0) {
-      lines.push(`${candidate.timeProximityHits} transaction${candidate.timeProximityHits > 1 ? "s" : ""} occurred close in time to ${targetName}'s activity.`);
-    }
-
-    // Similar amounts
-    if (candidate.similarAmountHits > 0) {
-      lines.push(`${candidate.similarAmountHits} outgoing transaction${candidate.similarAmountHits > 1 ? "s" : ""} matched similar amounts.`);
-    }
-
     // Shared contracts
     if (candidate.sharedContracts.length > 0) {
       lines.push(`Both interacted with ${candidate.sharedContracts.length} of the same contract${candidate.sharedContracts.length > 1 ? "s" : ""}.`);
+    }
+
+    // Shared CEX deposit addresses
+    if (candidate.sharedCexDeposits && candidate.sharedCexDeposits.length > 0) {
+      for (const dep of candidate.sharedCexDeposits) {
+        const others = dep.wallets
+          .filter((w) => !(candidate.wallets || [candidate.address]).includes(w))
+          .map((w) => resolveAddressName(w));
+        if (others.length > 0) {
+          lines.push(`Same ${dep.exchange} deposit address as ${others.slice(0, 3).join(", ")}${others.length > 3 ? ` and ${others.length - 3} more` : ""} (likely same ${dep.exchange} account).`);
+        }
+      }
+    }
+
+    // Multi-hop funding
+    if (candidate.signals.some((s) => s.type === "multi_hop_funding")) {
+      const detail = candidate.signals.find((s) => s.type === "multi_hop_funding")?.details || "";
+      lines.push(`Discovered via multi-hop funding analysis: ${detail}.`);
+    }
+
+    // Ethos social signals
+    if (candidate.invitedByTarget && candidate.invitedTarget) {
+      lines.push(`Mutual invitation: ${targetName} invited ${name} and ${name} invited ${targetName} on Ethos.`);
+    } else if (candidate.invitedByTarget) {
+      lines.push(`Invited by ${targetName} on Ethos.`);
+    } else if (candidate.invitedTarget) {
+      lines.push(`Invited ${targetName} on Ethos.`);
+    }
+
+    if (candidate.mutualReviews) {
+      lines.push(`${name} and ${targetName} reviewed each other on Ethos.`);
+    }
+
+    if (candidate.mutualVouches) {
+      lines.push(`${name} and ${targetName} vouched for each other on Ethos.`);
+    }
+
+    // Cross-cluster connections
+    if (candidate.crossClusterContracts && candidate.crossClusterContracts.length > 0) {
+      const uniqueSharedWith = new Set<string>();
+      const contractLabels: string[] = [];
+      for (const cc of candidate.crossClusterContracts) {
+        for (const w of cc.sharedWith) uniqueSharedWith.add(resolveAddressName(w));
+        if (cc.contractName) contractLabels.push(cc.contractName);
+      }
+      const names = [...uniqueSharedWith].slice(0, 3);
+      const more = uniqueSharedWith.size > 3 ? ` and ${uniqueSharedWith.size - 3} more` : "";
+      const contractInfo = contractLabels.length > 0
+        ? ` (${[...new Set(contractLabels)].slice(0, 2).join(", ")})`
+        : "";
+      lines.push(`Deposited to the same contract${candidate.crossClusterContracts.length > 1 ? "s" : ""}${contractInfo} as ${names.join(", ")}${more}.`);
     }
 
     return lines;
   };
 
   // Render a wallet address with its Ethos profile name if available
-  const renderAddress = (addr: string) => {
+  const renderAddress = (addr: string, chain?: string) => {
     const name = resolveAddressName(addr);
     const isResolved = name !== `${addr.slice(0, 8)}...${addr.slice(-4)}`;
     const funderProfile = clusterResult?.funderProfiles?.[addr];
+    const knownLabel = getAddressLabel(addr);
     return (
-      <span className="inline-flex items-center gap-1">
-        {isResolved && (
-          <span className="font-medium not-italic">{name}</span>
+      <span className="inline-flex items-center gap-1.5">
+        {isResolved && funderProfile && (
+          <a href={funderProfile.profileUrl} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
+            {name}
+          </a>
+        )}
+        {isResolved && !funderProfile && knownLabel && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{knownLabel}</span>
+        )}
+        {isResolved && !funderProfile && !knownLabel && (
+          <span className="font-medium">{name}</span>
         )}
         <a
-          href={funderProfile?.profileUrl || getExplorerAddressUrl(addr)}
+          href={getExplorerAddressUrl(addr, chain)}
           target="_blank"
           rel="noopener noreferrer"
           className="font-mono text-muted-foreground hover:underline"
@@ -814,7 +889,7 @@ export default function Home() {
                                 </a>
                               ) : (
                                 <a
-                                  href={getExplorerAddressUrl(ff.funder)}
+                                  href={getExplorerAddressUrl(ff.funder, ff.chain)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="font-mono hover:underline"
@@ -961,49 +1036,6 @@ export default function Home() {
                               <span>{line}</span>
                             </div>
                           ))}
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Cross-cluster shared deposits */}
-              {clusterResult.sharedDeposits && clusterResult.sharedDeposits.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Cross-Cluster Connections</CardTitle>
-                    <CardDescription className="text-xs">
-                      Contracts that 2 or more cluster members deposited to independently.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {clusterResult.sharedDeposits.map((dep, i) => (
-                      <div key={i} className="rounded-lg border border-border p-2.5 space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <a
-                            href={getExplorerAddressUrl(dep.contract)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-mono hover:underline inline-flex items-center gap-1"
-                          >
-                            {dep.contract.slice(0, 12)}...{dep.contract.slice(-6)}
-                            <ExternalLink className="h-2.5 w-2.5 opacity-50" />
-                          </a>
-                          <span className="text-muted-foreground">{dep.network}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {dep.wallets.length} cluster members deposited to this contract:
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {dep.wallets.map((wallet) => {
-                            const name = resolveAddressName(wallet);
-                            return (
-                              <span key={wallet} className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30">
-                                {name}
-                              </span>
-                            );
-                          })}
                         </div>
                       </div>
                     ))}
@@ -1187,7 +1219,7 @@ export default function Home() {
                 {(selectedCandidate.wallets || [selectedCandidate.address]).map((wallet) => (
                   <a
                     key={wallet}
-                    href={getExplorerAddressUrl(wallet)}
+                    href={getExplorerAddressUrl(wallet, selectedCandidate.networks[0])}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
@@ -1264,7 +1296,7 @@ export default function Home() {
                         <div key={i} className="flex items-center justify-between text-xs border border-border rounded px-2 py-1.5">
                           <div className="flex items-center gap-2">
                             <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                            {renderAddress(ff.funder)}
+                            {renderAddress(ff.funder, ff.chain)}
                           </div>
                           <span className="text-muted-foreground shrink-0">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
                         </div>
@@ -1314,22 +1346,94 @@ export default function Home() {
                     );
                   })()}
 
-                  {/* Timing */}
-                  {selectedCandidate.timeProximityHits > 0 && (
+                  {/* Ethos social connections */}
+                  {(selectedCandidate.invitedByTarget || selectedCandidate.invitedTarget || selectedCandidate.mutualReviews || selectedCandidate.mutualVouches) && (
                     <div className="space-y-1">
-                      <div className="text-xs font-medium">Transaction Timing</div>
-                      <div className="text-xs text-muted-foreground">
-                        {selectedCandidate.timeProximityHits} transaction{selectedCandidate.timeProximityHits !== 1 && "s"} occurred within a close time window of the target&apos;s transactions, suggesting coordinated activity.
+                      <div className="text-xs font-medium">Ethos Social Connections</div>
+                      <div className="text-xs text-muted-foreground space-y-0.5">
+                        {selectedCandidate.invitedByTarget && (
+                          <div>Invited by {clusterResult.targetEthos?.displayName || "the target"} on Ethos.</div>
+                        )}
+                        {selectedCandidate.invitedTarget && (
+                          <div>Invited {clusterResult.targetEthos?.displayName || "the target"} on Ethos.</div>
+                        )}
+                        {selectedCandidate.mutualReviews && (
+                          <div>Mutual reviews: both reviewed each other on Ethos.</div>
+                        )}
+                        {selectedCandidate.mutualVouches && (
+                          <div>Mutual vouches: both vouched for each other on Ethos.</div>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* Amount similarity */}
-                  {selectedCandidate.similarAmountHits > 0 && (
+                  {/* Shared CEX deposit addresses */}
+                  {selectedCandidate.sharedCexDeposits && selectedCandidate.sharedCexDeposits.length > 0 && (
                     <div className="space-y-1">
-                      <div className="text-xs font-medium">Similar Amounts</div>
+                      <div className="text-xs font-medium">Shared Exchange Deposit Addresses</div>
                       <div className="text-xs text-muted-foreground">
-                        {selectedCandidate.similarAmountHits} outgoing transaction{selectedCandidate.similarAmountHits !== 1 && "s"} matched similar amounts (within 10%) to the target&apos;s transactions.
+                        This wallet and other cluster members deposited to the same exchange address. CEX deposit addresses are unique per account, so this strongly suggests the same exchange account.
+                      </div>
+                      <div className="space-y-1.5">
+                        {selectedCandidate.sharedCexDeposits.map((dep, i) => (
+                          <div key={i} className="text-xs border border-border rounded px-2.5 py-2 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{dep.exchange}</span>
+                                <a
+                                  href={getExplorerAddressUrl(dep.depositAddress, dep.network)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono text-muted-foreground hover:underline"
+                                >
+                                  {dep.depositAddress.slice(0, 10)}...{dep.depositAddress.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                </a>
+                              </div>
+                              <span className="text-muted-foreground">{dep.network}</span>
+                            </div>
+                            <div className="text-muted-foreground">
+                              Also used by: {dep.wallets
+                                .filter((w) => !(selectedCandidate.wallets || [selectedCandidate.address]).includes(w))
+                                .map((w) => resolveAddressName(w))
+                                .join(", ")}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cross-cluster deposits */}
+                  {selectedCandidate.crossClusterContracts && selectedCandidate.crossClusterContracts.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium">Shared Deposits with Other Results</div>
+                      <div className="text-xs text-muted-foreground">
+                        This wallet deposited to the same contract{selectedCandidate.crossClusterContracts.length > 1 ? "s" : ""} as other cluster members:
+                      </div>
+                      <div className="space-y-1.5">
+                        {selectedCandidate.crossClusterContracts.map((cc, i) => (
+                          <div key={i} className="text-xs border border-border rounded px-2.5 py-2 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                {cc.contractName && (
+                                  <span className="font-medium">{cc.contractName}</span>
+                                )}
+                                <a
+                                  href={getExplorerAddressUrl(cc.contract, cc.network)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono text-muted-foreground hover:underline"
+                                >
+                                  {cc.contract.slice(0, 10)}...{cc.contract.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
+                                </a>
+                              </div>
+                              <span className="text-muted-foreground">{cc.network}</span>
+                            </div>
+                            <div className="text-muted-foreground">
+                              Also deposited by: {cc.sharedWith.map((w) => resolveAddressName(w)).join(", ")}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -1338,8 +1442,11 @@ export default function Home() {
                   {selectedCandidate.directCount === 0 &&
                     selectedCandidate.sharedContracts.length === 0 &&
                     selectedCandidate.sharedFundingSources.length === 0 &&
-                    selectedCandidate.timeProximityHits === 0 &&
-                    selectedCandidate.similarAmountHits === 0 && (
+                    !selectedCandidate.invitedByTarget &&
+                    !selectedCandidate.invitedTarget &&
+                    !selectedCandidate.mutualReviews &&
+                    !selectedCandidate.mutualVouches &&
+                    (!selectedCandidate.crossClusterContracts || selectedCandidate.crossClusterContracts.length === 0) && (
                     <div className="text-xs text-muted-foreground">No specific connection details available.</div>
                   )}
                 </div>

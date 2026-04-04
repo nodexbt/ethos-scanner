@@ -268,6 +268,26 @@ export async function batchGetCode(
   return result;
 }
 
+/** Try to get a contract's name via token metadata */
+export async function getContractName(
+  address: string,
+  chain: Chain
+): Promise<string | null> {
+  try {
+    const data = await alchemyRequest(chain.rpcBase, "alchemy_getTokenMetadata", [address]) as {
+      name?: string;
+      symbol?: string;
+    } | null;
+    if (!data) return null;
+    if (data.name && data.symbol) return `${data.name} (${data.symbol})`;
+    if (data.name) return data.name;
+    if (data.symbol) return data.symbol;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Run tasks with concurrency limit */
 export async function parallel<T, R>(
   items: T[],
