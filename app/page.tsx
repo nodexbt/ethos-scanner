@@ -20,6 +20,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  Copy,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -604,18 +605,23 @@ export default function Home() {
           {hasResults && (
             <>
               <Button
-                onClick={() => {
+                onClick={(e) => {
                   const wallets = [
                     clusterResult!.target,
                     ...clusterResult!.strongCluster.flatMap((c) => c.wallets || [c.address]),
                     ...clusterResult!.possibleCluster.flatMap((c) => c.wallets || [c.address]),
                   ];
                   navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
+                  const btn = e.currentTarget;
+                  btn.dataset.copied = "true";
+                  setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
                 }}
-                size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
+                size="sm" variant="secondary" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
+                data-copied="false"
               >
-                <Wallet className="h-3.5 w-3.5" />
-                Copy Wallets
+                <Wallet className="h-3.5 w-3.5 data-[copied=true]:hidden" />
+                <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
+                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
               </Button>
               <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
                 <FileText className="h-3.5 w-3.5" />
@@ -784,10 +790,25 @@ export default function Home() {
                       {currentInvestigationId ? "Update" : "Save"}
                     </Button>
                   </div>
-                  <CardDescription className="text-xs">
-                    Target: {clusterResult.target.slice(0, 10)}...{clusterResult.target.slice(-6)}
+                  <CardDescription className="text-xs flex items-center gap-1.5">
+                    <span>Target:</span>
+                    <button
+                      onClick={(e) => {
+                        navigator.clipboard.writeText(clusterResult.target);
+                        const btn = e.currentTarget;
+                        btn.dataset.copied = "true";
+                        setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+                      }}
+                      className="font-mono hover:underline cursor-pointer inline-flex items-center gap-1 group data-[copied=true]:text-green-500"
+                      title="Click to copy full address"
+                      data-copied="false"
+                    >
+                      {clusterResult.target.slice(0, 10)}...{clusterResult.target.slice(-6)}
+                      <span className="group-data-[copied=true]:hidden"><Copy className="h-2.5 w-2.5 opacity-50" /></span>
+                      <span className="hidden group-data-[copied=true]:inline text-[10px] font-medium text-green-500">Copied!</span>
+                    </button>
                     {clusterResult.targetEthos && (
-                      <> &middot; Ethos: {clusterResult.targetEthos.displayName} (score: {clusterResult.targetEthos.score})</>
+                      <span>&middot; Ethos: {clusterResult.targetEthos.displayName} (score: {clusterResult.targetEthos.score})</span>
                     )}
                   </CardDescription>
                 </CardHeader>
@@ -858,50 +879,61 @@ export default function Home() {
                     const multiHop = allResults.filter((c) => c.signals.some((s) => s.type === "multi_hop_funding"));
                     const hasFindings = fundedByTarget.length > 0 || sharedFF.length > 0 || invitedBy.length > 0 || mutualRev.length > 0 || mutualVou.length > 0 || withCex.length > 0 || multiHop.length > 0;
                     if (!hasFindings) return null;
-                    const names = (list: typeof allResults) => list.map((c) => c.ethosProfile?.displayName || c.address.slice(0, 10) + "...").join(", ");
+                    const nameLinks = (list: typeof allResults) => list.map((c, i) => {
+                      const name = c.ethosProfile?.displayName || c.address.slice(0, 10) + "...";
+                      const url = c.ethosProfile?.profileUrl || getExplorerAddressUrl(c.address);
+                      return (
+                        <span key={c.address}>
+                          {i > 0 && ", "}
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="text-foreground font-medium hover:underline">
+                            {name}
+                          </a>
+                        </span>
+                      );
+                    });
                     return (
                       <div className="rounded-lg border border-border p-3 space-y-1.5">
                         <div className="text-xs font-medium text-muted-foreground">Key Findings</div>
                         {fundedByTarget.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>{tName} first funded: <span className="text-foreground font-medium">{names(fundedByTarget)}</span></span>
+                            <span>{tName} first funded: {nameLinks(fundedByTarget)}</span>
                           </div>
                         )}
                         {sharedFF.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>Share the same first funder as {tName}: <span className="text-foreground font-medium">{names(sharedFF)}</span></span>
+                            <span>Share the same first funder as {tName}: {nameLinks(sharedFF)}</span>
                           </div>
                         )}
                         {invitedBy.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>{tName} invited on Ethos: <span className="text-foreground font-medium">{names(invitedBy)}</span></span>
+                            <span>{tName} invited on Ethos: {nameLinks(invitedBy)}</span>
                           </div>
                         )}
                         {mutualRev.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>Mutual reviews with {tName}: <span className="text-foreground font-medium">{names(mutualRev)}</span></span>
+                            <span>Mutual reviews with {tName}: {nameLinks(mutualRev)}</span>
                           </div>
                         )}
                         {mutualVou.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>Mutual vouches with {tName}: <span className="text-foreground font-medium">{names(mutualVou)}</span></span>
+                            <span>Mutual vouches with {tName}: {nameLinks(mutualVou)}</span>
                           </div>
                         )}
                         {withCex.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>Share exchange deposit address: <span className="text-foreground font-medium">{names(withCex)}</span></span>
+                            <span>Share exchange deposit address: {nameLinks(withCex)}</span>
                           </div>
                         )}
                         {multiHop.length > 0 && (
                           <div className="text-xs text-muted-foreground flex gap-1.5">
                             <span className="shrink-0">-</span>
-                            <span>Discovered via funding chain analysis: <span className="text-foreground font-medium">{names(multiHop)}</span></span>
+                            <span>Discovered via funding chain analysis: {nameLinks(multiHop)}</span>
                           </div>
                         )}
                       </div>
