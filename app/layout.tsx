@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
+import { SmoothScroll } from "@/components/smooth-scroll";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,6 +34,7 @@ export default function RootLayout({
       >
         <SessionProvider>
           <ThemeProvider>
+            <SmoothScroll />
             <main className="min-h-screen">{children}</main>
           </ThemeProvider>
         </SessionProvider>
