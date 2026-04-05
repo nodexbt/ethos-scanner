@@ -70,11 +70,45 @@ export default function Home() {
 
   useEffect(() => {
     fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
+
+    // Check if URL has a wallet address to load
+    const path = window.location.pathname;
+    const match = path.match(/^\/scan\/(0x[a-fA-F0-9]{40})$/i);
+    if (match) {
+      const addr = match[1].toLowerCase();
+      setWalletInput(addr);
+      loadCachedScan(addr);
+    }
   }, []);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [clusterLogs]);
+
+  const pushScanUrl = (addr: string) => {
+    const url = `/scan/${addr.toLowerCase()}`;
+    if (window.location.pathname !== url) {
+      window.history.pushState({}, "", url);
+    }
+  };
+
+  const loadCachedScan = async (addr: string) => {
+    const cachedId = `scan-${addr.toLowerCase()}`;
+    try {
+      const resp = await fetch(`/api/investigations/${cachedId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setClusterResult(data.clusterResult);
+        setCurrentInvestigationId(cachedId);
+        setScreenshots(new Map());
+        setClusterLogs([]);
+        setError(null);
+        pushScanUrl(addr);
+        return true;
+      }
+    } catch {}
+    return false;
+  };
 
   const runFreshScan = async (addr: string) => {
     setScanning(true);
@@ -159,6 +193,7 @@ export default function Home() {
           }),
         });
         setCurrentInvestigationId(id);
+        pushScanUrl(addr);
         refreshInvestigations();
       }
     } catch (err) {
@@ -177,22 +212,9 @@ export default function Home() {
       return;
     }
 
-    // Check if we have a cached scan for this wallet
-    const cachedId = `scan-${addr}`;
-    try {
-      const resp = await fetch(`/api/investigations/${cachedId}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        setClusterResult(data.clusterResult);
-        setCurrentInvestigationId(cachedId);
-        setScreenshots(new Map());
-        setClusterLogs([]);
-        setError(null);
-        return;
-      }
-    } catch {
-      // No cache, proceed with scan
-    }
+    // Check if we have a cached scan
+    const cached = await loadCachedScan(addr);
+    if (cached) return;
 
     await runFreshScan(addr);
   };
@@ -838,15 +860,21 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
                     <div className="flex items-center gap-1">
-                      {currentInvestigationId && (
-                        <Button
-                          onClick={() => handleShareInvestigation(currentInvestigationId)}
-                          size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
-                        >
-                          <Share2 className="h-3.5 w-3.5" />
-                          Share
-                        </Button>
-                      )}
+                      <Button
+                        onClick={(e) => {
+                          const url = `${window.location.origin}/scan/${clusterResult.target}`;
+                          navigator.clipboard.writeText(url);
+                          const btn = e.currentTarget;
+                          btn.dataset.copied = "true";
+                          setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+                        }}
+                        size="sm" variant="ghost" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
+                        data-copied="false"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                        <span className="[[data-copied=true]_&]:hidden">Share</span>
+                        <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+                      </Button>
                       <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
                         <Save className="h-3.5 w-3.5" />
                         {currentInvestigationId ? "Update" : "Save"}
