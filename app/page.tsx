@@ -645,7 +645,7 @@ export default function Home() {
                   placeholder="Passphrase"
                   value={loginPassphrase}
                   onChange={(e) => setLoginPassphrase(e.target.value)}
-                  className="h-9 text-sm"
+                  className="h-9"
                 />
                 {loginError && <div className="text-xs text-red-500">{loginError}</div>}
                 <Button type="submit" className="w-full" size="sm" disabled={!loginPassphrase.trim()}>
@@ -741,7 +741,7 @@ export default function Home() {
                     placeholder="0x..."
                     value={walletInput}
                     onChange={(e) => setWalletInput(e.target.value)}
-                    className="pl-10 h-9 text-sm font-mono"
+                    className="pl-10 h-9 font-mono"
                     disabled={scanning}
                   />
                 </div>
