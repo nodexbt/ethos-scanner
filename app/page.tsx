@@ -1051,40 +1051,15 @@ export default function Home() {
                       </button>
                       {showFirstFunders && (
                         <div className="space-y-1 pt-1">
-                          {clusterResult.targetFirstFunders.map((ff, i) => {
-                            const funderProfile = clusterResult.funderProfiles?.[ff.funder];
-                            return (
-                              <div key={i} className="flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                                  {funderProfile ? (
-                                    <a
-                                      href={funderProfile.profileUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="hover:underline inline-flex items-center gap-1"
-                                    >
-                                      {funderProfile.avatarUrl && (
-                                        <img src={funderProfile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
-                                      )}
-                                      {funderProfile.displayName}
-                                      <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                                    </a>
-                                  ) : (
-                                    <a
-                                      href={getExplorerAddressUrl(ff.funder, ff.chain)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="font-mono hover:underline"
-                                    >
-                                      {ff.funder.slice(0, 10)}...{ff.funder.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                                    </a>
-                                  )}
-                                </div>
-                                <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
+                          {clusterResult.targetFirstFunders.map((ff, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
+                                {renderAddress(ff.funder, ff.chain)}
                               </div>
-                            );
-                          })}
+                              <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
