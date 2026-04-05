@@ -76,14 +76,7 @@ export default function Home() {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [clusterLogs]);
 
-  const startScan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const addr = walletInput.trim();
-    if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
-      setError("Please enter a valid EVM address (0x...)");
-      return;
-    }
-
+  const runFreshScan = async (addr: string) => {
     setScanning(true);
     setClusterResult(null);
     setClusterLogs([]);
@@ -91,6 +84,8 @@ export default function Home() {
     setError(null);
     setScreenshots(new Map());
     setCurrentInvestigationId(null);
+
+    let scanResult: ClusterScanResult | null = null;
 
     try {
       const resp = await fetch("/api/scan", {
@@ -131,7 +126,6 @@ export default function Home() {
             } else if (msg.type === "progress") {
               setScanProgress(msg.data);
             } else if (msg.type === "result") {
-              // Restore Sets from arrays
               const result = msg.data as ClusterScanResult;
               result.strongCluster.forEach((c) => {
                 c.signalTypes = new Set(c.signalTypes as unknown as string[]);
@@ -140,6 +134,7 @@ export default function Home() {
                 c.signalTypes = new Set(c.signalTypes as unknown as string[]);
               });
               setClusterResult(result);
+              scanResult = result;
             } else if (msg.type === "error") {
               setError(msg.data);
             }
@@ -148,12 +143,58 @@ export default function Home() {
           }
         }
       }
+
+      // Auto-save after scan completes
+      if (scanResult) {
+        const id = `scan-${addr.toLowerCase()}`;
+        await fetch("/api/investigations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            target: addr.toLowerCase(),
+            targetName: (scanResult as ClusterScanResult).targetEthos?.displayName ?? null,
+            clusterResult: scanResult,
+            aiAnalysis: null,
+          }),
+        });
+        setCurrentInvestigationId(id);
+        refreshInvestigations();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cluster scan failed");
     } finally {
       setScanning(false);
       setScanProgress(null);
     }
+  };
+
+  const startScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const addr = walletInput.trim().toLowerCase();
+    if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+      setError("Please enter a valid EVM address (0x...)");
+      return;
+    }
+
+    // Check if we have a cached scan for this wallet
+    const cachedId = `scan-${addr}`;
+    try {
+      const resp = await fetch(`/api/investigations/${cachedId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setClusterResult(data.clusterResult);
+        setCurrentInvestigationId(cachedId);
+        setScreenshots(new Map());
+        setClusterLogs([]);
+        setError(null);
+        return;
+      }
+    } catch {
+      // No cache, proceed with scan
+    }
+
+    await runFreshScan(addr);
   };
 
   const getScoreBorderColor = (score: number): string => {
@@ -194,7 +235,7 @@ export default function Home() {
 
   const handleSaveInvestigation = async () => {
     if (!clusterResult) return;
-    const id = currentInvestigationId || `inv-${Date.now()}`;
+    const id = currentInvestigationId || `scan-${clusterResult.target}`;
     await fetch("/api/investigations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -809,6 +850,14 @@ export default function Home() {
                       <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
                         <Save className="h-3.5 w-3.5" />
                         {currentInvestigationId ? "Update" : "Save"}
+                      </Button>
+                      <Button
+                        onClick={() => runFreshScan(clusterResult.target)}
+                        size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
+                        disabled={scanning}
+                      >
+                        <Search className="h-3.5 w-3.5" />
+                        Re-scan
                       </Button>
                     </div>
                   </div>
