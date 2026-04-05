@@ -665,17 +665,17 @@ export default function Home() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4">
+      <div className="flex items-start sm:items-center justify-between gap-2 pb-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Shield className="h-6 w-6" />
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
             Ethos Sybil Scanner
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
             Discover wallet clusters and sybil accounts on Ethos Network via on-chain transaction analysis.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end shrink-0">
           {hasResults && (
             <>
               <Button
@@ -694,25 +694,26 @@ export default function Home() {
                 data-copied="false"
               >
                 <Wallet className="h-3.5 w-3.5 data-[copied=true]:hidden" />
-                <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
+                <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Copy Wallets</span>
                 <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
               </Button>
               <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
                 <FileText className="h-3.5 w-3.5" />
-                Export for Slash Report
+                <span className="hidden sm:inline">Export for Slash Report</span>
               </Button>
             </>
           )}
           {session && (
             <>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
                 {session.user?.image && (
                   <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
                 )}
                 <span>{session.user?.name || "Admin"}</span>
               </div>
               <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
-                Sign out
+                <span className="hidden sm:inline">Sign out</span>
+                <span className="sm:hidden text-xs">Exit</span>
               </Button>
             </>
           )}
@@ -872,12 +873,12 @@ export default function Home() {
                         data-copied="false"
                       >
                         <Share2 className="h-3.5 w-3.5" />
-                        <span className="[[data-copied=true]_&]:hidden">Share</span>
+                        <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Share</span>
                         <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
                       </Button>
                       <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
                         <Save className="h-3.5 w-3.5" />
-                        {currentInvestigationId ? "Update" : "Save"}
+                        <span className="hidden sm:inline">{currentInvestigationId ? "Update" : "Save"}</span>
                       </Button>
                       <Button
                         onClick={() => runFreshScan(clusterResult.target)}
@@ -885,7 +886,7 @@ export default function Home() {
                         disabled={scanning}
                       >
                         <Search className="h-3.5 w-3.5" />
-                        Re-scan
+                        <span className="hidden sm:inline">Re-scan</span>
                       </Button>
                     </div>
                   </div>
@@ -912,7 +913,7 @@ export default function Home() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
                       <div className="text-xl font-bold">{Object.keys(clusterResult.networkStats).length}</div>
                       <div className="text-[10px] text-muted-foreground">Networks</div>
@@ -1334,7 +1335,7 @@ export default function Home() {
           onClick={() => setSelectedCandidate(null)}
         >
           <div
-            className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+            className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto mx-2 sm:mx-0"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
