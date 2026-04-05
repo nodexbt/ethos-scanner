@@ -32,6 +32,7 @@ import {
 import { getAddressLabel } from "@/lib/known-addresses";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { motion, AnimatePresence } from "framer-motion";
 
 // --- Saved Investigations ---
 
@@ -621,6 +622,11 @@ export default function Home() {
   if (!session && !bypassAuth) {
     return (
       <div className="flex items-center justify-center min-h-screen">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <Shield className="h-10 w-10 mx-auto mb-2" />
@@ -658,6 +664,7 @@ export default function Home() {
             </div>
           </CardContent>
         </Card>
+        </motion.div>
       </div>
     );
   }
@@ -853,9 +860,15 @@ export default function Home() {
 
         {/* Right column: Results */}
         <div className="space-y-4">
+          <AnimatePresence>
           {hasResults && (
-            <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-4"
+            >
               {/* Overview */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
@@ -1067,10 +1080,12 @@ export default function Home() {
                   )}
                 </CardContent>
               </Card>
+              </motion.div>
 
               {/* Strong Cluster */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
               <Card>
-                <CardHeader className="pb-3">
+                <CardHeader className={clusterResult.strongCluster.length === 0 ? "pb-6" : "pb-3"}>
                   <CardTitle className="text-base flex items-center gap-2">
                     {clusterResult.strongCluster.length > 0 ? (
                       <>
@@ -1142,9 +1157,11 @@ export default function Home() {
                   </CardContent>
                 )}
               </Card>
+              </motion.div>
 
               {/* Possible Candidates */}
               {clusterResult.possibleCluster.length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -1202,6 +1219,7 @@ export default function Home() {
                     ))}
                   </CardContent>
                 </Card>
+              </motion.div>
               )}
 
               {/* Manual Checks + Evidence Collection */}
@@ -1316,8 +1334,9 @@ export default function Home() {
                   </CardContent>
                 </Card>
               )}
-            </>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Empty state */}
           {!scanning && !hasResults && (
@@ -1329,12 +1348,21 @@ export default function Home() {
       </div>
 
       {/* Candidate Detail Modal */}
+      <AnimatePresence>
       {selectedCandidate && clusterResult && (
-        <div
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setSelectedCandidate(null)}
         >
-          <div
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ duration: 0.2 }}
             className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto mx-2 sm:mx-0"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1595,9 +1623,10 @@ export default function Home() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }
