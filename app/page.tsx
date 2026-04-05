@@ -36,6 +36,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
 import { OverviewCard } from "@/components/results/overview-card";
+import { ScanInput } from "@/components/scanner/scan-input";
+import { ScanLog } from "@/components/scanner/scan-log";
 
 // --- Saved Investigations ---
 
@@ -738,92 +740,21 @@ export default function Home() {
       {/* Two-column layout */}
       <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4">
         {/* Left column: Input + Log */}
+        {/* Left column: Input + Log */}
         <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Wallet Cluster Scan</CardTitle>
-              <CardDescription className="text-xs">
-                Enter any EVM wallet address to discover related wallets across 5 chains.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <form onSubmit={startScan} className="flex gap-2">
-                <div className="relative flex-1">
-                  <Wallet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="0x..."
-                    value={walletInput}
-                    onChange={(e) => setWalletInput(e.target.value)}
-                    className="pl-10 h-9 font-mono"
-                    disabled={scanning}
-                  />
-                </div>
-                <Button type="submit" size="sm" disabled={scanning || !walletInput.trim()}>
-                  {scanning ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                </Button>
-              </form>
+          <ScanInput
+            walletInput={walletInput}
+            setWalletInput={setWalletInput}
+            scanning={scanning}
+            error={error}
+            onSubmit={startScan}
+          />
 
-              {error && <div className="text-xs text-red-500">{error}</div>}
-
-              <div className="text-[10px] text-muted-foreground space-y-0.5">
-                <p>Scans Ethereum, Base, Arbitrum, Optimism, and Polygon in parallel.</p>
-                <p>Analyzes direct transfers, shared contracts, funding sources, timing, and amounts.</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Scan Log */}
-          {clusterLogs.length > 0 && (
-            <Card>
-              <CardHeader className={logExpanded ? "pb-2" : ""}>
-                <button
-                  onClick={() => setLogExpanded(!logExpanded)}
-                  className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors w-full"
-                >
-                  {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : (logExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
-                  Scan Log
-                  {scanning && scanProgress && (
-                    <span className="text-xs font-normal text-muted-foreground ml-auto">
-                      {scanProgress.percent}%
-                      {scanProgress.estimatedRemaining !== null && (
-                        <> &middot; ~{formatTime(scanProgress.estimatedRemaining)} left</>
-                      )}
-                    </span>
-                  )}
-                  {!scanning && clusterLogs.length > 0 && (
-                    <span className="text-xs font-normal text-muted-foreground ml-auto">
-                      {clusterLogs.length} entries
-                    </span>
-                  )}
-                </button>
-                {scanning && scanProgress && (
-                  <div className="w-full bg-muted rounded-full h-1.5 mt-1">
-                    <div
-                      className="bg-primary h-1.5 rounded-full transition-all duration-500"
-                      style={{ width: `${scanProgress.percent}%` }}
-                    />
-                  </div>
-                )}
-              </CardHeader>
-              {logExpanded && (
-                <CardContent>
-                  <div className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5">
-                    {clusterLogs.map((entry, i) => (
-                      <div key={i} className={getLogColor(entry.level)}>
-                        {entry.message}
-                      </div>
-                    ))}
-                    <div ref={logEndRef} />
-                  </div>
-                </CardContent>
-              )}
-            </Card>
-          )}
+          <ScanLog
+            logs={clusterLogs}
+            scanning={scanning}
+            progress={scanProgress}
+          />
           {/* Saved Investigations */}
           {savedInvestigations.length > 0 && (
             <Card>
