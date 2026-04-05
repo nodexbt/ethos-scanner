@@ -84,6 +84,7 @@ export default function Home() {
   }, []);
 
   const [logExpanded, setLogExpanded] = useState(true);
+  const [loadingCached, setLoadingCached] = useState(false);
 
   const pushScanUrl = (addr: string) => {
     const url = `/scan/${addr.toLowerCase()}`;
@@ -94,6 +95,7 @@ export default function Home() {
 
   const loadCachedScan = async (addr: string) => {
     const cachedId = `scan-${addr.toLowerCase()}`;
+    setLoadingCached(true);
     try {
       const resp = await fetch(`/api/investigations/${cachedId}`);
       if (resp.ok) {
@@ -103,10 +105,12 @@ export default function Home() {
         setScreenshots(new Map());
         setClusterLogs([]);
         setError(null);
+        setLoadingCached(false);
         pushScanUrl(addr);
         return true;
       }
     } catch {}
+    setLoadingCached(false);
     return false;
   };
 
@@ -870,6 +874,61 @@ export default function Home() {
 
         {/* Right column: Results */}
         <div className="space-y-4">
+          {/* Loading skeleton */}
+          {loadingCached && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-4"
+            >
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="h-5 w-48 bg-muted rounded animate-pulse" />
+                  <div className="h-3 w-72 bg-muted rounded animate-pulse mt-2" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="rounded-lg border border-border bg-muted/30 p-2 text-center space-y-1">
+                        <div className="h-6 w-8 bg-muted rounded animate-pulse mx-auto" />
+                        <div className="h-2 w-12 bg-muted rounded animate-pulse mx-auto" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-lg border border-border p-3 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-muted animate-pulse shrink-0" />
+                    <div className="space-y-1.5">
+                      <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+                      <div className="h-3 w-48 bg-muted rounded animate-pulse" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="h-5 w-40 bg-muted rounded animate-pulse" />
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="rounded-lg border border-border p-3 space-y-2.5">
+                      <div className="flex items-start gap-3">
+                        <div className="h-10 w-10 rounded-full bg-muted animate-pulse shrink-0" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-4 w-36 bg-muted rounded animate-pulse" />
+                          <div className="h-3 w-52 bg-muted rounded animate-pulse" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="h-3 w-full bg-muted rounded animate-pulse" />
+                        <div className="h-3 w-3/4 bg-muted rounded animate-pulse" />
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
           <AnimatePresence>
           {hasResults && (
             <motion.div
@@ -1355,7 +1414,7 @@ export default function Home() {
           </AnimatePresence>
 
           {/* Empty state */}
-          {!scanning && !hasResults && (
+          {!scanning && !hasResults && !loadingCached && (
             <div className="hidden lg:flex items-center justify-center h-64 text-muted-foreground text-sm">
               Enter a wallet address and scan to discover related wallets
             </div>
