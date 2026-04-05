@@ -67,6 +67,7 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
+  const [showPossible, setShowPossible] = useState(false);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
@@ -82,9 +83,7 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [clusterLogs]);
+  const [logExpanded, setLogExpanded] = useState(true);
 
   const pushScanUrl = (addr: string) => {
     const url = `/scan/${addr.toLowerCase()}`;
@@ -119,6 +118,7 @@ export default function Home() {
     setError(null);
     setScreenshots(new Map());
     setCurrentInvestigationId(null);
+    setLogExpanded(true);
 
     let scanResult: ClusterScanResult | null = null;
 
@@ -773,9 +773,12 @@ export default function Home() {
           {/* Scan Log */}
           {clusterLogs.length > 0 && (
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  {scanning && <Loader2 className="h-4 w-4 animate-spin" />}
+              <CardHeader className={logExpanded ? "pb-2" : ""}>
+                <button
+                  onClick={() => setLogExpanded(!logExpanded)}
+                  className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors w-full"
+                >
+                  {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : (logExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
                   Scan Log
                   {scanning && scanProgress && (
                     <span className="text-xs font-normal text-muted-foreground ml-auto">
@@ -785,7 +788,12 @@ export default function Home() {
                       )}
                     </span>
                   )}
-                </CardTitle>
+                  {!scanning && clusterLogs.length > 0 && (
+                    <span className="text-xs font-normal text-muted-foreground ml-auto">
+                      {clusterLogs.length} entries
+                    </span>
+                  )}
+                </button>
                 {scanning && scanProgress && (
                   <div className="w-full bg-muted rounded-full h-1.5 mt-1">
                     <div
@@ -795,16 +803,18 @@ export default function Home() {
                   </div>
                 )}
               </CardHeader>
-              <CardContent>
-                <div className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5">
-                  {clusterLogs.map((entry, i) => (
-                    <div key={i} className={getLogColor(entry.level)}>
-                      {entry.message}
-                    </div>
-                  ))}
-                  <div ref={logEndRef} />
-                </div>
-              </CardContent>
+              {logExpanded && (
+                <CardContent>
+                  <div className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5">
+                    {clusterLogs.map((entry, i) => (
+                      <div key={i} className={getLogColor(entry.level)}>
+                        {entry.message}
+                      </div>
+                    ))}
+                    <div ref={logEndRef} />
+                  </div>
+                </CardContent>
+              )}
             </Card>
           )}
           {/* Saved Investigations */}
@@ -1163,12 +1173,17 @@ export default function Home() {
               {clusterResult.possibleCluster.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
                 <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                  <CardHeader className={showPossible ? "pb-3" : ""}>
+                    <button
+                      onClick={() => setShowPossible(!showPossible)}
+                      className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors w-full"
+                    >
+                      {showPossible ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       <AlertTriangle className="h-5 w-5 text-amber-500" />
                       {clusterResult.possibleCluster.length} Possible Candidate{clusterResult.possibleCluster.length !== 1 && "s"}
-                    </CardTitle>
+                    </button>
                   </CardHeader>
+                  {showPossible && (
                   <CardContent className="space-y-2">
                     {clusterResult.possibleCluster.map((candidate) => (
                       <div
@@ -1218,6 +1233,7 @@ export default function Home() {
                       </div>
                     ))}
                   </CardContent>
+                  )}
                 </Card>
               </motion.div>
               )}
