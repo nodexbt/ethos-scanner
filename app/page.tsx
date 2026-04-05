@@ -35,6 +35,7 @@ import { useSession, signIn, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
+import { OverviewCard } from "@/components/results/overview-card";
 
 // --- Saved Investigations ---
 
@@ -939,218 +940,19 @@ export default function Home() {
               className="space-y-4"
             >
               {/* Overview */}
+              {/* Overview */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        onClick={(e) => {
-                          const url = `${window.location.origin}/scan/${clusterResult.target}`;
-                          navigator.clipboard.writeText(url);
-                          const btn = e.currentTarget;
-                          btn.dataset.copied = "true";
-                          setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-                        }}
-                        size="sm" variant="ghost" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
-                        data-copied="false"
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Share</span>
-                        <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-                      </Button>
-                      <Button onClick={handleSaveInvestigation} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
-                        <Save className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">{currentInvestigationId ? "Update" : "Save"}</span>
-                      </Button>
-                      <Button
-                        onClick={() => runFreshScan(clusterResult.target)}
-                        size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
-                        disabled={scanning}
-                      >
-                        <Search className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Re-scan</span>
-                      </Button>
-                    </div>
-                  </div>
-                  <CardDescription className="text-xs flex items-center gap-1.5">
-                    <span>Target:</span>
-                    <button
-                      onClick={(e) => {
-                        navigator.clipboard.writeText(clusterResult.target);
-                        const btn = e.currentTarget;
-                        btn.dataset.copied = "true";
-                        setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-                      }}
-                      className="font-mono hover:underline cursor-pointer inline-flex items-center gap-1 group data-[copied=true]:text-green-500"
-                      title="Click to copy full address"
-                      data-copied="false"
-                    >
-                      {clusterResult.target.slice(0, 10)}...{clusterResult.target.slice(-6)}
-                      <span className="group-data-[copied=true]:hidden"><Copy className="h-2.5 w-2.5 opacity-50" /></span>
-                      <span className="hidden group-data-[copied=true]:inline text-[10px] font-medium text-green-500">Copied!</span>
-                    </button>
-                    {clusterResult.targetEthos && (
-                      <span>&middot; Ethos: {clusterResult.targetEthos.displayName} (score: {clusterResult.targetEthos.score})</span>
-                    )}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
-                      <div className="text-xl font-bold">{Object.keys(clusterResult.networkStats).length}</div>
-                      <div className="text-[10px] text-muted-foreground">Networks</div>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
-                      <div className="text-xl font-bold">
-                        {Object.values(clusterResult.networkStats).reduce((s, n) => s + n.txCount, 0)}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">Transactions</div>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
-                      <div className="text-xl font-bold text-red-500">{clusterResult.strongCluster.length}</div>
-                      <div className="text-[10px] text-red-500">Strong</div>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
-                      <div className="text-xl font-bold text-amber-500">{clusterResult.possibleCluster.length}</div>
-                      <div className="text-[10px] text-amber-500">Possible</div>
-                    </div>
-                  </div>
-
-                  {clusterResult.targetEthos && (
-                    <div className="rounded-lg border border-border p-3 space-y-1">
-                      <div className="text-xs font-medium text-muted-foreground">Target Ethos Profile</div>
-                      <div className="flex items-center gap-3">
-                        {clusterResult.targetEthos.avatarUrl && (
-                          <a href={clusterResult.targetEthos.profileUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                            <img
-                              src={clusterResult.targetEthos.avatarUrl}
-                              alt={clusterResult.targetEthos.displayName}
-                              className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(clusterResult.targetEthos.score)}`}
-                            />
-                          </a>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <a
-                            href={clusterResult.targetEthos.profileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-sm hover:underline inline-flex items-center gap-1"
-                          >
-                            {clusterResult.targetEthos.displayName}
-                            <ExternalLink className="h-3 w-3 opacity-50" />
-                          </a>
-                          <div className="text-xs text-muted-foreground">
-                            {clusterResult.targetEthos.username && `@${clusterResult.targetEthos.username} · `}
-                            Score: {clusterResult.targetEthos.score}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Key Findings */}
-                  {(clusterResult.strongCluster.length > 0 || clusterResult.possibleCluster.length > 0) && (() => {
-                    const tName = clusterResult.targetEthos?.displayName || "Target";
-                    const allResults = [...clusterResult.strongCluster, ...clusterResult.possibleCluster];
-                    const fundedByTarget = allResults.filter((c) => c.signals.some((s) => s.type === "funded_by_target"));
-                    const sharedFF = allResults.filter((c) => c.sharedFirstFunder && !c.signals.some((s) => s.type === "funded_by_target"));
-                    const invitedBy = allResults.filter((c) => c.invitedByTarget);
-                    const mutualRev = allResults.filter((c) => c.mutualReviews);
-                    const mutualVou = allResults.filter((c) => c.mutualVouches);
-                    const withCex = allResults.filter((c) => c.sharedCexDeposits && c.sharedCexDeposits.length > 0);
-                    const multiHop = allResults.filter((c) => c.signals.some((s) => s.type === "multi_hop_funding"));
-                    const hasFindings = fundedByTarget.length > 0 || sharedFF.length > 0 || invitedBy.length > 0 || mutualRev.length > 0 || mutualVou.length > 0 || withCex.length > 0 || multiHop.length > 0;
-                    if (!hasFindings) return null;
-                    const nameLinks = (list: typeof allResults) => list.map((c, i) => {
-                      const name = c.ethosProfile?.displayName || c.address.slice(0, 10) + "...";
-                      const url = c.ethosProfile?.profileUrl || getExplorerAddressUrl(c.address);
-                      return (
-                        <span key={c.address}>
-                          {i > 0 && ", "}
-                          <a href={url} target="_blank" rel="noopener noreferrer" className="text-foreground font-medium hover:underline">
-                            {name}
-                          </a>
-                        </span>
-                      );
-                    });
-                    return (
-                      <div className="rounded-lg border border-border p-3 space-y-1.5">
-                        <div className="text-xs font-medium text-muted-foreground">Key Findings</div>
-                        {fundedByTarget.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>{tName} first funded: {nameLinks(fundedByTarget)}</span>
-                          </div>
-                        )}
-                        {sharedFF.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>Share the same first funder as {tName}: {nameLinks(sharedFF)}</span>
-                          </div>
-                        )}
-                        {invitedBy.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>{tName} invited on Ethos: {nameLinks(invitedBy)}</span>
-                          </div>
-                        )}
-                        {mutualRev.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>Mutual reviews with {tName}: {nameLinks(mutualRev)}</span>
-                          </div>
-                        )}
-                        {mutualVou.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>Mutual vouches with {tName}: {nameLinks(mutualVou)}</span>
-                          </div>
-                        )}
-                        {withCex.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>Share exchange deposit address: {nameLinks(withCex)}</span>
-                          </div>
-                        )}
-                        {multiHop.length > 0 && (
-                          <div className="text-xs text-muted-foreground flex gap-1.5">
-                            <span className="shrink-0">-</span>
-                            <span>Discovered via funding chain analysis: {nameLinks(multiHop)}</span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Target first funders (collapsible) */}
-                  {clusterResult.targetFirstFunders && clusterResult.targetFirstFunders.length > 0 && (
-                    <div className="rounded-lg border border-border p-3 space-y-1.5">
-                      <button
-                        onClick={() => setShowFirstFunders(!showFirstFunders)}
-                        className="flex items-center gap-1 text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground transition-colors w-full"
-                      >
-                        {showFirstFunders ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                        {clusterResult.targetEthos?.displayName || "Target"}&apos;s First Funders
-                      </button>
-                      {showFirstFunders && (
-                        <div className="space-y-1 pt-1">
-                          {clusterResult.targetFirstFunders.map((ff, i) => (
-                            <div key={i} className="flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                                {renderAddress(ff.funder, ff.chain)}
-                              </div>
-                              <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <OverviewCard
+                result={clusterResult}
+                currentInvestigationId={currentInvestigationId}
+                scanning={scanning}
+                onSave={handleSaveInvestigation}
+                onShare={() => {
+                  const url = `${window.location.origin}/scan/${clusterResult.target}`;
+                  navigator.clipboard.writeText(url);
+                }}
+                onRescan={() => runFreshScan(clusterResult.target)}
+              />
               </motion.div>
 
               {/* Strong Cluster */}
