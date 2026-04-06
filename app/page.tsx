@@ -61,6 +61,7 @@ interface InvestigationSummary {
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
+  lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
 }
 
 export default function Home() {
@@ -1130,6 +1131,14 @@ export default function Home() {
                           {inv.strongCount === 0 && inv.possibleCount === 0 && (
                             <Shield className="h-3 w-3 text-green-500" />
                           )}
+                          {inv.lastScannedBy && (
+                            <img
+                              src={inv.lastScannedBy.avatarUrl}
+                              alt=""
+                              title={`Scanned by ${inv.lastScannedBy.displayName}`}
+                              className="h-4 w-4 rounded-full"
+                            />
+                          )}
                         </div>
                       </button>
                     ))}
@@ -1321,6 +1330,22 @@ function ScansList({
                   <span className="flex items-center gap-1">
                     <Share2 className="h-3 w-3" />
                     Shared
+                  </span>
+                )}
+                {inv.lastScannedBy && (
+                  <span
+                    className="flex items-center gap-1.5"
+                    title={`Scanned by ${inv.lastScannedBy.displayName}`}
+                  >
+                    <span className="hidden lg:inline">scanned by</span>
+                    <img
+                      src={inv.lastScannedBy.avatarUrl}
+                      alt=""
+                      className="h-4 w-4 rounded-full"
+                    />
+                    <span className="hidden lg:inline truncate max-w-24 text-foreground">
+                      {inv.lastScannedBy.displayName}
+                    </span>
                   </span>
                 )}
                 <span>{new Date(inv.savedAt).toLocaleDateString()}</span>

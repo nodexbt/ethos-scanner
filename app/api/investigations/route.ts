@@ -6,13 +6,115 @@ import { listInvestigations, saveInvestigation } from "@/lib/db/investigations";
 // to prevent DB bloat / DoS via arbitrary writes.
 const MAX_CLUSTER_RESULT_BYTES = 2 * 1024 * 1024;
 
+interface ResolvedProfile {
+  displayName: string;
+  avatarUrl: string;
+  profileUrl: string;
+}
+
+// In-memory cache for resolved Ethos profiles, keyed by profileId.
+// 5 minute TTL is fine — display name / avatar change rarely.
+const profileCache = new Map<
+  number,
+  { data: ResolvedProfile | null; expires: number }
+>();
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+
+interface EthosBulkProfile {
+  profileId: number | null;
+  displayName: string;
+  avatarUrl: string;
+  links?: { profile?: string };
+}
+
+async function resolveProfiles(
+  profileIds: number[]
+): Promise<Map<number, ResolvedProfile | null>> {
+  const out = new Map<number, ResolvedProfile | null>();
+  const now = Date.now();
+  const toFetch: number[] = [];
+
+  for (const id of profileIds) {
+    const cached = profileCache.get(id);
+    if (cached && cached.expires > now) {
+      out.set(id, cached.data);
+    } else {
+      toFetch.push(id);
+    }
+  }
+
+  if (toFetch.length === 0) return out;
+
+  try {
+    const resp = await fetch(
+      "https://api.ethos.network/api/v2/users/by/profile-id",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Ethos-Client": "ethos-scanner@0.1.0",
+        },
+        body: JSON.stringify({ profileIds: toFetch }),
+      }
+    );
+
+    if (resp.ok) {
+      const profiles: EthosBulkProfile[] = await resp.json();
+      for (const p of profiles) {
+        if (p.profileId === null || p.profileId === undefined) continue;
+        const data: ResolvedProfile = {
+          displayName: p.displayName,
+          avatarUrl: p.avatarUrl,
+          profileUrl: p.links?.profile || "",
+        };
+        out.set(p.profileId, data);
+        profileCache.set(p.profileId, {
+          data,
+          expires: now + PROFILE_TTL_MS,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("resolveProfiles failed:", err);
+  }
+
+  // Mark any IDs we asked for but didn't get back as null so we don't refetch
+  // them in a tight loop.
+  for (const id of toFetch) {
+    if (!out.has(id)) {
+      out.set(id, null);
+      profileCache.set(id, { data: null, expires: now + PROFILE_TTL_MS });
+    }
+  }
+
+  return out;
+}
+
 // GET /api/investigations — list all
 export async function GET() {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
 
   const investigations = await listInvestigations();
-  return NextResponse.json(investigations);
+
+  const uniqueIds = [
+    ...new Set(
+      investigations
+        .map((inv) => inv.lastScannedByProfileId)
+        .filter((id): id is number => id !== null)
+    ),
+  ];
+  const resolved = await resolveProfiles(uniqueIds);
+
+  const enriched = investigations.map((inv) => ({
+    ...inv,
+    lastScannedBy:
+      inv.lastScannedByProfileId !== null
+        ? resolved.get(inv.lastScannedByProfileId) ?? null
+        : null,
+  }));
+
+  return NextResponse.json(enriched);
 }
 
 // POST /api/investigations — save/update

@@ -13,6 +13,7 @@ export interface InvestigationSummary {
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
+  lastScannedByProfileId: number | null;
 }
 
 export interface InvestigationRow {
@@ -29,7 +30,7 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("investigations")
-    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, updated_at")
+    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at")
     .order("updated_at", { ascending: false })
     .limit(100);
 
@@ -63,6 +64,7 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
       shareId: row.share_id,
       isPublic: row.is_public ?? false,
       ownerProfileId: row.owner_profile_id ?? null,
+      lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
     };
   });
 }
@@ -145,6 +147,9 @@ export async function saveInvestigation(data: {
       cluster_result: data.clusterResult,
       ai_analysis: data.aiAnalysis,
       owner_profile_id: ownerToWrite,
+      // last_scanned_by is always overwritten with the current user, unlike
+      // owner_profile_id which is sticky to the original creator.
+      last_scanned_by_profile_id: data.ownerProfileId,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
