@@ -81,6 +81,7 @@ html {
   background-size: var(--dot-spacing) var(--dot-spacing);
   background-position: calc(var(--dot-spacing) / 2) calc(var(--dot-spacing) / 2);
   min-height: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {
