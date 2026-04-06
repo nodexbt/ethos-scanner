@@ -11,6 +11,35 @@ export const authOptions: NextAuthOptions = {
       clientId: process.env.TWITTER_CLIENT_ID || "",
       clientSecret: process.env.TWITTER_CLIENT_SECRET || "",
       version: "2.0",
+      userinfo: {
+        url: "https://api.twitter.com/2/users/me",
+        params: { "user.fields": "id,name,username,profile_image_url" },
+        async request({ tokens }: { tokens: { access_token?: string } }) {
+          const url = new URL("https://api.twitter.com/2/users/me");
+          url.searchParams.set("user.fields", "id,name,username,profile_image_url");
+          const res = await fetch(url.toString(), {
+            headers: {
+              Authorization: `Bearer ${tokens.access_token}`,
+              "User-Agent": "ethos-scanner",
+            },
+          });
+          if (!res.ok) {
+            const body = await res.text();
+            throw new Error(`Twitter userinfo ${res.status}: ${body}`);
+          }
+          return await res.json();
+        },
+      },
+      profile(profile) {
+        // Twitter v2 returns { data: { id, name, username, profile_image_url } }
+        const data = profile.data || profile;
+        return {
+          id: data.id,
+          name: data.name,
+          email: null,
+          image: data.profile_image_url?.replace(/_normal\./, "."),
+        };
+      },
     }),
     CredentialsProvider({
       name: "Passphrase",
