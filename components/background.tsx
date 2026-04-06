@@ -43,11 +43,14 @@ export function Background() {
   return (
     <div
       aria-hidden
-      className="fixed inset-0 -z-10 pointer-events-none"
+      className="fixed -z-10 pointer-events-none"
       style={{
-        // Use 100dvh so the background follows the browser chrome
-        // expanding/collapsing on mobile.
-        height: "100dvh",
+        // Oversized to guarantee coverage of iOS safe areas (notch, home bar)
+        // which aren't reliably included in `inset: 0` on all browsers.
+        top: "-200px",
+        left: "-200px",
+        right: "-200px",
+        bottom: "-200px",
         // Invert the shader output for light mode (shader is hardcoded to mix from black)
         filter: theme === "light" ? "invert(1) contrast(1.25)" : undefined,
       }}

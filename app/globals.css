@@ -76,6 +76,9 @@
 }
 
 html {
+  /* Background color matches theme so safe area strips on iOS blend in
+     if the Dither canvas doesn't cover them for any reason (initial paint,
+     WebGL fail, etc.) */
   background-color: hsl(var(--background));
   min-height: 100%;
   scrollbar-gutter: stable;
