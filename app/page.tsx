@@ -768,7 +768,7 @@ export default function Home() {
             sequential
             revealDirection="start"
             animateOn="hover"
-            replayInterval={60000}
+            replayInterval={30000}
             useOriginalCharsOnly={false}
             parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
             className="text-foreground"
