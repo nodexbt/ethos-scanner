@@ -40,6 +40,7 @@ import { safeExternalUrl } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
+import DecryptedText from "@/components/ui/decrypted-text";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
 import { OverviewCard } from "@/components/results/overview-card";
@@ -757,10 +758,22 @@ export default function Home() {
             setScreenshots(new Map());
             window.history.pushState({}, "", "/");
           }}
-          className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0"
+          className="group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0"
         >
           <Shield className="h-4.5 w-4.5 shrink-0" />
-          <span className="font-bold tracking-tight text-base">Ethos Scanner</span>
+          <DecryptedText
+            text="Ethos Scanner"
+            speed={40}
+            maxIterations={12}
+            sequential
+            revealDirection="start"
+            animateOn="hover"
+            replayInterval={60000}
+            useOriginalCharsOnly={false}
+            parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
+            className="text-foreground"
+            encryptedClassName="text-muted-foreground"
+          />
         </button>
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
           {session && (
