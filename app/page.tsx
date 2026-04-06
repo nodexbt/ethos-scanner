@@ -27,6 +27,7 @@ import {
   Activity,
   Network,
   ArrowRight,
+  LogOut,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -742,8 +743,8 @@ export default function Home() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-2 pb-4">
-        <div className="space-y-1">
+      <div className="flex items-start sm:items-center justify-between gap-3 pb-4">
+        <div className="min-w-0">
           <button
             onClick={() => {
               setActiveTab("scanner");
@@ -761,58 +762,36 @@ export default function Home() {
             <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
             Ethos Scanner
           </button>
-          <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
-            Discover wallet clusters and sybil accounts on Ethos Network via on-chain transaction analysis.
+          <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block mt-1">
+            Discover wallet clusters and sybil accounts via on-chain transaction analysis.
           </p>
         </div>
-        <div className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end shrink-0">
-          {hasResults && (
-            <>
-              <Button
-                onClick={(e) => {
-                  const wallets = [
-                    clusterResult!.target,
-                    ...clusterResult!.strongCluster.flatMap((c) => c.wallets || [c.address]),
-                    ...clusterResult!.possibleCluster.flatMap((c) => c.wallets || [c.address]),
-                  ];
-                  navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
-                  const btn = e.currentTarget;
-                  btn.dataset.copied = "true";
-                  setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-                }}
-                size="sm" variant="secondary" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
-                data-copied="false"
-              >
-                <Wallet className="h-3.5 w-3.5 data-[copied=true]:hidden" />
-                <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Copy Wallets</span>
-                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-              </Button>
-              <Button onClick={exportInvestigation} size="sm" variant="secondary" className="h-7 text-xs gap-1.5">
-                <FileText className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Export for Slash Report</span>
-              </Button>
-            </>
-          )}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
           {session && (
-            <>
-              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
-                {session.user?.image && (
-                  <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
-                )}
-                <span>{session.user?.name || "Admin"}</span>
+            <div className="flex items-center gap-1.5 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1 pr-1 sm:pr-2">
+              {session.user?.image ? (
+                <img src={session.user.image} alt="" className="h-6 w-6 rounded-md shrink-0" />
+              ) : (
+                <div className="h-6 w-6 rounded-md bg-muted shrink-0" />
+              )}
+              <div className="hidden sm:flex items-center gap-1.5 text-xs">
+                <span className="font-medium truncate max-w-30">{session.user?.name || "Admin"}</span>
                 {/* @ts-expect-error - ethos field added in session callback */}
                 {session.user?.ethos?.score !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-muted text-[10px] font-medium">
+                  <span className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
                     {/* @ts-expect-error - ethos field added in session callback */}
                     {session.user.ethos.score}
                   </span>
                 )}
               </div>
-              <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
-                <span className="hidden sm:inline">Sign out</span>
-                <span className="sm:hidden text-xs">Exit</span>
-              </Button>
-            </>
+              <button
+                onClick={() => signOut()}
+                title="Sign out"
+                className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
           <ThemeToggle />
         </div>
@@ -960,6 +939,15 @@ export default function Home() {
                   navigator.clipboard.writeText(url);
                 }}
                 onRescan={() => runFreshScan(clusterResult.target)}
+                onCopyWallets={() => {
+                  const wallets = [
+                    clusterResult.target,
+                    ...clusterResult.strongCluster.flatMap((c) => c.wallets || [c.address]),
+                    ...clusterResult.possibleCluster.flatMap((c) => c.wallets || [c.address]),
+                  ];
+                  navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
+                }}
+                onExport={exportInvestigation}
               />
               </motion.div>
 

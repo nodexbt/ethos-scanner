@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Save, Search, Share2, Copy, ChevronDown, ChevronRight } from "lucide-react";
+import { ExternalLink, Save, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, FileText } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
@@ -16,6 +16,8 @@ interface OverviewCardProps {
   onSave: () => void;
   onShare: () => void;
   onRescan: () => void;
+  onCopyWallets: () => void;
+  onExport: () => void;
 }
 
 export function OverviewCard({
@@ -25,6 +27,8 @@ export function OverviewCard({
   onSave,
   onShare,
   onRescan,
+  onCopyWallets,
+  onExport,
 }: OverviewCardProps) {
   const [showFirstFunders, setShowFirstFunders] = useState(false);
 
@@ -57,9 +61,27 @@ export function OverviewCard({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            <Button
+              onClick={(e) => {
+                onCopyWallets();
+                const btn = e.currentTarget;
+                btn.dataset.copied = "true";
+                setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+              }}
+              size="sm" variant="ghost" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
+              data-copied="false"
+            >
+              <Wallet className="h-3.5 w-3.5 [[data-copied=true]_&]:hidden" />
+              <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Copy Wallets</span>
+              <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+            </Button>
+            <Button onClick={onExport} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Export</span>
+            </Button>
             <Button
               onClick={(e) => {
                 onShare();
