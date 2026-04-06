@@ -660,42 +660,76 @@ export default function Home() {
   // Not logged in
   if (!session) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen p-4">
+        {/* Theme toggle pinned top-right */}
+        <div className="fixed top-4 right-4 z-10">
+          <ThemeToggle />
+        </div>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
+          className="w-full max-w-2xl"
         >
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <Shield className="h-10 w-10 mx-auto mb-2" />
-            <CardTitle>Ethos Scanner</CardTitle>
-            <CardDescription>
-              Sign in to access the scanner.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button
-              onClick={() => signIn("twitter", { callbackUrl: "/" })}
-              className="w-full gap-2"
-              size="sm"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-              </svg>
-              Sign in with X
-            </Button>
-            {twitterAuthError && (
-              <div className="text-xs text-red-500 text-center">{twitterAuthError}</div>
-            )}
-            <p className="text-[11px] text-muted-foreground text-center">
-              Access restricted to approved Ethos profiles.
-            </p>
-            <div className="flex justify-center">
-              <ThemeToggle />
-            </div>
-          </CardContent>
-        </Card>
+          <Card className="w-full backdrop-blur-sm bg-card/80">
+            <CardHeader className="text-center space-y-3 pb-6">
+              <div className="inline-flex items-center justify-center h-14 w-14 rounded-full border border-border bg-background/60 mx-auto">
+                <Shield className="h-7 w-7" />
+              </div>
+              <div className="space-y-1.5">
+                <CardTitle className="text-2xl tracking-tight">Ethos Scanner</CardTitle>
+                <CardDescription className="text-sm max-w-sm mx-auto">
+                  Discover wallet clusters and sybil accounts on Ethos Network via on-chain transaction analysis.
+                </CardDescription>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              {/* Feature grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                <div className="rounded-lg border border-border bg-background/40 p-3 space-y-1">
+                  <Search className="h-4 w-4 mx-auto text-muted-foreground" />
+                  <div className="text-xs font-medium">On-chain clustering</div>
+                  <div className="text-[10px] text-muted-foreground leading-tight">
+                    5 chains scanned in parallel
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3 space-y-1">
+                  <AlertTriangle className="h-4 w-4 mx-auto text-muted-foreground" />
+                  <div className="text-xs font-medium">Signal scoring</div>
+                  <div className="text-[10px] text-muted-foreground leading-tight">
+                    Funding, transfers & CEX patterns
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3 space-y-1">
+                  <FileText className="h-4 w-4 mx-auto text-muted-foreground" />
+                  <div className="text-xs font-medium">Slash reports</div>
+                  <div className="text-[10px] text-muted-foreground leading-tight">
+                    Evidence export ready
+                  </div>
+                </div>
+              </div>
+
+              {/* Sign in */}
+              <div className="space-y-2">
+                <Button
+                  onClick={() => signIn("twitter", { callbackUrl: "/" })}
+                  className="w-full gap-2 h-10"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                  Sign in with X
+                </Button>
+                {twitterAuthError && (
+                  <div className="text-xs text-red-500 text-center">{twitterAuthError}</div>
+                )}
+                <p className="text-[11px] text-muted-foreground text-center">
+                  Access restricted to approved Ethos profiles.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </motion.div>
       </div>
     );

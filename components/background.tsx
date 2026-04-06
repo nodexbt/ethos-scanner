@@ -37,8 +37,6 @@ export function Background() {
         left: "calc(env(safe-area-inset-left, 0px) * -1)",
         width: "100vw",
         height: "100dvh",
-        // Re-enable pointer events only when we want mouse interaction
-        pointerEvents: loggedIn ? "none" : "auto",
         // Invert the shader output for light mode (shader is hardcoded to mix from black)
         filter: theme === "light" ? "invert(1) contrast(1.25)" : undefined,
       }}
@@ -48,7 +46,7 @@ export function Background() {
         // Login screen: animated + interactive; after login: static
         disableAnimation={loggedIn}
         enableMouseInteraction={!loggedIn}
-        mouseRadius={0.3}
+        mouseRadius={0.2}
         colorNum={7.3}
         waveAmplitude={0.18}
         waveFrequency={1.8}
