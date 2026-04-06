@@ -28,8 +28,15 @@ export function Background() {
   return (
     <div
       aria-hidden
-      className="fixed inset-0 -z-10 pointer-events-none"
+      className="fixed -z-10 pointer-events-none"
       style={{
+        // Cover the full visual viewport including mobile safe areas
+        top: "calc(env(safe-area-inset-top, 0px) * -1)",
+        right: "calc(env(safe-area-inset-right, 0px) * -1)",
+        bottom: "calc(env(safe-area-inset-bottom, 0px) * -1)",
+        left: "calc(env(safe-area-inset-left, 0px) * -1)",
+        width: "100vw",
+        height: "100dvh",
         // Re-enable pointer events only when we want mouse interaction
         pointerEvents: loggedIn ? "none" : "auto",
         // Invert the shader output for light mode (shader is hardcoded to mix from black)
