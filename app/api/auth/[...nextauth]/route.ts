@@ -1,6 +1,7 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
+import { isAdminProfileId } from "@/lib/admin";
 
 // Comma-separated list of allowed Ethos profile IDs (e.g., "123,456,789").
 // Only these profile IDs can log in. Read fresh on every call so updates
@@ -129,6 +130,8 @@ export const authOptions: NextAuthOptions = {
           score: token.ethosScore,
           profileUrl: token.ethosProfileUrl,
         };
+        // @ts-expect-error - extending session user with admin flag
+        session.user.isAdmin = isAdminProfileId(token.ethosProfileId as number);
         // Use Ethos avatar/name as the visible identity
         if (token.ethosDisplayName) session.user.name = token.ethosDisplayName as string;
         if (token.ethosAvatarUrl) session.user.image = token.ethosAvatarUrl as string;

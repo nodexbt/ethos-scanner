@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { isAdminProfileId } from "@/lib/admin";
 
 export interface AuthedUser {
   profileId: number;
   twitterUsername: string | null;
+  isAdmin: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export async function requireAuth(): Promise<AuthedUser | NextResponse> {
     profileId,
     // @ts-expect-error - twitterUsername added in session callback
     twitterUsername: session.user.twitterUsername ?? null,
+    isAdmin: isAdminProfileId(profileId),
   };
 }
 

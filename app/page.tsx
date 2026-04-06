@@ -55,6 +55,7 @@ interface InvestigationSummary {
   hasAnalysis: boolean;
   shareId: string | null;
   isPublic: boolean;
+  ownerProfileId: number | null;
 }
 
 export default function Home() {
@@ -74,7 +75,7 @@ export default function Home() {
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
-  const [activeTab, setActiveTab] = useState<"scanner" | "investigations">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "yours" | "all">("scanner");
   const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
@@ -636,6 +637,17 @@ export default function Home() {
 
   const hasResults = clusterResult !== null && !scanning;
 
+  // @ts-expect-error - ethos field added in session callback
+  const currentProfileId = (session?.user?.ethos?.profileId as number | undefined) ?? null;
+  // @ts-expect-error - isAdmin field added in session callback
+  const isAdmin = Boolean(session?.user?.isAdmin);
+  const yourInvestigations = currentProfileId
+    ? savedInvestigations.filter((inv) => inv.ownerProfileId === currentProfileId)
+    : [];
+  const yourScansCount = yourInvestigations.length;
+  const canDelete = (inv: InvestigationSummary) =>
+    isAdmin || inv.ownerProfileId === null || inv.ownerProfileId === currentProfileId;
+
   // Loading state
   if (sessionStatus === "loading") {
     return (
@@ -769,10 +781,10 @@ export default function Home() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-border mb-4">
+      <div className="flex items-center gap-1 border-b border-border mb-4 overflow-x-auto">
         <button
           onClick={() => setActiveTab("scanner")}
-          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
             activeTab === "scanner"
               ? "border-primary text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -782,15 +794,29 @@ export default function Home() {
           Scanner
         </button>
         <button
-          onClick={() => setActiveTab("investigations")}
-          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-            activeTab === "investigations"
+          onClick={() => setActiveTab("yours")}
+          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === "yours"
               ? "border-primary text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           <History className="h-4 w-4" />
-          Investigations
+          Your Scans
+          {yourScansCount > 0 && (
+            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{yourScansCount}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("all")}
+          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === "all"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <FolderOpen className="h-4 w-4" />
+          All Scans
           {savedInvestigations.length > 0 && (
             <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
           )}
@@ -990,111 +1016,25 @@ export default function Home() {
       </div>
       )}
 
-      {/* Investigations Tab */}
-      {activeTab === "investigations" && (
-        <div className="space-y-4">
-          {/* Search */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search investigations..."
-                value={investigationSearch}
-                onChange={(e) => setInvestigationSearch(e.target.value)}
-                className="pl-9 h-9"
-              />
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {savedInvestigations.length} investigation{savedInvestigations.length !== 1 && "s"}
-            </span>
-          </div>
-
-          {savedInvestigations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
-              <FolderOpen className="h-8 w-8" />
-              <p>No investigations yet. Run a scan to get started.</p>
-            </div>
-          ) : (
-            <div className="grid gap-2">
-              {savedInvestigations
-                .filter((inv) => {
-                  if (!investigationSearch.trim()) return true;
-                  const q = investigationSearch.toLowerCase();
-                  return (
-                    inv.target.toLowerCase().includes(q) ||
-                    (inv.targetName && inv.targetName.toLowerCase().includes(q))
-                  );
-                })
-                .map((inv) => (
-                  <div
-                    key={inv.id}
-                    className={`group flex items-center gap-4 rounded-lg border border-border px-4 py-3 transition-colors ${
-                      currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
-                    }`}
-                  >
-                    {inv.targetAvatar ? (
-                      <img
-                        src={inv.targetAvatar}
-                        alt={inv.targetName || ""}
-                        className="h-10 w-10 rounded-full shrink-0"
-                      />
-                    ) : (
-                      <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0">
-                        <Wallet className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                    )}
-                    <button
-                      onClick={() => {
-                        handleLoadInvestigation(inv);
-                        setActiveTab("scanner");
-                      }}
-                      className="flex-1 min-w-0 text-left cursor-pointer"
-                    >
-                      <div className="font-medium truncate">
-                        {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
-                      </div>
-                      <div className="text-xs text-muted-foreground font-mono mt-0.5">
-                        {inv.target}
-                      </div>
-                    </button>
-                    <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                      {inv.strongCount > 0 && (
-                        <span className="flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3 text-red-500" />
-                          {inv.strongCount} strong
-                        </span>
-                      )}
-                      {inv.possibleCount > 0 && (
-                        <span className="flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3 text-amber-500" />
-                          {inv.possibleCount} possible
-                        </span>
-                      )}
-                      {inv.strongCount === 0 && inv.possibleCount === 0 && (
-                        <span className="flex items-center gap-1">
-                          <Shield className="h-3 w-3 text-green-500" />
-                          Clean
-                        </span>
-                      )}
-                      {inv.isPublic && (
-                        <span className="flex items-center gap-1">
-                          <Share2 className="h-3 w-3" />
-                          Shared
-                        </span>
-                      )}
-                      <span>{new Date(inv.savedAt).toLocaleDateString()}</span>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteInvestigation(inv.id)}
-                      className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
+      {/* Your Scans / All Scans Tab */}
+      {(activeTab === "yours" || activeTab === "all") && (
+        <ScansList
+          investigations={activeTab === "yours" ? yourInvestigations : savedInvestigations}
+          emptyLabel={
+            activeTab === "yours"
+              ? "You haven't run any scans yet."
+              : "No scans yet. Run one to get started."
+          }
+          search={investigationSearch}
+          onSearchChange={setInvestigationSearch}
+          currentInvestigationId={currentInvestigationId}
+          canDelete={canDelete}
+          onLoad={(inv) => {
+            handleLoadInvestigation(inv);
+            setActiveTab("scanner");
+          }}
+          onDelete={handleDeleteInvestigation}
+        />
       )}
 
       {/* Candidate Detail Modal */}
@@ -1107,6 +1047,138 @@ export default function Home() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ScansList: shared renderer for the "Your Scans" and "All Scans" tabs
+// ---------------------------------------------------------------------------
+
+interface ScansListProps {
+  investigations: InvestigationSummary[];
+  emptyLabel: string;
+  search: string;
+  onSearchChange: (value: string) => void;
+  currentInvestigationId: string | null;
+  canDelete: (inv: InvestigationSummary) => boolean;
+  onLoad: (inv: InvestigationSummary) => void;
+  onDelete: (id: string) => void;
+}
+
+function ScansList({
+  investigations,
+  emptyLabel,
+  search,
+  onSearchChange,
+  currentInvestigationId,
+  canDelete,
+  onLoad,
+  onDelete,
+}: ScansListProps) {
+  const filtered = investigations.filter((inv) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      inv.target.toLowerCase().includes(q) ||
+      (inv.targetName && inv.targetName.toLowerCase().includes(q))
+    );
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Search */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search scans..."
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="pl-9 h-9"
+          />
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {investigations.length} scan{investigations.length !== 1 && "s"}
+        </span>
+      </div>
+
+      {investigations.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
+          <FolderOpen className="h-8 w-8" />
+          <p>{emptyLabel}</p>
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          {filtered.map((inv) => (
+            <div
+              key={inv.id}
+              className={`group flex items-center gap-4 rounded-lg border border-border px-4 py-3 transition-colors ${
+                currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
+              }`}
+            >
+              {inv.targetAvatar ? (
+                <img
+                  src={inv.targetAvatar}
+                  alt={inv.targetName || ""}
+                  className="h-10 w-10 rounded-full shrink-0"
+                />
+              ) : (
+                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                  <Wallet className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
+              <button
+                onClick={() => onLoad(inv)}
+                className="flex-1 min-w-0 text-left cursor-pointer"
+              >
+                <div className="font-medium truncate">
+                  {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
+                </div>
+                <div className="text-xs text-muted-foreground font-mono mt-0.5">
+                  {inv.target}
+                </div>
+              </button>
+              <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                {inv.strongCount > 0 && (
+                  <span className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-red-500" />
+                    {inv.strongCount} strong
+                  </span>
+                )}
+                {inv.possibleCount > 0 && (
+                  <span className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    {inv.possibleCount} possible
+                  </span>
+                )}
+                {inv.strongCount === 0 && inv.possibleCount === 0 && (
+                  <span className="flex items-center gap-1">
+                    <Shield className="h-3 w-3 text-green-500" />
+                    Clean
+                  </span>
+                )}
+                {inv.isPublic && (
+                  <span className="flex items-center gap-1">
+                    <Share2 className="h-3 w-3" />
+                    Shared
+                  </span>
+                )}
+                <span>{new Date(inv.savedAt).toLocaleDateString()}</span>
+              </div>
+              {canDelete(inv) && (
+                <button
+                  onClick={() => onDelete(inv.id)}
+                  className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                  title="Delete scan"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

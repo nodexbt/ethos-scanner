@@ -12,6 +12,7 @@ export interface InvestigationSummary {
   hasAnalysis: boolean;
   shareId: string | null;
   isPublic: boolean;
+  ownerProfileId: number | null;
 }
 
 export interface InvestigationRow {
@@ -28,7 +29,7 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("investigations")
-    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, updated_at")
+    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, updated_at")
     .order("updated_at", { ascending: false })
     .limit(100);
 
@@ -61,6 +62,7 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
       hasAnalysis: !!row.ai_analysis,
       shareId: row.share_id,
       isPublic: row.is_public ?? false,
+      ownerProfileId: row.owner_profile_id ?? null,
     };
   });
 }
