@@ -1037,7 +1037,7 @@ export default function Home() {
             <div className="hidden lg:block space-y-4">
               {/* Stats */}
               <div className="grid grid-cols-3 gap-3">
-                <Card className="bg-card/60 backdrop-blur-sm">
+                <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Activity className="h-3.5 w-3.5" />
@@ -1048,7 +1048,7 @@ export default function Home() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="bg-card/60 backdrop-blur-sm">
+                <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
@@ -1059,7 +1059,7 @@ export default function Home() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="bg-card/60 backdrop-blur-sm">
+                <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Users className="h-3.5 w-3.5 text-amber-500" />
@@ -1074,7 +1074,7 @@ export default function Home() {
 
               {/* Recent scans */}
               {savedInvestigations.length > 0 && (
-                <Card className="bg-card/60 backdrop-blur-sm">
+                <Card>
                   <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-base flex items-center gap-2">
                       <History className="h-4 w-4" />
@@ -1138,7 +1138,7 @@ export default function Home() {
               )}
 
               {/* How it works */}
-              <Card className="bg-card/60 backdrop-blur-sm">
+              <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Network className="h-4 w-4" />
