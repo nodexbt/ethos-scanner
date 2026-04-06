@@ -94,8 +94,8 @@ export default function Home() {
     // Check for auth error in query string
     const params = new URLSearchParams(window.location.search);
     const err = params.get("error");
-    if (err === "LowScore") {
-      setTwitterAuthError("Your Ethos score is below 1800. Access is restricted to high-credibility profiles.");
+    if (err === "NotAllowlisted") {
+      setTwitterAuthError("Your Ethos profile is not on the allowlist.");
     } else if (err === "NoEthosProfile") {
       setTwitterAuthError("No Ethos profile found for your X account.");
     } else if (err === "NoUsername") {
@@ -678,7 +678,7 @@ export default function Home() {
               <div className="text-xs text-red-500 text-center">{twitterAuthError}</div>
             )}
             <p className="text-[11px] text-muted-foreground text-center">
-              Requires an Ethos score of 1800 or higher.
+              Access restricted to approved Ethos profiles.
             </p>
             <div className="flex justify-center">
               <ThemeToggle />

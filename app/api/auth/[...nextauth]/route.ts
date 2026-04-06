@@ -2,7 +2,14 @@ import NextAuth, { type NextAuthOptions } from "next-auth";
 import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
 
-const MIN_ETHOS_SCORE = 1800;
+// Comma-separated list of allowed Ethos profile IDs (e.g., "123,456,789").
+// Only these profile IDs can log in.
+const ETHOS_ALLOWLIST = (process.env.ETHOS_PROFILE_ALLOWLIST || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean)
+  .map(Number)
+  .filter((n) => Number.isFinite(n));
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -57,7 +64,10 @@ export const authOptions: NextAuthOptions = {
 
       const ethos = await fetchProfile(username);
       if (!ethos) return "/?error=NoEthosProfile";
-      if (ethos.score < MIN_ETHOS_SCORE) return "/?error=LowScore";
+
+      if (ethos.profileId === null || !ETHOS_ALLOWLIST.includes(ethos.profileId)) {
+        return "/?error=NotAllowlisted";
+      }
       return true;
     },
     async jwt({ token, account, profile }) {
