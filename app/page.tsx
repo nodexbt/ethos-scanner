@@ -23,6 +23,10 @@ import {
   Copy,
   Share2,
   History,
+  Users,
+  Activity,
+  Network,
+  ArrowRight,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -1044,8 +1048,141 @@ export default function Home() {
 
           {/* Empty state */}
           {!scanning && !hasResults && !loadingCached && (
-            <div className="hidden lg:flex items-center justify-center h-64 text-muted-foreground text-sm">
-              Enter a wallet address and scan to discover related wallets
+            <div className="hidden lg:block space-y-4">
+              {/* Stats */}
+              <div className="grid grid-cols-3 gap-3">
+                <Card className="bg-card/60 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Activity className="h-3.5 w-3.5" />
+                      Total Scans
+                    </div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums">
+                      {savedInvestigations.length}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card/60 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+                      Strong Clusters
+                    </div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums">
+                      {savedInvestigations.reduce((sum, inv) => sum + inv.strongCount, 0)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card/60 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Users className="h-3.5 w-3.5 text-amber-500" />
+                      Possible Matches
+                    </div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums">
+                      {savedInvestigations.reduce((sum, inv) => sum + inv.possibleCount, 0)}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Recent scans */}
+              {savedInvestigations.length > 0 && (
+                <Card className="bg-card/60 backdrop-blur-sm">
+                  <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <History className="h-4 w-4" />
+                      Recent Scans
+                    </CardTitle>
+                    <button
+                      onClick={() => setActiveTab("all")}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      View all
+                      <ArrowRight className="h-3 w-3" />
+                    </button>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {savedInvestigations.slice(0, 5).map((inv) => (
+                      <button
+                        key={inv.id}
+                        onClick={() => handleLoadInvestigation(inv)}
+                        className="w-full group flex items-center gap-3 rounded-lg border border-border bg-card/40 hover:bg-card/80 px-3 py-2.5 transition-colors text-left cursor-pointer"
+                      >
+                        {inv.targetAvatar ? (
+                          <img
+                            src={inv.targetAvatar}
+                            alt=""
+                            className="h-8 w-8 rounded-full shrink-0"
+                          />
+                        ) : (
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                            <Wallet className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">
+                            {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground font-mono truncate">
+                            {inv.target}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                          {inv.strongCount > 0 && (
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-red-500" />
+                              {inv.strongCount}
+                            </span>
+                          )}
+                          {inv.possibleCount > 0 && (
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-amber-500" />
+                              {inv.possibleCount}
+                            </span>
+                          )}
+                          {inv.strongCount === 0 && inv.possibleCount === 0 && (
+                            <Shield className="h-3 w-3 text-green-500" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* How it works */}
+              <Card className="bg-card/60 backdrop-blur-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Network className="h-4 w-4" />
+                    How it works
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-muted-foreground">
+                  <div className="flex gap-3">
+                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">1</div>
+                    <div>
+                      <div className="font-medium text-foreground">Multi-chain transaction scan</div>
+                      <div className="text-xs">Pulls transfer history across Ethereum, Base, Arbitrum, Optimism, and Polygon.</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">2</div>
+                    <div>
+                      <div className="font-medium text-foreground">Signal correlation</div>
+                      <div className="text-xs">Identifies direct transfers, shared funding sources, and CEX deposit patterns.</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">3</div>
+                    <div>
+                      <div className="font-medium text-foreground">Cluster scoring</div>
+                      <div className="text-xs">Wallets matching multiple signal types are flagged as strong cluster candidates.</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
