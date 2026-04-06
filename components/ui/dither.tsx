@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unknown-property */
 "use client";
 
-import { useRef, useEffect, forwardRef } from "react";
+import { useRef, useEffect, useState, forwardRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, wrapEffect } from "@react-three/postprocessing";
 import { Effect } from "postprocessing";
@@ -191,6 +191,7 @@ interface DitheredWavesProps {
   disableAnimation: boolean;
   enableMouseInteraction: boolean;
   mouseRadius: number;
+  onCapture?: (dataUrl: string) => void;
 }
 
 function DitheredWaves({
@@ -203,6 +204,7 @@ function DitheredWaves({
   disableAnimation,
   enableMouseInteraction,
   mouseRadius,
+  onCapture,
 }: DitheredWavesProps) {
   const mesh = useRef<THREE.Mesh>(null);
   const mouseRef = useRef(new THREE.Vector2());
@@ -244,6 +246,8 @@ function DitheredWaves({
   }, [enableMouseInteraction, gl]);
 
   const prevColor = useRef([...waveColor]);
+  const captureFrames = useRef(0);
+  const captured = useRef(false);
   useFrame(({ clock }) => {
     const u = waveUniformsRef.current;
 
@@ -265,6 +269,22 @@ function DitheredWaves({
 
     if (enableMouseInteraction) {
       u.mousePos.value.copy(mouseRef.current);
+    }
+
+    // When animation is disabled, capture the dithered output to an image
+    // after a few frames (to ensure the EffectComposer has fully composited)
+    // so the parent can swap the live canvas for a static <img>.
+    if (disableAnimation && onCapture && !captured.current) {
+      captureFrames.current += 1;
+      if (captureFrames.current >= 3) {
+        captured.current = true;
+        try {
+          const url = gl.domElement.toDataURL("image/png");
+          onCapture(url);
+        } catch {
+          // toDataURL can throw (tainted canvas, context lost); fall through silently
+        }
+      }
     }
   });
 
@@ -309,6 +329,31 @@ export default function Dither({
   enableMouseInteraction = true,
   mouseRadius = 1,
 }: DitherProps) {
+  // When animation is disabled, we render the WebGL canvas once, capture
+  // its output to a data URL, then unmount the Canvas and render a static
+  // <img> instead — eliminating the per-frame RAF render loop entirely.
+  const [staticUrl, setStaticUrl] = useState<string | null>(null);
+
+  // Reset the captured image if animation is re-enabled (e.g. logout),
+  // so we go back to a live canvas.
+  useEffect(() => {
+    if (!disableAnimation && staticUrl) {
+      setStaticUrl(null);
+    }
+  }, [disableAnimation, staticUrl]);
+
+  if (disableAnimation && staticUrl) {
+    return (
+      <img
+        src={staticUrl}
+        alt=""
+        aria-hidden
+        className="w-full h-full object-cover select-none"
+        draggable={false}
+      />
+    );
+  }
+
   return (
     <Canvas
       className="w-full h-full relative"
@@ -326,6 +371,7 @@ export default function Dither({
         disableAnimation={disableAnimation}
         enableMouseInteraction={enableMouseInteraction}
         mouseRadius={mouseRadius}
+        onCapture={disableAnimation ? setStaticUrl : undefined}
       />
     </Canvas>
   );
