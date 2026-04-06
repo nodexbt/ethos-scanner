@@ -79,6 +79,8 @@ export default function Home() {
   const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
+  const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
 
@@ -89,6 +91,21 @@ export default function Home() {
       const addr = match[1].toLowerCase();
       setWalletInput(addr);
       loadCachedScan(addr);
+    }
+
+    // Check for auth error in query string
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("error");
+    if (err === "LowScore") {
+      setTwitterAuthError("Your Ethos score is below 1800. Access is restricted to high-credibility profiles.");
+    } else if (err === "NoEthosProfile") {
+      setTwitterAuthError("No Ethos profile found for your X account.");
+    } else if (err === "NoUsername") {
+      setTwitterAuthError("Could not read X username.");
+    }
+    if (err) {
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
 
@@ -659,6 +676,9 @@ export default function Home() {
               </svg>
               Sign in with X
             </Button>
+            {twitterAuthError && (
+              <div className="text-xs text-red-500 text-center">{twitterAuthError}</div>
+            )}
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t border-border" />
@@ -761,6 +781,13 @@ export default function Home() {
                   <img src={session.user.image} alt="" className="h-6 w-6 rounded-full" />
                 )}
                 <span>{session.user?.name || "Admin"}</span>
+                {/* @ts-expect-error - ethos field added in session callback */}
+                {session.user?.ethos?.score !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-muted text-[10px] font-medium">
+                    {/* @ts-expect-error - ethos field added in session callback */}
+                    {session.user.ethos.score}
+                  </span>
+                )}
               </div>
               <Button onClick={() => signOut()} variant="ghost" size="sm" className="h-7 text-xs">
                 <span className="hidden sm:inline">Sign out</span>

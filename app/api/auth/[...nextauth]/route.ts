@@ -1,9 +1,11 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import TwitterProvider from "next-auth/providers/twitter";
+import { fetchProfile } from "@/lib/ethos";
 
 const ADMIN_PASSPHRASE = process.env.ADMIN_PASSPHRASE || "";
 const BYPASS_AUTH = process.env.BYPASS_AUTH === "true";
+const MIN_ETHOS_SCORE = 1800;
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -64,12 +66,34 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
   callbacks: {
+    async signIn({ account, profile }) {
+      if (account?.provider !== "twitter") return true;
+      // @ts-expect-error - Twitter v2 profile has data field
+      const data = profile?.data || profile;
+      const username = data?.username;
+      if (!username) return "/?error=NoUsername";
+
+      const ethos = await fetchProfile(username);
+      if (!ethos) return "/?error=NoEthosProfile";
+      if (ethos.score < MIN_ETHOS_SCORE) return "/?error=LowScore";
+      return true;
+    },
     async jwt({ token, account, profile }) {
       if (account?.provider === "twitter" && profile) {
         // @ts-expect-error - Twitter v2 profile has data field
         const data = profile.data || profile;
         token.twitterId = data.id;
         token.twitterUsername = data.username;
+
+        // Fetch and attach Ethos profile
+        const ethos = await fetchProfile(data.username);
+        if (ethos) {
+          token.ethosProfileId = ethos.profileId;
+          token.ethosDisplayName = ethos.displayName;
+          token.ethosAvatarUrl = ethos.avatarUrl;
+          token.ethosScore = ethos.score;
+          token.ethosProfileUrl = ethos.links?.profile;
+        }
       }
       return token;
     },
@@ -79,6 +103,19 @@ export const authOptions: NextAuthOptions = {
         session.user.twitterId = token.twitterId;
         // @ts-expect-error - extending session user
         session.user.twitterUsername = token.twitterUsername;
+      }
+      if (token.ethosProfileId !== undefined && session.user) {
+        // @ts-expect-error - extending session user with ethos data
+        session.user.ethos = {
+          profileId: token.ethosProfileId,
+          displayName: token.ethosDisplayName,
+          avatarUrl: token.ethosAvatarUrl,
+          score: token.ethosScore,
+          profileUrl: token.ethosProfileUrl,
+        };
+        // Use Ethos avatar/name as the visible identity
+        if (token.ethosDisplayName) session.user.name = token.ethosDisplayName as string;
+        if (token.ethosAvatarUrl) session.user.image = token.ethosAvatarUrl as string;
       }
       return session;
     },
