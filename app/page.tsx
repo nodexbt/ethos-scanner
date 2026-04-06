@@ -815,7 +815,7 @@ export default function Home() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-4 -mx-1 px-1 overflow-x-auto">
+      <div className="mb-4 -mx-1 px-1 overflow-x-auto scrollbar-hide">
         <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
           <button
             onClick={() => setActiveTab("scanner")}
@@ -1149,8 +1149,8 @@ function ScansList({
           {filtered.map((inv) => (
             <div
               key={inv.id}
-              className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card px-3 sm:px-4 py-3 transition-colors ${
-                currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
+              className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
+                currentInvestigationId === inv.id ? "border-primary bg-primary/10" : "hover:bg-card/80"
               }`}
             >
               {inv.targetAvatar ? (

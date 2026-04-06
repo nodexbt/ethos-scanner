@@ -102,3 +102,11 @@ body {
 svg {
   shape-rendering: geometricPrecision;
 }
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
