@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Copy,
   Share2,
+  History,
 } from "lucide-react";
 import {
   type ClusterScanResult,
@@ -74,6 +75,8 @@ export default function Home() {
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
+  const [activeTab, setActiveTab] = useState<"scanner" | "investigations">("scanner");
+  const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   useEffect(() => {
@@ -684,10 +687,23 @@ export default function Home() {
       {/* Header */}
       <div className="flex items-start sm:items-center justify-between gap-2 pb-4">
         <div className="space-y-1">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+          <button
+            onClick={() => {
+              setActiveTab("scanner");
+              setClusterResult(null);
+              setClusterLogs([]);
+              setScanProgress(null);
+              setWalletInput("");
+              setError(null);
+              setCurrentInvestigationId(null);
+              setScreenshots(new Map());
+              window.history.pushState({}, "", "/");
+            }}
+            className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
+          >
             <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
-            Ethos Sybil Scanner
-          </h1>
+            Ethos Scanner
+          </button>
           <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
             Discover wallet clusters and sybil accounts on Ethos Network via on-chain transaction analysis.
           </p>
@@ -738,9 +754,38 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Two-column layout */}
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border mb-4">
+        <button
+          onClick={() => setActiveTab("scanner")}
+          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+            activeTab === "scanner"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Search className="h-4 w-4" />
+          Scanner
+        </button>
+        <button
+          onClick={() => setActiveTab("investigations")}
+          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+            activeTab === "investigations"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <History className="h-4 w-4" />
+          Investigations
+          {savedInvestigations.length > 0 && (
+            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Scanner Tab */}
+      {activeTab === "scanner" && (
       <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4">
-        {/* Left column: Input + Log */}
         {/* Left column: Input + Log */}
         <div className="space-y-4">
           <ScanInput
@@ -756,55 +801,6 @@ export default function Home() {
             scanning={scanning}
             progress={scanProgress}
           />
-          {/* Saved Investigations */}
-          {savedInvestigations.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4" />
-                  Saved ({savedInvestigations.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1">
-                {savedInvestigations.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className={`group flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2 text-xs ${
-                      currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
-                    }`}
-                  >
-                    {inv.targetAvatar && (
-                      <img
-                        src={inv.targetAvatar}
-                        alt={inv.targetName || ""}
-                        className="h-8 w-8 rounded-full shrink-0"
-                      />
-                    )}
-                    <button
-                      onClick={() => handleLoadInvestigation(inv)}
-                      className="flex-1 min-w-0 text-left cursor-pointer"
-                    >
-                      <div className="font-medium truncate">
-                        {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {inv.strongCount} strong
-                        {" / "}{inv.possibleCount} possible
-                        {inv.isPublic && " / shared"}
-                        {" / "}{new Date(inv.savedAt).toLocaleDateString()}
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteInvestigation(inv.id)}
-                      className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
-                    >
-                      <Trash2 className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* Right column: Results */}
@@ -978,6 +974,114 @@ export default function Home() {
           )}
         </div>
       </div>
+      )}
+
+      {/* Investigations Tab */}
+      {activeTab === "investigations" && (
+        <div className="space-y-4">
+          {/* Search */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search investigations..."
+                value={investigationSearch}
+                onChange={(e) => setInvestigationSearch(e.target.value)}
+                className="pl-9 h-9"
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {savedInvestigations.length} investigation{savedInvestigations.length !== 1 && "s"}
+            </span>
+          </div>
+
+          {savedInvestigations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
+              <FolderOpen className="h-8 w-8" />
+              <p>No investigations yet. Run a scan to get started.</p>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {savedInvestigations
+                .filter((inv) => {
+                  if (!investigationSearch.trim()) return true;
+                  const q = investigationSearch.toLowerCase();
+                  return (
+                    inv.target.toLowerCase().includes(q) ||
+                    (inv.targetName && inv.targetName.toLowerCase().includes(q))
+                  );
+                })
+                .map((inv) => (
+                  <div
+                    key={inv.id}
+                    className={`group flex items-center gap-4 rounded-lg border border-border px-4 py-3 transition-colors ${
+                      currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
+                    }`}
+                  >
+                    {inv.targetAvatar ? (
+                      <img
+                        src={inv.targetAvatar}
+                        alt={inv.targetName || ""}
+                        className="h-10 w-10 rounded-full shrink-0"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                        <Wallet className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        handleLoadInvestigation(inv);
+                        setActiveTab("scanner");
+                      }}
+                      className="flex-1 min-w-0 text-left cursor-pointer"
+                    >
+                      <div className="font-medium truncate">
+                        {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
+                      </div>
+                      <div className="text-xs text-muted-foreground font-mono mt-0.5">
+                        {inv.target}
+                      </div>
+                    </button>
+                    <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                      {inv.strongCount > 0 && (
+                        <span className="flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 text-red-500" />
+                          {inv.strongCount} strong
+                        </span>
+                      )}
+                      {inv.possibleCount > 0 && (
+                        <span className="flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 text-amber-500" />
+                          {inv.possibleCount} possible
+                        </span>
+                      )}
+                      {inv.strongCount === 0 && inv.possibleCount === 0 && (
+                        <span className="flex items-center gap-1">
+                          <Shield className="h-3 w-3 text-green-500" />
+                          Clean
+                        </span>
+                      )}
+                      {inv.isPublic && (
+                        <span className="flex items-center gap-1">
+                          <Share2 className="h-3 w-3" />
+                          Shared
+                        </span>
+                      )}
+                      <span>{new Date(inv.savedAt).toLocaleDateString()}</span>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteInvestigation(inv.id)}
+                      className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Candidate Detail Modal */}
       <AnimatePresence>
