@@ -70,8 +70,6 @@ export default function Home() {
   const [screenshots, setScreenshots] = useState<Map<string, string>>(new Map());
   const [savedInvestigations, setSavedInvestigations] = useState<InvestigationSummary[]>([]);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
-  const [loginPassphrase, setLoginPassphrase] = useState("");
-  const [loginError, setLoginError] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
@@ -679,37 +677,9 @@ export default function Home() {
             {twitterAuthError && (
               <div className="text-xs text-red-500 text-center">{twitterAuthError}</div>
             )}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-card px-2 text-muted-foreground">or</span>
-              </div>
-            </div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              setLoginError("");
-              const res = await signIn("credentials", {
-                passphrase: loginPassphrase,
-                redirect: false,
-              });
-              if (res?.error) setLoginError("Invalid passphrase");
-            }}>
-              <div className="space-y-2">
-                <Input
-                  type="password"
-                  placeholder="Passphrase"
-                  value={loginPassphrase}
-                  onChange={(e) => setLoginPassphrase(e.target.value)}
-                  className="h-9"
-                />
-                {loginError && <div className="text-xs text-red-500">{loginError}</div>}
-                <Button type="submit" variant="secondary" className="w-full" size="sm" disabled={!loginPassphrase.trim()}>
-                  Sign in with passphrase
-                </Button>
-              </div>
-            </form>
+            <p className="text-[11px] text-muted-foreground text-center">
+              Requires an Ethos score of 1800 or higher.
+            </p>
             <div className="flex justify-center">
               <ThemeToggle />
             </div>
