@@ -815,46 +815,48 @@ export default function Home() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-border mb-4 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab("scanner")}
-          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-            activeTab === "scanner"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Search className="h-4 w-4" />
-          Scanner
-        </button>
-        <button
-          onClick={() => setActiveTab("yours")}
-          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-            activeTab === "yours"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <History className="h-4 w-4" />
-          Your Scans
-          {yourScansCount > 0 && (
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{yourScansCount}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("all")}
-          className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-            activeTab === "all"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <FolderOpen className="h-4 w-4" />
-          All Scans
-          {savedInvestigations.length > 0 && (
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
-          )}
-        </button>
+      <div className="mb-4 -mx-1 px-1 overflow-x-auto">
+        <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
+          <button
+            onClick={() => setActiveTab("scanner")}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === "scanner"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Search className="h-4 w-4" />
+            Scanner
+          </button>
+          <button
+            onClick={() => setActiveTab("yours")}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === "yours"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <History className="h-4 w-4" />
+            Your Scans
+            {yourScansCount > 0 && (
+              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{yourScansCount}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("all")}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === "all"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <FolderOpen className="h-4 w-4" />
+            All Scans
+            {savedInvestigations.length > 0 && (
+              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Scanner Tab */}
@@ -1143,11 +1145,11 @@ function ScansList({
           <p>{emptyLabel}</p>
         </div>
       ) : (
-        <div className="grid gap-2">
+        <div className="grid gap-2 min-w-0">
           {filtered.map((inv) => (
             <div
               key={inv.id}
-              className={`group flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 transition-colors ${
+              className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card px-3 sm:px-4 py-3 transition-colors ${
                 currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
               }`}
             >
@@ -1169,11 +1171,11 @@ function ScansList({
                 <div className="font-medium truncate">
                   {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
                 </div>
-                <div className="text-xs text-muted-foreground font-mono mt-0.5">
+                <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
                   {inv.target}
                 </div>
               </button>
-              <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+              <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
                 {inv.strongCount > 0 && (
                   <span className="flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3 text-red-500" />
