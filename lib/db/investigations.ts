@@ -118,9 +118,20 @@ export async function saveInvestigation(data: {
   targetName: string | null;
   clusterResult: unknown;
   aiAnalysis: string | null;
+  ownerProfileId: number;
 }): Promise<void> {
   const supabase = getSupabase();
   const result = data.clusterResult as { targetEthos?: { avatarUrl?: string } };
+
+  // On upsert, only stamp owner_profile_id on new rows or legacy rows without
+  // an owner — never overwrite an existing owner.
+  const existingOwner = await getInvestigationOwner(data.id);
+  const ownerToWrite = existingOwner === null ? data.ownerProfileId : existingOwner;
+
+  // Prevent a non-owner from overwriting someone else's investigation.
+  if (existingOwner !== null && existingOwner !== data.ownerProfileId) {
+    throw new Error("Not authorized to modify this investigation");
+  }
 
   const { error } = await supabase
     .from("investigations")
@@ -131,6 +142,7 @@ export async function saveInvestigation(data: {
       target_avatar: result?.targetEthos?.avatarUrl ?? null,
       cluster_result: data.clusterResult,
       ai_analysis: data.aiAnalysis,
+      owner_profile_id: ownerToWrite,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
@@ -138,6 +150,22 @@ export async function saveInvestigation(data: {
     console.error("saveInvestigation error:", error);
     throw new Error(error.message);
   }
+}
+
+/**
+ * Returns the owner_profile_id for an investigation, or null if the
+ * row doesn't exist or has no owner set (legacy rows).
+ */
+export async function getInvestigationOwner(id: string): Promise<number | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("investigations")
+    .select("owner_profile_id")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return null;
+  return data.owner_profile_id ?? null;
 }
 
 export async function deleteInvestigation(id: string): Promise<void> {

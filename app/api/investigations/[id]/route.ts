@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
-import { getInvestigation, deleteInvestigation, shareInvestigation } from "@/lib/db/investigations";
+import { requireAuth, isAuthError } from "@/lib/auth";
+import {
+  getInvestigation,
+  deleteInvestigation,
+  shareInvestigation,
+  getInvestigationOwner,
+} from "@/lib/db/investigations";
 
 // GET /api/investigations/[id] — load one
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
 
   const { id } = await params;
   const investigation = await getInvestigation(id);
@@ -18,28 +23,38 @@ export async function GET(
   return NextResponse.json(investigation);
 }
 
-// DELETE /api/investigations/[id] — delete one
+// DELETE /api/investigations/[id] — delete one (owner only)
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
 
   const { id } = await params;
+  const owner = await getInvestigationOwner(id);
+  // Allow delete if owner matches, or if the row has no owner (legacy)
+  if (owner !== null && owner !== auth.profileId) {
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  }
   await deleteInvestigation(id);
   return NextResponse.json({ ok: true });
 }
 
-// PATCH /api/investigations/[id] — share
+// PATCH /api/investigations/[id] — share (owner only)
 export async function PATCH(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
 
   const { id } = await params;
+  const owner = await getInvestigationOwner(id);
+  if (owner !== null && owner !== auth.profileId) {
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  }
+
   const shareId = await shareInvestigation(id);
   if (!shareId) {
     return NextResponse.json({ error: "Failed to share" }, { status: 500 });

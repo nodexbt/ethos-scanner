@@ -1,12 +1,21 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { runClusterScan } from "@/lib/cluster-scanner";
 
 export const maxDuration = 300; // 5 min timeout for long scans
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
+
+  // Rate limit: 10 scans per user per hour
+  if (!rateLimit(`scan:${auth.profileId}`, 10, 60 * 60 * 1000)) {
+    return new Response(
+      JSON.stringify({ error: "Rate limit exceeded. Try again later." }),
+      { status: 429, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
   const { target } = await req.json();
   if (!target || !/^0x[a-fA-F0-9]{40}$/.test(target)) {

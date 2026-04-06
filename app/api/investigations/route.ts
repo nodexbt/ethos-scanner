@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth";
 import { listInvestigations, saveInvestigation } from "@/lib/db/investigations";
 
 // Cap on the serialized cluster result size (2 MB). Larger payloads are rejected
@@ -8,8 +8,8 @@ const MAX_CLUSTER_RESULT_BYTES = 2 * 1024 * 1024;
 
 // GET /api/investigations — list all
 export async function GET() {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
 
   const investigations = await listInvestigations();
   return NextResponse.json(investigations);
@@ -17,8 +17,8 @@ export async function GET() {
 
 // POST /api/investigations — save/update
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
 
   let body: unknown;
   try {
@@ -65,12 +65,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid aiAnalysis" }, { status: 400 });
   }
 
-  await saveInvestigation({
-    id: data.id,
-    target: data.target.toLowerCase(),
-    targetName: (data.targetName as string | null) ?? null,
-    clusterResult: data.clusterResult,
-    aiAnalysis: (data.aiAnalysis as string | null) ?? null,
-  });
+  try {
+    await saveInvestigation({
+      id: data.id,
+      target: data.target.toLowerCase(),
+      targetName: (data.targetName as string | null) ?? null,
+      clusterResult: data.clusterResult,
+      aiAnalysis: (data.aiAnalysis as string | null) ?? null,
+      ownerProfileId: auth.profileId,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Not authorized")) {
+      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    }
+    console.error("saveInvestigation failed:", err);
+    return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

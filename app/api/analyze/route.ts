@@ -1,10 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// Max base64-decoded size per screenshot (4 MB)
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+// Max number of screenshots per request
+const MAX_SCREENSHOTS = 20;
+// Max prompt text length
+const MAX_PROMPT_CHARS = 50_000;
 
 const SYSTEM_PROMPT = `You are helping draft an Ethos Slash report documenting reputation abuse (e.g. sybil behavior, review-for-review, vouch-for-vouch, or coordinated farming).
 
@@ -55,42 +63,88 @@ Output Requirement:
 - Do not include commentary, explanations, or analysis outside the report itself.`;
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireAuth();
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
+
+  // Rate limit: 20 analyses per user per hour (Claude is expensive)
+  if (!rateLimit(`analyze:${auth.profileId}`, 20, 60 * 60 * 1000)) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded. Try again later." },
+      { status: 429 }
+    );
+  }
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+    return NextResponse.json({ error: "Analysis unavailable" }, { status: 500 });
+  }
+
+  let body: { prompt?: unknown; screenshots?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const { prompt, screenshots } = body;
+
+  if (typeof prompt !== "string") {
+    return NextResponse.json({ error: "Invalid prompt" }, { status: 400 });
+  }
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    return NextResponse.json({ error: "Prompt too large" }, { status: 413 });
+  }
+
+  if (screenshots !== undefined && !Array.isArray(screenshots)) {
+    return NextResponse.json({ error: "Invalid screenshots" }, { status: 400 });
+  }
+  if (Array.isArray(screenshots) && screenshots.length > MAX_SCREENSHOTS) {
+    return NextResponse.json(
+      { error: `Too many screenshots (max ${MAX_SCREENSHOTS})` },
+      { status: 413 }
+    );
   }
 
   try {
-    const { prompt, screenshots } = await req.json();
-
     // Build message content: text + images
     const content: Anthropic.MessageCreateParams["messages"][0]["content"] = [];
-
-    // Add the evidence data as text
     content.push({ type: "text", text: prompt });
 
     // Add screenshots as images
-    if (screenshots && Array.isArray(screenshots)) {
+    if (Array.isArray(screenshots)) {
       for (const screenshot of screenshots) {
-        if (screenshot.dataUrl && screenshot.address) {
-          const match = screenshot.dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-          if (match) {
-            content.push({
-              type: "text",
-              text: `\nX/Twitter search screenshot for wallet ${screenshot.address}:`,
-            });
-            content.push({
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-                data: match[2],
-              },
-            });
-          }
+        if (
+          !screenshot ||
+          typeof screenshot !== "object" ||
+          typeof screenshot.dataUrl !== "string" ||
+          typeof screenshot.address !== "string"
+        ) {
+          continue;
         }
+        const match = screenshot.dataUrl.match(/^data:(image\/(png|jpeg|gif|webp));base64,(.+)$/);
+        if (!match) continue;
+
+        // Validate decoded size (base64 is ~4/3 of binary)
+        const base64 = match[3];
+        const approxBytes = Math.floor((base64.length * 3) / 4);
+        if (approxBytes > MAX_IMAGE_BYTES) {
+          return NextResponse.json(
+            { error: "Screenshot too large (max 4 MB)" },
+            { status: 413 }
+          );
+        }
+
+        content.push({
+          type: "text",
+          text: `\nX/Twitter search screenshot for wallet ${screenshot.address}:`,
+        });
+        content.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+            data: base64,
+          },
+        });
       }
     }
 
@@ -108,7 +162,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ analysis: text });
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Analysis failed";
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    // Log the real error server-side but don't leak it to the client
+    console.error("/api/analyze error:", err);
+    return NextResponse.json({ error: "Analysis failed" }, { status: 500 });
   }
 }

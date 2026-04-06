@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+export interface AuthedUser {
+  profileId: number;
+  twitterUsername: string | null;
+}
+
 /**
  * Parses the ETHOS_PROFILE_ALLOWLIST env var fresh on every call,
  * so allowlist changes take effect immediately (no redeploy required
@@ -19,13 +24,13 @@ function getAllowlist(): number[] {
 
 /**
  * Require a valid, currently-allowlisted session for an API route.
- * Returns null if authorized, or a 401 NextResponse to return directly
- * if unauthorized.
+ * Returns an AuthedUser if authorized, or a NextResponse error to
+ * return directly if unauthorized.
  *
  * Re-checks the allowlist on every call so users removed from the
  * allowlist lose access immediately, even if their JWT is still valid.
  */
-export async function requireAuth(): Promise<NextResponse | null> {
+export async function requireAuth(): Promise<AuthedUser | NextResponse> {
   const session = await getServerSession(authOptions);
   if (!session || !session.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -42,5 +47,13 @@ export async function requireAuth(): Promise<NextResponse | null> {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
-  return null;
+  return {
+    profileId,
+    // @ts-expect-error - twitterUsername added in session callback
+    twitterUsername: session.user.twitterUsername ?? null,
+  };
+}
+
+export function isAuthError(result: AuthedUser | NextResponse): result is NextResponse {
+  return result instanceof NextResponse;
 }
