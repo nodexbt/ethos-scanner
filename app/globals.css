@@ -77,9 +77,6 @@
 
 html {
   background-color: hsl(var(--background));
-  background-image: radial-gradient(circle, var(--dot-color) 0px, var(--dot-color) 1px, transparent 1px);
-  background-size: var(--dot-spacing) var(--dot-spacing);
-  background-position: calc(var(--dot-spacing) / 2) calc(var(--dot-spacing) / 2);
   min-height: 100%;
   scrollbar-gutter: stable;
 }
@@ -91,9 +88,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: transparent;
-  background-image: inherit;
-  background-size: inherit;
-  background-position: inherit;
   min-height: 100vh;
 }
 

@@ -6,6 +6,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
 import { SmoothScroll } from "@/components/smooth-scroll";
+import { Background } from "@/components/background";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,6 +35,7 @@ export default function RootLayout({
       >
         <SessionProvider>
           <ThemeProvider>
+            <Background />
             <SmoothScroll />
             <main className="min-h-screen">{children}</main>
           </ThemeProvider>
