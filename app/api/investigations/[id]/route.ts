@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getInvestigation, deleteInvestigation, shareInvestigation } from "@/lib/db/investigations";
 
 // GET /api/investigations/[id] — load one
@@ -6,6 +7,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
   const investigation = await getInvestigation(id);
   if (!investigation) {
@@ -19,6 +23,9 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
   await deleteInvestigation(id);
   return NextResponse.json({ ok: true });
@@ -29,6 +36,9 @@ export async function PATCH(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
   const shareId = await shareInvestigation(id);
   if (!shareId) {

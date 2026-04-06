@@ -31,6 +31,7 @@ import {
   type ScanProgress,
 } from "@/lib/cluster-scanner";
 import { getAddressLabel } from "@/lib/known-addresses";
+import { safeExternalUrl } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -611,7 +612,7 @@ export default function Home() {
     return (
       <span className="inline-flex items-center gap-1.5">
         {isResolved && funderProfile && (
-          <a href={funderProfile.profileUrl} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
+          <a href={safeExternalUrl(funderProfile.profileUrl)} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
             {name}
           </a>
         )}
@@ -645,9 +646,7 @@ export default function Home() {
   }
 
   // Not logged in
-  const bypassAuth = process.env.NEXT_PUBLIC_BYPASS_AUTH === "true";
-
-  if (!session && !bypassAuth) {
+  if (!session) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <motion.div

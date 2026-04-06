@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { resolveAddressName, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { getAddressLabel } from "@/lib/known-addresses";
+import { safeExternalUrl } from "@/lib/utils";
 
 interface AddressDisplayProps {
   address: string;
@@ -20,7 +21,7 @@ export function AddressDisplay({ address, chain, result }: AddressDisplayProps) 
   return (
     <span className="inline-flex items-center gap-1.5">
       {isResolved && funderProfile && (
-        <a href={funderProfile.profileUrl} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
+        <a href={safeExternalUrl(funderProfile.profileUrl)} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
           {name}
         </a>
       )}

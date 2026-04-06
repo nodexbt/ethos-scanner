@@ -7,6 +7,7 @@ import { ExternalLink, Save, Search, Share2, Copy, ChevronDown, ChevronRight } f
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
+import { safeExternalUrl } from "@/lib/utils";
 
 interface OverviewCardProps {
   result: ClusterScanResult;
@@ -138,7 +139,7 @@ export function OverviewCard({
             <div className="text-xs font-medium text-muted-foreground">Target Ethos Profile</div>
             <div className="flex items-center gap-3">
               {result.targetEthos.avatarUrl && (
-                <a href={result.targetEthos.profileUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                <a href={safeExternalUrl(result.targetEthos.profileUrl)} target="_blank" rel="noopener noreferrer" className="shrink-0">
                   <img
                     src={result.targetEthos.avatarUrl}
                     alt={result.targetEthos.displayName}
@@ -148,7 +149,7 @@ export function OverviewCard({
               )}
               <div className="flex-1 min-w-0">
                 <a
-                  href={result.targetEthos.profileUrl}
+                  href={safeExternalUrl(result.targetEthos.profileUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-medium text-sm hover:underline inline-flex items-center gap-1"

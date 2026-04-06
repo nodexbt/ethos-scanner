@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { requireAuth } from "@/lib/auth";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -56,15 +55,11 @@ Output Requirement:
 - Do not include commentary, explanations, or analysis outside the report itself.`;
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireAuth();
+  if (unauthorized) return unauthorized;
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
-  }
-
-  if (process.env.BYPASS_AUTH !== "true") {
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
   }
 
   try {

@@ -1,20 +1,12 @@
 import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { requireAuth } from "@/lib/auth";
 import { runClusterScan } from "@/lib/cluster-scanner";
 
 export const maxDuration = 300; // 5 min timeout for long scans
 
 export async function POST(req: NextRequest) {
-  if (process.env.BYPASS_AUTH !== "true") {
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return new Response(JSON.stringify({ error: "Not authenticated" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-  }
+  const unauthorized = await requireAuth();
+  if (unauthorized) return unauthorized;
 
   const { target } = await req.json();
   if (!target || !/^0x[a-fA-F0-9]{40}$/.test(target)) {

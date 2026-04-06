@@ -10,6 +10,7 @@ import {
   buildConnectionSummary,
 } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
+import { safeExternalUrl } from "@/lib/utils";
 
 interface CandidateModalProps {
   candidate: ClusterCandidate;
@@ -66,7 +67,7 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
           <div className="flex flex-wrap gap-2">
             {candidate.ethosProfile && (
               <a
-                href={candidate.ethosProfile.profileUrl}
+                href={safeExternalUrl(candidate.ethosProfile.profileUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"

@@ -6,6 +6,7 @@ import { Shield, Loader2, AlertTriangle, ExternalLink, Wallet } from "lucide-rea
 import { type ClusterScanResult, type ClusterCandidate } from "@/lib/cluster-scanner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getAddressLabel } from "@/lib/known-addresses";
+import { safeExternalUrl } from "@/lib/utils";
 import { useParams } from "next/navigation";
 
 export default function SharedInvestigation() {
@@ -213,7 +214,7 @@ export default function SharedInvestigation() {
                     <img src={result.targetEthos.avatarUrl} alt={result.targetEthos.displayName} className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(result.targetEthos.score)}`} />
                   )}
                   <div>
-                    <a href={result.targetEthos.profileUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-sm hover:underline inline-flex items-center gap-1">
+                    <a href={safeExternalUrl(result.targetEthos.profileUrl)} target="_blank" rel="noopener noreferrer" className="font-medium text-sm hover:underline inline-flex items-center gap-1">
                       {result.targetEthos.displayName} <ExternalLink className="h-3 w-3 opacity-50" />
                     </a>
                     <div className="text-xs text-muted-foreground">

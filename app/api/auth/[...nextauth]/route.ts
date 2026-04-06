@@ -3,13 +3,16 @@ import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
 
 // Comma-separated list of allowed Ethos profile IDs (e.g., "123,456,789").
-// Only these profile IDs can log in.
-const ETHOS_ALLOWLIST = (process.env.ETHOS_PROFILE_ALLOWLIST || "")
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean)
-  .map(Number)
-  .filter((n) => Number.isFinite(n));
+// Only these profile IDs can log in. Read fresh on every call so updates
+// take effect on the next JWT refresh without a redeploy.
+function getAllowlist(): number[] {
+  return (process.env.ETHOS_PROFILE_ALLOWLIST || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .map(Number)
+    .filter((n) => Number.isFinite(n));
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -65,7 +68,7 @@ export const authOptions: NextAuthOptions = {
       const ethos = await fetchProfile(username);
       if (!ethos) return "/?error=NoEthosProfile";
 
-      if (ethos.profileId === null || !ETHOS_ALLOWLIST.includes(ethos.profileId)) {
+      if (ethos.profileId === null || !getAllowlist().includes(ethos.profileId)) {
         return "/?error=NotAllowlisted";
       }
       return true;
@@ -85,6 +88,27 @@ export const authOptions: NextAuthOptions = {
           token.ethosAvatarUrl = ethos.avatarUrl;
           token.ethosScore = ethos.score;
           token.ethosProfileUrl = ethos.links?.profile;
+        }
+      }
+
+      // Re-check allowlist on every token refresh so removals take effect immediately
+      if (token.ethosProfileId !== undefined) {
+        if (
+          typeof token.ethosProfileId !== "number" ||
+          !getAllowlist().includes(token.ethosProfileId)
+        ) {
+          // Revoke: clear identity fields so session callback won't populate user
+          delete token.ethosProfileId;
+          delete token.ethosDisplayName;
+          delete token.ethosAvatarUrl;
+          delete token.ethosScore;
+          delete token.ethosProfileUrl;
+          delete token.twitterId;
+          delete token.twitterUsername;
+          token.name = undefined;
+          token.email = undefined;
+          token.picture = undefined;
+          token.sub = undefined;
         }
       }
       return token;

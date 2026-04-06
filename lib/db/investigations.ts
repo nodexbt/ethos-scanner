@@ -171,8 +171,8 @@ export async function shareInvestigation(id: string): Promise<string | null> {
     return existing.share_id;
   }
 
-  // Generate a new share ID
-  const shareId = nanoid(10);
+  // Generate a new share ID (22 chars from 36-char alphabet ≈ 114 bits of entropy)
+  const shareId = nanoid(22);
   const { error } = await supabase
     .from("investigations")
     .update({ share_id: shareId, is_public: true })
