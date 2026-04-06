@@ -744,36 +744,31 @@ export default function Home() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-3 pb-4">
-        <div className="min-w-0">
-          <button
-            onClick={() => {
-              setActiveTab("scanner");
-              setClusterResult(null);
-              setClusterLogs([]);
-              setScanProgress(null);
-              setWalletInput("");
-              setError(null);
-              setCurrentInvestigationId(null);
-              setScreenshots(new Map());
-              window.history.pushState({}, "", "/");
-            }}
-            className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
-          >
-            <Shield className="h-5 w-5 sm:h-6 sm:w-6" />
-            Ethos Scanner
-          </button>
-          <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block mt-1">
-            Discover wallet clusters and sybil accounts via on-chain transaction analysis.
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-3 pb-4">
+        <button
+          onClick={() => {
+            setActiveTab("scanner");
+            setClusterResult(null);
+            setClusterLogs([]);
+            setScanProgress(null);
+            setWalletInput("");
+            setError(null);
+            setCurrentInvestigationId(null);
+            setScreenshots(new Map());
+            window.history.pushState({}, "", "/");
+          }}
+          className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0"
+        >
+          <Shield className="h-4.5 w-4.5 shrink-0" />
+          <span className="font-bold tracking-tight text-base">Ethos Scanner</span>
+        </button>
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
           {session && (
-            <div className="flex items-center gap-1.5 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1 pr-1 sm:pr-2">
+            <div className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg pl-1 pr-1 sm:pr-2">
               {session.user?.image ? (
-                <img src={session.user.image} alt="" className="h-6 w-6 rounded-md shrink-0" />
+                <img src={session.user.image} alt="" className="h-7 w-7 rounded-md shrink-0" />
               ) : (
-                <div className="h-6 w-6 rounded-md bg-muted shrink-0" />
+                <div className="h-7 w-7 rounded-md bg-muted shrink-0" />
               )}
               <div className="hidden sm:flex items-center gap-1.5 text-xs">
                 <span className="font-medium truncate max-w-30">{session.user?.name || "Admin"}</span>
@@ -788,7 +783,7 @@ export default function Home() {
               <button
                 onClick={() => signOut()}
                 title="Sign out"
-                className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
