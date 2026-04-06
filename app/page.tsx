@@ -655,7 +655,7 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-        <Card className="w-full max-w-sm">
+        <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <Shield className="h-10 w-10 mx-auto mb-2" />
             <CardTitle>Ethos Scanner</CardTitle>
