@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Save, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, FileText } from "lucide-react";
+import { ExternalLink, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, Download } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
@@ -11,9 +11,7 @@ import { safeExternalUrl } from "@/lib/utils";
 
 interface OverviewCardProps {
   result: ClusterScanResult;
-  currentInvestigationId: string | null;
   scanning: boolean;
-  onSave: () => void;
   onShare: () => void;
   onRescan: () => void;
   onCopyWallets: () => void;
@@ -22,9 +20,7 @@ interface OverviewCardProps {
 
 export function OverviewCard({
   result,
-  currentInvestigationId,
   scanning,
-  onSave,
   onShare,
   onRescan,
   onCopyWallets,
@@ -63,7 +59,7 @@ export function OverviewCard({
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-          <div className="flex items-center gap-1 flex-wrap justify-end">
+          <div className="flex items-center gap-0.5">
             <Button
               onClick={(e) => {
                 onCopyWallets();
@@ -71,16 +67,25 @@ export function OverviewCard({
                 btn.dataset.copied = "true";
                 setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
               }}
-              size="sm" variant="ghost" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
+              size="sm" variant="ghost"
+              className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
               data-copied="false"
             >
-              <Wallet className="h-3.5 w-3.5 [[data-copied=true]_&]:hidden" />
-              <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Copy Wallets</span>
-              <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+              <Copy className="h-3.5 w-3.5 shrink-0" />
+              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
+                <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
+                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+              </span>
             </Button>
-            <Button onClick={onExport} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
-              <FileText className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Export</span>
+            <Button
+              onClick={onExport}
+              size="sm" variant="ghost"
+              className="group h-7 px-2 text-xs gap-1.5"
+            >
+              <Download className="h-3.5 w-3.5 shrink-0" />
+              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200">
+                Export
+              </span>
             </Button>
             <Button
               onClick={(e) => {
@@ -89,24 +94,24 @@ export function OverviewCard({
                 btn.dataset.copied = "true";
                 setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
               }}
-              size="sm" variant="ghost" className="h-7 text-xs gap-1.5 data-[copied=true]:text-green-500"
+              size="sm" variant="ghost"
+              className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
               data-copied="false"
             >
-              <Share2 className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline [[data-copied=true]_&]:hidden">Share</span>
-              <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+              <Share2 className="h-3.5 w-3.5 shrink-0" />
+              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
+                <span className="[[data-copied=true]_&]:hidden">Share</span>
+                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+              </span>
             </Button>
-            <Button onClick={onSave} size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
-              <Save className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{currentInvestigationId ? "Update" : "Save"}</span>
-            </Button>
+            <div className="w-px h-5 bg-border mx-1" />
             <Button
               onClick={onRescan}
               size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
               disabled={scanning}
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Re-scan</span>
+              Re-scan
             </Button>
           </div>
         </div>
