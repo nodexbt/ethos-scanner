@@ -643,12 +643,30 @@ export default function Home() {
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <Shield className="h-10 w-10 mx-auto mb-2" />
-            <CardTitle>Ethos Sybil Scanner</CardTitle>
+            <CardTitle>Ethos Scanner</CardTitle>
             <CardDescription>
-              Enter passphrase to access the scanner.
+              Sign in to access the scanner.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <Button
+              onClick={() => signIn("twitter", { callbackUrl: "/" })}
+              className="w-full gap-2"
+              size="sm"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+              Sign in with X
+            </Button>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-card px-2 text-muted-foreground">or</span>
+              </div>
+            </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
               setLoginError("");
@@ -667,8 +685,8 @@ export default function Home() {
                   className="h-9"
                 />
                 {loginError && <div className="text-xs text-red-500">{loginError}</div>}
-                <Button type="submit" className="w-full" size="sm" disabled={!loginPassphrase.trim()}>
-                  Sign in
+                <Button type="submit" variant="secondary" className="w-full" size="sm" disabled={!loginPassphrase.trim()}>
+                  Sign in with passphrase
                 </Button>
               </div>
             </form>
