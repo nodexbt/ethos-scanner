@@ -62,9 +62,9 @@ export function Background() {
         disableAnimation={loggedIn}
         enableMouseInteraction={interactive}
         mouseRadius={0.2}
-        colorNum={7.3}
-        waveAmplitude={0.18}
-        waveFrequency={1.8}
+        colorNum={4.8}
+        waveAmplitude={0.24}
+        waveFrequency={5.6}
         waveSpeed={0.01}
       />
     </div>
