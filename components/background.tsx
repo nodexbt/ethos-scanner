@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
@@ -8,34 +8,45 @@ import { useTheme } from "@/components/theme-provider";
 // Dynamically import Dither so WebGL/three.js code never runs server-side
 const Dither = dynamic(() => import("@/components/ui/dither"), { ssr: false });
 
+// Subscribe to the "(pointer: coarse)" media query via useSyncExternalStore
+// so we can safely read it without causing hydration mismatch or setState-in-effect.
+function subscribeToCoarsePointer(callback: () => void): () => void {
+  const mql = window.matchMedia("(pointer: coarse)");
+  mql.addEventListener("change", callback);
+  return () => mql.removeEventListener("change", callback);
+}
+function getCoarsePointerSnapshot(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+function getCoarsePointerServerSnapshot(): boolean {
+  return false;
+}
+
 export function Background() {
   const { data: session, status } = useSession();
   const { theme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const isTouchDevice = useSyncExternalStore(
+    subscribeToCoarsePointer,
+    getCoarsePointerSnapshot,
+    getCoarsePointerServerSnapshot
+  );
 
-  // Avoid hydration mismatch on theme
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted || status === "loading") {
+  if (status === "loading") {
     return null;
   }
 
   const loggedIn = !!session;
+  // Mouse interaction only on login screen AND only on devices with a fine pointer (non-touch)
+  const interactive = !loggedIn && !isTouchDevice;
   const waveColor: [number, number, number] = [0.5, 0.5, 0.5];
 
   return (
     <div
       aria-hidden
-      className="fixed -z-10 pointer-events-none"
+      className="fixed inset-0 -z-10 pointer-events-none"
       style={{
-        // Cover the full visual viewport including mobile safe areas
-        top: "calc(env(safe-area-inset-top, 0px) * -1)",
-        right: "calc(env(safe-area-inset-right, 0px) * -1)",
-        bottom: "calc(env(safe-area-inset-bottom, 0px) * -1)",
-        left: "calc(env(safe-area-inset-left, 0px) * -1)",
-        width: "100vw",
+        // Use 100dvh so the background follows the browser chrome
+        // expanding/collapsing on mobile.
         height: "100dvh",
         // Invert the shader output for light mode (shader is hardcoded to mix from black)
         filter: theme === "light" ? "invert(1) contrast(1.25)" : undefined,
@@ -43,9 +54,10 @@ export function Background() {
     >
       <Dither
         waveColor={waveColor}
-        // Login screen: animated + interactive; after login: static
+        // Login screen on desktop: animated + interactive.
+        // Mobile/tablet or logged in: static, no mouse interaction.
         disableAnimation={loggedIn}
-        enableMouseInteraction={!loggedIn}
+        enableMouseInteraction={interactive}
         mouseRadius={0.2}
         colorNum={7.3}
         waveAmplitude={0.18}

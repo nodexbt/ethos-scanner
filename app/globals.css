@@ -79,6 +79,11 @@ html {
   background-color: hsl(var(--background));
   min-height: 100%;
   scrollbar-gutter: stable;
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
@@ -88,7 +93,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: transparent;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 svg {

@@ -1147,7 +1147,7 @@ function ScansList({
           {filtered.map((inv) => (
             <div
               key={inv.id}
-              className={`group flex items-center gap-4 rounded-lg border border-border px-4 py-3 transition-colors ${
+              className={`group flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 transition-colors ${
                 currentInvestigationId === inv.id ? "border-primary bg-primary/5" : "hover:bg-muted/30"
               }`}
             >
