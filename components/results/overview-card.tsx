@@ -62,33 +62,6 @@ export function OverviewCard({
           <div className="flex items-center gap-0.5">
             <Button
               onClick={(e) => {
-                onCopyWallets();
-                const btn = e.currentTarget;
-                btn.dataset.copied = "true";
-                setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-              }}
-              size="sm" variant="ghost"
-              className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
-              data-copied="false"
-            >
-              <Copy className="h-3.5 w-3.5 shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
-                <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
-                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-              </span>
-            </Button>
-            <Button
-              onClick={onExport}
-              size="sm" variant="ghost"
-              className="group h-7 px-2 text-xs gap-1.5"
-            >
-              <Download className="h-3.5 w-3.5 shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200">
-                Export
-              </span>
-            </Button>
-            <Button
-              onClick={(e) => {
                 onShare();
                 const btn = e.currentTarget;
                 btn.dataset.copied = "true";
@@ -115,7 +88,7 @@ export function OverviewCard({
             </Button>
           </div>
         </div>
-        <CardDescription className="text-xs flex items-center gap-1.5">
+        <CardDescription className="text-xs flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span>Target:</span>
           <button
             onClick={(e) => {
@@ -267,6 +240,36 @@ export function OverviewCard({
             )}
           </div>
         )}
+
+        {/* Secondary actions: data export operations live at the bottom
+            of the card (rather than in the header) so the header stays
+            uncluttered and these utility actions are still easy to find
+            once you've reviewed the results. */}
+        <div className="flex flex-col sm:flex-row gap-2 pt-1">
+          <Button
+            onClick={(e) => {
+              onCopyWallets();
+              const btn = e.currentTarget;
+              btn.dataset.copied = "true";
+              setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+            }}
+            size="sm" variant="outline"
+            className="w-full sm:flex-1 data-[copied=true]:text-green-500 data-[copied=true]:border-green-500/50"
+            data-copied="false"
+          >
+            <Copy className="h-4 w-4 shrink-0" />
+            <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
+            <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+          </Button>
+          <Button
+            onClick={onExport}
+            size="sm" variant="outline"
+            className="w-full sm:flex-1"
+          >
+            <Download className="h-4 w-4 shrink-0" />
+            Export
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
