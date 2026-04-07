@@ -871,8 +871,45 @@ export default function Home() {
       {/* Scanner Tab */}
       {activeTab === "scanner" && (
       <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4">
-        {/* Left column: Input + Log */}
+        {/* Left column: How it works (empty state) + Input + Log */}
         <div className="space-y-4">
+          {/* "How it works" lives above the scan input as the explainer
+              for the tool. Hidden once a scan starts or results exist —
+              past that point it's just noise. */}
+          {!scanning && !hasResults && !loadingCached && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Network className="h-4 w-4" />
+                  How it works
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-muted-foreground">
+                <div className="flex gap-3">
+                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">1</div>
+                  <div>
+                    <div className="font-medium text-foreground">Multi-chain transaction scan</div>
+                    <div className="text-xs">Pulls transfer history across Ethereum, Base, Arbitrum, Optimism, and Polygon.</div>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">2</div>
+                  <div>
+                    <div className="font-medium text-foreground">Signal correlation</div>
+                    <div className="text-xs">Identifies direct transfers, shared funding sources, and CEX deposit patterns.</div>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">3</div>
+                  <div>
+                    <div className="font-medium text-foreground">Cluster scoring</div>
+                    <div className="text-xs">Wallets matching multiple signal types are flagged as strong cluster candidates.</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <ScanInput
             walletInput={walletInput}
             setWalletInput={setWalletInput}
@@ -1060,7 +1097,7 @@ export default function Home() {
 
           {/* Empty state */}
           {!scanning && !hasResults && !loadingCached && (
-            <div className="hidden lg:block space-y-4">
+            <div className="space-y-4">
               {/* Stats */}
               <div className="grid grid-cols-3 gap-3">
                 <Card>
@@ -1171,38 +1208,6 @@ export default function Home() {
                 </Card>
               )}
 
-              {/* How it works */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Network className="h-4 w-4" />
-                    How it works
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-muted-foreground">
-                  <div className="flex gap-3">
-                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">1</div>
-                    <div>
-                      <div className="font-medium text-foreground">Multi-chain transaction scan</div>
-                      <div className="text-xs">Pulls transfer history across Ethereum, Base, Arbitrum, Optimism, and Polygon.</div>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">2</div>
-                    <div>
-                      <div className="font-medium text-foreground">Signal correlation</div>
-                      <div className="text-xs">Identifies direct transfers, shared funding sources, and CEX deposit patterns.</div>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">3</div>
-                    <div>
-                      <div className="font-medium text-foreground">Cluster scoring</div>
-                      <div className="text-xs">Wallets matching multiple signal types are flagged as strong cluster candidates.</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           )}
         </div>
