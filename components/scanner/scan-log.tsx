@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { type LogEntry, type ScanProgress } from "@/lib/cluster-scanner";
@@ -15,7 +15,19 @@ interface ScanLogProps {
 
 export function ScanLog({ logs, scanning, progress, defaultExpanded = true }: ScanLogProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to the bottom whenever new log entries arrive while a
+  // scan is in progress. We scroll the log container itself (not the
+  // window) so the page doesn't jump around. Only runs while scanning
+  // so a user reviewing a finished scan can scroll up freely without
+  // getting yanked back to the bottom.
+  useEffect(() => {
+    if (!scanning || !expanded) return;
+    const el = logContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logs, scanning, expanded]);
 
   if (logs.length === 0) return null;
 
@@ -53,13 +65,15 @@ export function ScanLog({ logs, scanning, progress, defaultExpanded = true }: Sc
       </CardHeader>
       {expanded && (
         <CardContent>
-          <div className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5">
+          <div
+            ref={logContainerRef}
+            className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5"
+          >
             {logs.map((entry, i) => (
               <div key={i} className={getLogColor(entry.level)}>
                 {entry.message}
               </div>
             ))}
-            <div ref={logEndRef} />
           </div>
         </CardContent>
       )}
