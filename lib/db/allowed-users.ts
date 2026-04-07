@@ -42,7 +42,26 @@ async function loadAllowedIds(): Promise<Set<number>> {
     // re-attempt the load.
     return new Set();
   }
-  return new Set((data || []).map((r) => r.profile_id as number));
+  let ids = new Set((data || []).map((r) => r.profile_id as number));
+
+  // Self-heal during the env→DB migration: if the table is empty but the
+  // legacy env var is set, seed it now and re-read. This ensures existing
+  // users with valid JWTs don't get bounced just because they haven't
+  // signed in since the migration deployed.
+  if (ids.size === 0 && (process.env.ETHOS_PROFILE_ALLOWLIST || "").trim()) {
+    try {
+      const seeded = await seedFromEnvIfMissing();
+      if (seeded > 0) {
+        const { data: data2 } = await supabase
+          .from("allowed_users")
+          .select("profile_id");
+        ids = new Set((data2 || []).map((r) => r.profile_id as number));
+      }
+    } catch (err) {
+      console.error("loadAllowedIds self-heal failed:", err);
+    }
+  }
+  return ids;
 }
 
 /**

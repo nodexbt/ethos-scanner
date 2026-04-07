@@ -91,7 +91,10 @@ export default function Home() {
   const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
+    fetch("/api/investigations")
+      .then((r) => r.json())
+      .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
+      .catch(() => {});
 
     // Check if URL has a wallet address to load
     const path = window.location.pathname;
@@ -292,7 +295,10 @@ export default function Home() {
   };
 
   const refreshInvestigations = () => {
-    fetch("/api/investigations").then((r) => r.json()).then(setSavedInvestigations).catch(() => {});
+    fetch("/api/investigations")
+      .then((r) => r.json())
+      .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
+      .catch(() => {});
   };
 
   const handleSaveInvestigation = async () => {
