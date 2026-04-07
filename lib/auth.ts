@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { isAdminProfileId } from "@/lib/admin";
+import { isAllowed } from "@/lib/db/allowed-users";
 
 export interface AuthedUser {
   profileId: number;
@@ -10,27 +11,13 @@ export interface AuthedUser {
 }
 
 /**
- * Parses the ETHOS_PROFILE_ALLOWLIST env var fresh on every call,
- * so allowlist changes take effect immediately (no redeploy required
- * if you update the env var at runtime) and sessions are re-validated
- * on every request.
- */
-function getAllowlist(): number[] {
-  return (process.env.ETHOS_PROFILE_ALLOWLIST || "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter((n) => Number.isFinite(n));
-}
-
-/**
  * Require a valid, currently-allowlisted session for an API route.
  * Returns an AuthedUser if authorized, or a NextResponse error to
  * return directly if unauthorized.
  *
- * Re-checks the allowlist on every call so users removed from the
- * allowlist lose access immediately, even if their JWT is still valid.
+ * Re-checks the DB allowlist on every call (via short-lived cache in
+ * lib/db/allowed-users) so users removed from the allowlist lose access
+ * within ~10 seconds, even if their JWT is still valid.
  */
 export async function requireAuth(): Promise<AuthedUser | NextResponse> {
   const session = await getServerSession(authOptions);
@@ -44,8 +31,7 @@ export async function requireAuth(): Promise<AuthedUser | NextResponse> {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
-  const allowlist = getAllowlist();
-  if (!allowlist.includes(profileId)) {
+  if (!(await isAllowed(profileId))) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
@@ -55,6 +41,18 @@ export async function requireAuth(): Promise<AuthedUser | NextResponse> {
     twitterUsername: session.user.twitterUsername ?? null,
     isAdmin: isAdminProfileId(profileId),
   };
+}
+
+/**
+ * Like requireAuth, but additionally requires the caller to be an admin.
+ */
+export async function requireAdmin(): Promise<AuthedUser | NextResponse> {
+  const result = await requireAuth();
+  if (result instanceof NextResponse) return result;
+  if (!result.isAdmin) {
+    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  }
+  return result;
 }
 
 export function isAuthError(result: AuthedUser | NextResponse): result is NextResponse {

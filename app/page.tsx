@@ -28,7 +28,9 @@ import {
   Network,
   ArrowRight,
   LogOut,
+  ShieldCheck,
 } from "lucide-react";
+import Link from "next/link";
 import {
   type ClusterScanResult,
   type ClusterCandidate,
@@ -793,6 +795,15 @@ export default function Home() {
                   </span>
                 )}
               </div>
+              {isAdmin && (
+                <Link
+                  href="/admin/users"
+                  title="Admin: manage allowlist"
+                  className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                </Link>
+              )}
               <button
                 onClick={() => signOut()}
                 title="Sign out"

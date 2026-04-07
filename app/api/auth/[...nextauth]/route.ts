@@ -2,17 +2,23 @@ import NextAuth, { type NextAuthOptions } from "next-auth";
 import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
 import { isAdminProfileId } from "@/lib/admin";
+import { isAllowed, seedFromEnvIfMissing } from "@/lib/db/allowed-users";
 
-// Comma-separated list of allowed Ethos profile IDs (e.g., "123,456,789").
-// Only these profile IDs can log in. Read fresh on every call so updates
-// take effect on the next JWT refresh without a redeploy.
-function getAllowlist(): number[] {
-  return (process.env.ETHOS_PROFILE_ALLOWLIST || "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter((n) => Number.isFinite(n));
+// Run the env→DB seed at most once per process. The seeded rows make the
+// transition from ETHOS_PROFILE_ALLOWLIST to the DB-backed allowlist
+// invisible to existing users — anyone who could log in before the
+// migration can still log in after.
+let seededThisProcess = false;
+async function ensureSeeded() {
+  if (seededThisProcess) return;
+  seededThisProcess = true;
+  try {
+    await seedFromEnvIfMissing();
+  } catch (err) {
+    // Don't block sign-in on seed failure — `isAllowed` will fall back
+    // to whatever's already in the DB.
+    console.error("ensureSeeded failed:", err);
+  }
 }
 
 export const authOptions: NextAuthOptions = {
@@ -69,7 +75,9 @@ export const authOptions: NextAuthOptions = {
       const ethos = await fetchProfile(username);
       if (!ethos) return "/?error=NoEthosProfile";
 
-      if (ethos.profileId === null || !getAllowlist().includes(ethos.profileId)) {
+      await ensureSeeded();
+
+      if (ethos.profileId === null || !(await isAllowed(ethos.profileId))) {
         return "/?error=NotAllowlisted";
       }
       return true;
@@ -92,12 +100,14 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      // Re-check allowlist on every token refresh so removals take effect immediately
+      // Re-check allowlist on every token refresh so removals take effect.
+      // (requireAuth() also re-checks on every protected request, so this
+      // is the second line of defense, not the only one.)
       if (token.ethosProfileId !== undefined) {
-        if (
-          typeof token.ethosProfileId !== "number" ||
-          !getAllowlist().includes(token.ethosProfileId)
-        ) {
+        const stillAllowed =
+          typeof token.ethosProfileId === "number" &&
+          (await isAllowed(token.ethosProfileId));
+        if (!stillAllowed) {
           // Revoke: clear identity fields so session callback won't populate user
           delete token.ethosProfileId;
           delete token.ethosDisplayName;
