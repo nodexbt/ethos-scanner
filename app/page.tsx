@@ -163,6 +163,7 @@ export default function Home() {
     setLogExpanded(true);
 
     let scanResult: ClusterScanResult | null = null;
+    let scanDurationMs: number | null = null;
 
     try {
       const resp = await fetch("/api/scan", {
@@ -203,7 +204,13 @@ export default function Home() {
             } else if (msg.type === "progress") {
               setScanProgress(msg.data);
             } else if (msg.type === "result") {
-              const result = msg.data as ClusterScanResult;
+              // Pull off scanDurationMs before storing in state — it's
+              // metadata for the save call, not part of the cluster
+              // result that gets persisted/displayed.
+              const { scanDurationMs: dur, ...rest } = msg.data as ClusterScanResult & {
+                scanDurationMs?: number;
+              };
+              const result = rest as ClusterScanResult;
               result.strongCluster.forEach((c) => {
                 c.signalTypes = new Set(c.signalTypes as unknown as string[]);
               });
@@ -212,6 +219,7 @@ export default function Home() {
               });
               setClusterResult(result);
               scanResult = result;
+              if (typeof dur === "number") scanDurationMs = dur;
             } else if (msg.type === "error") {
               setError(msg.data);
             }
@@ -233,6 +241,7 @@ export default function Home() {
             targetName: (scanResult as ClusterScanResult).targetEthos?.displayName ?? null,
             clusterResult: scanResult,
             aiAnalysis: null,
+            scanDurationMs,
           }),
         });
         setCurrentInvestigationId(id);

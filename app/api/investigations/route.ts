@@ -167,6 +167,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid aiAnalysis" }, { status: 400 });
   }
 
+  // scan_duration_ms is optional and only set when the client is
+  // saving fresh scan results (not when manually editing). Sanity-cap
+  // to 10 minutes so a wildly wrong value can't poison the rolling
+  // average — real scans are 30s-3min.
+  let scanDurationMs: number | null = null;
+  if (data.scanDurationMs != null) {
+    if (typeof data.scanDurationMs !== "number" || !Number.isFinite(data.scanDurationMs)) {
+      return NextResponse.json({ error: "Invalid scanDurationMs" }, { status: 400 });
+    }
+    if (data.scanDurationMs > 0 && data.scanDurationMs < 10 * 60 * 1000) {
+      scanDurationMs = Math.round(data.scanDurationMs);
+    }
+  }
+
   try {
     await saveInvestigation({
       id: data.id,
@@ -175,6 +189,7 @@ export async function POST(req: NextRequest) {
       clusterResult: data.clusterResult,
       aiAnalysis: (data.aiAnalysis as string | null) ?? null,
       ownerProfileId: auth.profileId,
+      scanDurationMs,
     });
   } catch (err) {
     if (err instanceof Error && err.message.includes("Not authorized")) {

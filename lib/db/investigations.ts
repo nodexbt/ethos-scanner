@@ -123,6 +123,7 @@ export async function saveInvestigation(data: {
   clusterResult: unknown;
   aiAnalysis: string | null;
   ownerProfileId: number;
+  scanDurationMs?: number | null;
 }): Promise<void> {
   const supabase = getSupabase();
   const result = data.clusterResult as { targetEthos?: { avatarUrl?: string } };
@@ -150,6 +151,11 @@ export async function saveInvestigation(data: {
       // last_scanned_by is always overwritten with the current user, unlike
       // owner_profile_id which is sticky to the original creator.
       last_scanned_by_profile_id: data.ownerProfileId,
+      // scan_duration_ms is also always overwritten — the most recent
+      // scan's timing is the most relevant for the rolling baseline.
+      // Only write when we have a value; leave column untouched if not
+      // (preserves the previous duration on legacy upserts).
+      ...(data.scanDurationMs != null && { scan_duration_ms: data.scanDurationMs }),
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
@@ -219,4 +225,52 @@ export async function shareInvestigation(id: string): Promise<string | null> {
   }
 
   return shareId;
+}
+
+/** Cold-start fallback used when there isn't enough scan history yet
+    to compute a meaningful rolling average. Tuned to a typical scan
+    based on early observations; gets replaced once history accumulates. */
+const COLD_START_BASELINE_MS = 90_000;
+const ROLLING_AVERAGE_WINDOW = 20;
+const MIN_SAMPLES_FOR_AVERAGE = 5;
+
+/**
+ * Returns the rolling average duration of recent scans, used by the
+ * progress estimator to give the user a stable, time-based countdown
+ * instead of guessing from per-step rate. Falls back to a hardcoded
+ * baseline when there aren't enough samples to average reliably.
+ *
+ * Caches the result for 60 seconds per process so a burst of scans
+ * doesn't hammer the DB on every start. Cache is process-local; that's
+ * fine because the average changes slowly and stale-by-a-minute is
+ * better than fresh-but-rate-limited.
+ */
+let baselineCache: { value: number; expires: number } | null = null;
+const BASELINE_CACHE_TTL_MS = 60_000;
+
+export async function getRecentScanAverageMs(): Promise<number> {
+  const now = Date.now();
+  if (baselineCache && baselineCache.expires > now) {
+    return baselineCache.value;
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("investigations")
+    .select("scan_duration_ms")
+    .not("scan_duration_ms", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(ROLLING_AVERAGE_WINDOW);
+
+  let value = COLD_START_BASELINE_MS;
+  if (!error && data && data.length >= MIN_SAMPLES_FOR_AVERAGE) {
+    const sum = data.reduce(
+      (acc, row) => acc + ((row.scan_duration_ms as number) ?? 0),
+      0
+    );
+    value = Math.round(sum / data.length);
+  }
+
+  baselineCache = { value, expires: now + BASELINE_CACHE_TTL_MS };
+  return value;
 }

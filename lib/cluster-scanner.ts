@@ -336,8 +336,9 @@ async function scanNetwork(
   stepDone?.(`${network}: Fetched transactions`);
 
   if (txs.length === 0) {
-    // Mark remaining 6 steps done for this network
-    for (let i = 0; i < STEPS_PER_NETWORK - 1; i++) stepDone?.(`${network}: Skipped (no txs)`);
+    // Nothing to analyze on this chain — emit one progress ping with
+    // the skip phase label so the user sees it in the log.
+    stepDone?.(`${network}: Skipped (no txs)`);
     return {
       directWallets: new Map(),
       candidates: new Map(),
@@ -616,21 +617,35 @@ async function verifyCexDepositAddresses(
 // --- Main Entry Point ---
 
 export interface ScanProgress {
-  stepsCompleted: number;
-  totalSteps: number;
-  percent: number;
+  /** Wall-clock ms since the scan started. Monotonic. */
   elapsed: number;
-  estimatedRemaining: number | null;
+  /** Total expected wall-clock ms based on the rolling average of
+      recent scan durations. Stable for the lifetime of one scan. */
+  totalEstimatedMs: number;
+  /** Remaining wall-clock ms = totalEstimatedMs - elapsed, floored at
+      a small minimum so we never show "0s left" while scanning. */
+  estimatedRemaining: number;
+  /** Percent complete derived from elapsed vs totalEstimatedMs.
+      Capped at 99 while scanning so the bar doesn't read "100%"
+      before the result is ready. */
+  percent: number;
+  /** Human-readable phase label for the most recent step. */
   phase: string;
 }
 
-const STEPS_PER_NETWORK = 7;
-const ETHOS_STEPS = 1;
+/** Floor for the displayed remaining time while scanning. Prevents
+    "0s left" from appearing if the actual scan overruns the baseline. */
+const MIN_REMAINING_MS = 1_000;
 
 export async function runClusterScan(
   targetAddress: string,
   onLog?: (entry: LogEntry) => void,
-  onProgress?: (progress: ScanProgress) => void
+  onProgress?: (progress: ScanProgress) => void,
+  /** Rolling-average baseline duration in ms, fetched by the caller
+      from recent scan history. Lifetime of one scan; never updated
+      mid-scan. The estimator becomes a pure elapsed-vs-baseline
+      countdown using this value — no per-step rate calculations. */
+  baselineMs: number = 90_000
 ): Promise<ClusterScanResult> {
   const logs: LogEntry[] = [];
   const log = (level: LogLevel, message: string) => {
@@ -639,26 +654,24 @@ export async function runClusterScan(
     onLog?.(entry);
   };
 
-  const totalNetworks = CHAINS.length;
-  const totalSteps = totalNetworks * STEPS_PER_NETWORK + ETHOS_STEPS;
-  const progress = { steps: 0, start: Date.now() };
+  const start = Date.now();
 
   function emitProgress(phase: string) {
-    const elapsed = Date.now() - progress.start;
-    const rate = progress.steps > 0 ? elapsed / progress.steps : 0;
-    const remaining = progress.steps > 0 ? Math.round(rate * (totalSteps - progress.steps)) : null;
+    const elapsed = Date.now() - start;
+    const remaining = Math.max(MIN_REMAINING_MS, baselineMs - elapsed);
+    const percent = Math.min(99, Math.round((elapsed / baselineMs) * 100));
     onProgress?.({
-      stepsCompleted: progress.steps,
-      totalSteps,
-      percent: Math.round((progress.steps / totalSteps) * 100),
       elapsed,
+      totalEstimatedMs: baselineMs,
       estimatedRemaining: remaining,
+      percent,
       phase,
     });
   }
 
+  // stepDone is now just "something happened — ping the client with a
+  // fresh phase label." The progress math doesn't care which step.
   function stepDone(phase: string) {
-    progress.steps++;
     emitProgress(phase);
   }
 
@@ -676,8 +689,9 @@ export async function runClusterScan(
         return { chain, result, error: null };
       } catch (err) {
         log("error", `[${chain.name}] Network scan failed: ${err instanceof Error ? err.message : String(err)}`);
-        // Mark remaining steps for this network as done
-        for (let i = 0; i < STEPS_PER_NETWORK; i++) stepDone(chain.name);
+        // Ping the client with the failure phase label; the bar/ETA
+        // are time-based now and don't need any per-network credit.
+        stepDone(`${chain.name}: Network failed`);
         return { chain, result: null, error: err };
       }
     },
@@ -1084,7 +1098,7 @@ export async function runClusterScan(
     log("info", `No shared EOA destinations found between cluster members`);
   }
 
-  const totalElapsed = Date.now() - progress.start;
+  const totalElapsed = Date.now() - start;
   const mins = Math.floor(totalElapsed / 60000);
   const secs = Math.round((totalElapsed % 60000) / 1000);
   const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
