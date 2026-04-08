@@ -215,19 +215,21 @@ After scoring, candidates are deduplicated by Ethos profile ID — if two wallet
 
 ## Example output
 
-> *Screenshots to be added — capture each from a real scan and drop into `docs/screenshots/` with the filenames below.*
+**Scan in progress** — <img width="1490" height="1082" alt="image" src="https://github.com/user-attachments/assets/fb0940e2-0029-4d60-802f-c6829ad0a18b" />
 
-**Scan in progress** — `docs/screenshots/scan-progress.png`
 The scan log streams from server to client over a chunked HTTP response. Each per-chain stage logs into the live feed and the progress bar moves at exactly real-time pace based on a rolling-average baseline of recent scans.
 
-**Cluster overview** — `docs/screenshots/overview.png`
+**Cluster overview** — <img width="1828" height="1892" alt="image" src="https://github.com/user-attachments/assets/2df0f2a3-c250-4a3f-b244-a6178b8997d0" />
+
 The result card shows network stats, target Ethos profile, key findings with linked profile names, target's first funders per chain, and one-click copy/export of all cluster wallet addresses.
 
-**Strong cluster card** — `docs/screenshots/strong-cluster.png`
+**Strong cluster card** — <img width="1430" height="858" alt="image" src="https://github.com/user-attachments/assets/a354105e-db05-4451-9084-3c4ebf1e96ac" />
+
 A flagged profile with its Ethos identity, network breakdown, signal list, and on-chain evidence. Each signal shows the weight and the specific detail that triggered it.
 
-**AI-drafted slash report** — `docs/screenshots/slash-report.png`
+**AI-drafted slash report generation prompt** — 
 Optional one-click evidence drafting using Claude. The model is given the structured cluster data plus any screenshots the investigator has uploaded as additional evidence, and produces a neutral, structured report the investigator reviews before posting.
+
 
 ---
 
