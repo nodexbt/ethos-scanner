@@ -271,75 +271,14 @@ A portfolio README without a "limitations" section is dishonest. Here's what thi
 
 ---
 
-## Setup
 
-This is an internal tool, not a packaged OSS project. The instructions below are enough to clone-and-run if you have access to the required services.
-
-### Prerequisites
-
-- Node.js 20+
-- A Supabase project (free tier is fine)
-- An Alchemy API key with access to Base, Ethereum, Arbitrum, Optimism, and Polygon mainnets
-- A Twitter OAuth v2 app (client ID + secret, callback URL configured)
-- An Anthropic API key (only required for the AI evidence drafting feature)
-
-### Environment variables
-
-```env
-# Supabase
-SUPABASE_URL=
-SUPABASE_SERVICE_KEY=
-
-# Alchemy
-ALCHEMY_API_KEY=
-
-# NextAuth
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=
-
-# Twitter OAuth v2
-TWITTER_CLIENT_ID=
-TWITTER_CLIENT_SECRET=
-
-# Anthropic (optional — only for AI evidence drafting)
-ANTHROPIC_API_KEY=
-
-# Admins (comma-separated Ethos profile IDs)
-ETHOS_ADMIN_PROFILE_IDS=
-```
-
-### Run the migrations
-
-In the Supabase SQL editor, run the migrations in order:
-
-```bash
-supabase/migrations/001_allowed_users.sql
-supabase/migrations/002_scan_duration.sql
-```
-
-### Add yourself to the allowlist
-
-```sql
-insert into allowed_users (profile_id, added_by)
-values (<your-ethos-profile-id>, <your-ethos-profile-id>);
-```
-
-### Run
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) and sign in with the Twitter account that owns the Ethos profile you allowlisted.
-
----
 
 ## Acknowledgments
 
-Built primarily with [Claude](https://claude.com/claude-code) (Anthropic's Claude Code). The vast majority of the code in this repository was written collaboratively with Claude — the planning, architecture decisions, signal weights, and most of the implementation came out of long iterative sessions where I described what I wanted and we figured out the right approach together. It's the most productive way I've ever built anything.
+Code written primarily by Claude Code. Planning, architectural and design decisions made by me.
 
-Thanks to the [Ethos Network](https://ethos.network) team for letting me build this internally and for the public API that makes the social signal correlation possible.
+I am considering to make this tool public for all Ethos users to conduct their own investigations.
+
 
 ---
 
