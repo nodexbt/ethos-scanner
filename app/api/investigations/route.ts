@@ -97,22 +97,33 @@ export async function GET() {
 
   const investigations = await listInvestigations();
 
-  const uniqueIds = [
-    ...new Set(
-      investigations
-        .map((inv) => inv.lastScannedByProfileId)
-        .filter((id): id is number => id !== null)
-    ),
-  ];
-  const resolved = await resolveProfiles(uniqueIds);
+  // Scanner attribution is admin-only — non-admins should not see who scanned
+  // a wallet. Skip the resolve step entirely for non-admins so we don't leak
+  // profile IDs over the wire either.
+  const resolved = auth.isAdmin
+    ? await resolveProfiles([
+        ...new Set(
+          investigations
+            .map((inv) => inv.lastScannedByProfileId)
+            .filter((id): id is number => id !== null)
+        ),
+      ])
+    : null;
 
-  const enriched = investigations.map((inv) => ({
-    ...inv,
-    lastScannedBy:
-      inv.lastScannedByProfileId !== null
-        ? resolved.get(inv.lastScannedByProfileId) ?? null
-        : null,
-  }));
+  const enriched = investigations.map((inv) => {
+    const { lastScannedByProfileId, ...rest } = inv;
+    if (!auth.isAdmin) {
+      return { ...rest, lastScannedByProfileId: null, lastScannedBy: null };
+    }
+    return {
+      ...rest,
+      lastScannedByProfileId,
+      lastScannedBy:
+        lastScannedByProfileId !== null
+          ? resolved!.get(lastScannedByProfileId) ?? null
+          : null,
+    };
+  });
 
   return NextResponse.json(enriched);
 }
