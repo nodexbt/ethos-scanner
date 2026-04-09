@@ -1005,8 +1005,8 @@ export default function Home() {
                 result={clusterResult}
                 scanning={scanning}
                 onShare={() => {
-                  const url = `${window.location.origin}/scan/${clusterResult.target}`;
-                  navigator.clipboard.writeText(url);
+                  const id = currentInvestigationId || `scan-${clusterResult.target}`;
+                  handleShareInvestigation(id);
                 }}
                 onRescan={() => runFreshScan(clusterResult.target)}
                 onCopyWallets={() => {

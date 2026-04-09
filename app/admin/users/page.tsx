@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Trash2, AlertTriangle, Shield } from "lucide-react";
+import DecryptedText from "@/components/ui/decrypted-text";
 
 interface AllowedUser {
   profileId: number;
@@ -137,7 +138,26 @@ export default function AdminUsersPage() {
 
   return (
     <div className="min-h-screen p-4 sm:p-6 max-w-4xl mx-auto">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-2">
+        <Link
+          href="/"
+          className="group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors min-w-0"
+        >
+          <Shield className="h-4.5 w-4.5 shrink-0" />
+          <DecryptedText
+            text="Ethos Scanner"
+            speed={40}
+            maxIterations={12}
+            sequential
+            revealDirection="start"
+            animateOn="hover"
+            replayInterval={30000}
+            useOriginalCharsOnly={false}
+            parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
+            className="text-foreground"
+            encryptedClassName="text-muted-foreground"
+          />
+        </Link>
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"

@@ -12,10 +12,14 @@ import { safeExternalUrl } from "@/lib/utils";
 interface OverviewCardProps {
   result: ClusterScanResult;
   scanning: boolean;
-  onShare: () => void;
-  onRescan: () => void;
-  onCopyWallets: () => void;
-  onExport: () => void;
+  // Action handlers are all optional. The component renders the matching
+  // button only when the handler is provided, which lets read-only contexts
+  // (e.g. the public /s/[shareId] page) reuse the card without owning a
+  // share/rescan/export flow.
+  onShare?: () => void;
+  onRescan?: () => void;
+  onCopyWallets?: () => void;
+  onExport?: () => void;
 }
 
 export function OverviewCard({
@@ -59,34 +63,40 @@ export function OverviewCard({
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-          <div className="flex items-center gap-0.5">
-            <Button
-              onClick={(e) => {
-                onShare();
-                const btn = e.currentTarget;
-                btn.dataset.copied = "true";
-                setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-              }}
-              size="sm" variant="ghost"
-              className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
-              data-copied="false"
-            >
-              <Share2 className="h-3.5 w-3.5 shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
-                <span className="[[data-copied=true]_&]:hidden">Share</span>
-                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-              </span>
-            </Button>
-            <div className="w-px h-5 bg-border mx-1" />
-            <Button
-              onClick={onRescan}
-              size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
-              disabled={scanning}
-            >
-              <Search className="h-3.5 w-3.5" />
-              Re-scan
-            </Button>
-          </div>
+          {(onShare || onRescan) && (
+            <div className="flex items-center gap-0.5">
+              {onShare && (
+                <Button
+                  onClick={(e) => {
+                    onShare();
+                    const btn = e.currentTarget;
+                    btn.dataset.copied = "true";
+                    setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+                  }}
+                  size="sm" variant="ghost"
+                  className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
+                  data-copied="false"
+                >
+                  <Share2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
+                    <span className="[[data-copied=true]_&]:hidden">Share</span>
+                    <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+                  </span>
+                </Button>
+              )}
+              {onShare && onRescan && <div className="w-px h-5 bg-border mx-1" />}
+              {onRescan && (
+                <Button
+                  onClick={onRescan}
+                  size="sm" variant="ghost" className="h-7 text-xs gap-1.5"
+                  disabled={scanning}
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Re-scan
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         <CardDescription className="text-xs flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span>Target:</span>
@@ -245,31 +255,37 @@ export function OverviewCard({
             of the card (rather than in the header) so the header stays
             uncluttered and these utility actions are still easy to find
             once you've reviewed the results. */}
-        <div className="flex flex-col sm:flex-row gap-2 pt-1">
-          <Button
-            onClick={(e) => {
-              onCopyWallets();
-              const btn = e.currentTarget;
-              btn.dataset.copied = "true";
-              setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-            }}
-            size="sm" variant="outline"
-            className="w-full sm:flex-1 data-[copied=true]:text-green-500 data-[copied=true]:border-green-500/50"
-            data-copied="false"
-          >
-            <Copy className="h-4 w-4 shrink-0" />
-            <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
-            <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-          </Button>
-          <Button
-            onClick={onExport}
-            size="sm" variant="outline"
-            className="w-full sm:flex-1"
-          >
-            <Download className="h-4 w-4 shrink-0" />
-            Export
-          </Button>
-        </div>
+        {(onCopyWallets || onExport) && (
+          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+            {onCopyWallets && (
+              <Button
+                onClick={(e) => {
+                  onCopyWallets();
+                  const btn = e.currentTarget;
+                  btn.dataset.copied = "true";
+                  setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
+                }}
+                size="sm" variant="outline"
+                className="w-full sm:flex-1 data-[copied=true]:text-green-500 data-[copied=true]:border-green-500/50"
+                data-copied="false"
+              >
+                <Copy className="h-4 w-4 shrink-0" />
+                <span className="[[data-copied=true]_&]:hidden">Copy Wallets</span>
+                <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
+              </Button>
+            )}
+            {onExport && (
+              <Button
+                onClick={onExport}
+                size="sm" variant="outline"
+                className="w-full sm:flex-1"
+              >
+                <Download className="h-4 w-4 shrink-0" />
+                Export
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

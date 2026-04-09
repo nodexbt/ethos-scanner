@@ -6,14 +6,19 @@ import { getScoreBorderColor, buildConnectionSummary } from "@/lib/scan-utils";
 interface CandidateCardProps {
   candidate: ClusterCandidate;
   result: ClusterScanResult;
-  onClick: () => void;
+  // Optional — when omitted (e.g. on the public share page) the card renders
+  // as a static read-only block instead of a clickable modal trigger.
+  onClick?: () => void;
 }
 
 export function CandidateCard({ candidate, result, onClick }: CandidateCardProps) {
+  const interactive = !!onClick;
   return (
     <div
       onClick={onClick}
-      className="rounded-lg border border-border p-3 space-y-2.5 cursor-pointer hover:bg-muted/30 transition-colors"
+      className={`rounded-lg border border-border p-3 space-y-2.5 ${
+        interactive ? "cursor-pointer hover:bg-muted/30 transition-colors" : ""
+      }`}
     >
       <div className="flex items-start gap-3">
         {candidate.ethosProfile?.avatarUrl && (
