@@ -24,9 +24,33 @@ const ibmPlexMono = IBM_Plex_Mono({
   weight: ["400", "500", "600", "700"],
 });
 
+// metadataBase is required for resolving relative OG/Twitter image URLs into
+// absolute ones. Prefer an explicit NEXT_PUBLIC_SITE_URL when set, otherwise
+// fall back to the Vercel-provided production URL, and finally to localhost
+// for development. Without this, social crawlers would see localhost URLs.
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "http://localhost:3000");
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Ethos Scanner",
-  description: "Look up Ethos Network profiles by X username or EVM address",
+  description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+  openGraph: {
+    title: "Ethos Scanner",
+    description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+    type: "website",
+    siteName: "Ethos Scanner",
+    // images is auto-populated by app/opengraph-image.tsx — Next 16 picks it
+    // up from the file convention, so we don't list it explicitly here.
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Ethos Scanner",
+    description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+  },
 };
 
 export const viewport: Viewport = {
