@@ -8,6 +8,7 @@ import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
+import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
 interface OverviewCardProps {
   result: ClusterScanResult;
@@ -165,6 +166,7 @@ export function OverviewCard({
                   className="font-medium text-sm hover:underline inline-flex items-center gap-1"
                 >
                   {result.targetEthos.displayName}
+                  {result.targetEthos.humanVerified && <HumanVerifiedBadge />}
                   <ExternalLink className="h-3 w-3 opacity-50" />
                 </a>
                 <div className="text-xs text-muted-foreground">

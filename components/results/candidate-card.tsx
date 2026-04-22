@@ -2,6 +2,7 @@
 
 import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, buildConnectionSummary } from "@/lib/scan-utils";
+import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
 interface CandidateCardProps {
   candidate: ClusterCandidate;
@@ -31,8 +32,9 @@ export function CandidateCard({ candidate, result, onClick }: CandidateCardProps
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-sm">
+              <span className="font-medium text-sm inline-flex items-center gap-1">
                 {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 10)}...${candidate.address.slice(-6)}`}
+                {candidate.ethosProfile?.humanVerified && <HumanVerifiedBadge />}
               </span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                 candidate.confidence === "high" ? "bg-red-500 text-white" : "bg-amber-500 text-white"

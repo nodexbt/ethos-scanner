@@ -11,6 +11,7 @@ import {
 } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
+import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
 interface CandidateModalProps {
   candidate: ClusterCandidate;
@@ -46,8 +47,9 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
             />
           )}
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-lg">
+            <div className="font-semibold text-lg inline-flex items-center gap-1.5">
               {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 12)}...${candidate.address.slice(-6)}`}
+              {candidate.ethosProfile?.humanVerified && <HumanVerifiedBadge size={16} />}
             </div>
             <div className="text-sm text-muted-foreground">
               {candidate.ethosProfile?.username && `@${candidate.ethosProfile.username} · `}

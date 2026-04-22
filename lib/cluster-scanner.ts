@@ -80,6 +80,7 @@ export interface ClusterCandidate {
     avatarUrl: string;
     score: number;
     profileUrl: string;
+    humanVerified: boolean;
   };
   networks: string[];
 }
@@ -93,9 +94,10 @@ export interface ClusterScanResult {
     avatarUrl: string;
     score: number;
     profileUrl: string;
+    humanVerified: boolean;
   };
   targetFirstFunders: FirstFunderInfo[];
-  funderProfiles: Record<string, { displayName: string; username: string | null; avatarUrl: string; score: number; profileUrl: string }>;
+  funderProfiles: Record<string, { displayName: string; username: string | null; avatarUrl: string; score: number; profileUrl: string; humanVerified: boolean }>;
   sharedCexDeposits: SharedCexDeposit[];
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
@@ -775,6 +777,7 @@ export async function runClusterScan(
       profileUrl: profile.username
         ? `https://app.ethos.network/profile/x/${profile.username}`
         : `https://app.ethos.network/profile/${profile.profileId}`,
+      humanVerified: profile.humanVerificationStatus === "VERIFIED",
     };
   }
 
@@ -808,6 +811,7 @@ export async function runClusterScan(
         avatarUrl: data.avatarUrl,
         score: data.score,
         profileUrl: data.profileUrl,
+        humanVerified: data.humanVerified,
       };
       log("info", `First funder ${funderAddr.slice(0, 10)}... is Ethos user: ${profile.displayName}`);
     }

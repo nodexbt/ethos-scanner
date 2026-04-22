@@ -18,6 +18,7 @@ export interface EthosProfile {
   xpRemovedDueToAbuse: boolean;
   influenceFactor: number;
   influenceFactorPercentile: number;
+  humanVerificationStatus: "VERIFIED" | null;
   links: {
     profile: string;
     scoreBreakdown: string;

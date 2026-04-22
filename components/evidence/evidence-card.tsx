@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Search, ExternalLink, ImagePlus, X, ClipboardPaste } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
+import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
 interface EvidenceCardProps {
   result: ClusterScanResult;
@@ -61,8 +62,9 @@ export function EvidenceCard({
                 {entry.label ? (
                   <span className="font-medium">{entry.label}</span>
                 ) : entry.ethosProfile ? (
-                  <span className="truncate">
+                  <span className="truncate inline-flex items-center gap-1">
                     {entry.ethosProfile.displayName}
+                    {entry.ethosProfile.humanVerified && <HumanVerifiedBadge size={12} />}
                     {entry.ethosProfile.username && <span className="text-muted-foreground"> @{entry.ethosProfile.username}</span>}
                   </span>
                 ) : (
