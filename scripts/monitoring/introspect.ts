@@ -11,17 +11,12 @@ async function main() {
   await client.connect();
 
   const focus = [
-    "profiles",
-    "users",
-    "reviews",
-    "review_events",
-    "vouches",
-    "vouch_events",
-    "invitations",
-    "score_history",
+    "slashes",
+    "slash_events",
+    "attestations",
     "xp_points_history",
-    "human_verifications",
     "userkeys",
+    "invitations",
   ];
 
   console.log("=== Columns ===");
@@ -41,21 +36,12 @@ async function main() {
     console.log(`  ${row.column_name}: ${row.data_type}`);
   }
 
-  console.log("\n=== Row count estimates ===");
-  for (const t of focus) {
-    const est = await client.query(
-      `SELECT reltuples::bigint AS est_rows FROM pg_class WHERE oid = to_regclass($1)`,
-      [`public.${t}`]
-    );
-    console.log(`  ${t}: ~${est.rows[0]?.est_rows ?? "?"}`);
-  }
-
   console.log("\n=== Sample rows ===");
-  for (const t of ["score_history", "xp_points_history", "review_events", "vouch_events"]) {
+  for (const t of ["slashes", "slash_events", "attestations", "xp_points_history"]) {
     try {
       const sample = await client.query(`SELECT * FROM "${t}" ORDER BY 1 DESC LIMIT 1`);
       if (sample.rows[0]) {
-        console.log(`\n-- ${t} (1 row)`);
+        console.log(`\n-- ${t}`);
         for (const [k, v] of Object.entries(sample.rows[0])) {
           const s = v === null ? "null" : typeof v === "object" ? JSON.stringify(v).slice(0, 120) : String(v).slice(0, 120);
           console.log(`  ${k}: ${s}`);
@@ -65,6 +51,26 @@ async function main() {
       console.log(`\n-- ${t}: ${(err as Error).message}`);
     }
   }
+
+  console.log("\n=== xp_points_history.type values (last 7d) ===");
+  const types = await client.query(
+    `SELECT type::text, count(*)::bigint as n
+     FROM xp_points_history
+     WHERE "createdAt" >= now() - interval '7 days'
+     GROUP BY 1 ORDER BY n DESC LIMIT 20`
+  );
+  console.table(types.rows);
+
+  console.log("\n=== userkey join sanity: recent reviews resolvable to profile_id ===");
+  const resolve = await client.query(
+    `SELECT count(*) filter (where u.profile_id is not null) as resolved,
+            count(*) as total
+     FROM reviews r
+     LEFT JOIN userkeys uk ON uk.userkey::text = r.subject::text
+     LEFT JOIN users u ON u.id = uk.user_id
+     WHERE r."createdAt" >= now() - interval '24 hours'`
+  );
+  console.log(resolve.rows[0]);
 
   await client.end();
 }

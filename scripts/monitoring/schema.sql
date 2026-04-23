@@ -20,6 +20,11 @@ create table if not exists public.profile_latest (
   created_at timestamptz default now()
 );
 
+-- display_name / username added after initial migration. Safe to re-run.
+alter table public.profile_latest
+  add column if not exists display_name text,
+  add column if not exists username text;
+
 create table if not exists public.profile_daily (
   profile_id integer not null,
   snapshot_date date not null,
@@ -36,6 +41,14 @@ create table if not exists public.profile_daily (
   created_at timestamptz default now(),
   primary key (profile_id, snapshot_date)
 );
+
+-- Added after initial migration. Safe to re-run.
+alter table public.profile_daily
+  add column if not exists invitations_accepted integer default 0,
+  add column if not exists attestations_added integer default 0,
+  add column if not exists slashes_authored integer default 0,
+  add column if not exists xp_gained bigint default 0,
+  add column if not exists xp_spent bigint default 0;
 
 create index if not exists idx_profile_daily_date_score
   on public.profile_daily (snapshot_date, score_delta desc);

@@ -6,6 +6,8 @@ interface EthosCurrent {
   score: number | null;
   xp_total: number | null;
   human_verified: boolean;
+  display_name: string | null;
+  username: string | null;
 }
 
 interface ActivityCounts {
@@ -13,6 +15,11 @@ interface ActivityCounts {
   vouches_given: Map<number, { count: number; wei: string }>;
   vouches_received: Map<number, number>;
   invitations_sent: Map<number, number>;
+  invitations_accepted: Map<number, number>;
+  attestations_added: Map<number, number>;
+  slashes_authored: Map<number, number>;
+  xp: Map<number, { gained: number; spent: number }>;
+  new_profiles_24h: number;
 }
 
 interface DailyRow {
@@ -26,7 +33,12 @@ interface DailyRow {
   vouches_given: number;
   vouch_given_wei: string;
   invitations_sent: number;
+  invitations_accepted: number;
   vouches_received: number;
+  attestations_added: number;
+  slashes_authored: number;
+  xp_gained: number;
+  xp_spent: number;
   human_verified: boolean;
 }
 
@@ -36,14 +48,46 @@ function todayUtcDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * The Ethos read-only endpoint is a hot standby. Long-running queries can
+ * be cancelled mid-flight with `40001: canceling statement due to conflict
+ * with recovery` when replay catches up. Retrying with a small backoff
+ * usually succeeds because the conflicting WAL segment has moved past.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function queryWithRetry<T extends Record<string, any>>(
+  ethos: Client,
+  sql: string,
+  label: string,
+  retries = 3
+): Promise<{ rows: T[] }> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await ethos.query<T>(sql);
+    } catch (err) {
+      lastErr = err;
+      const code = (err as { code?: string }).code;
+      if (code !== "40001" || attempt === retries - 1) throw err;
+      const backoffMs = 1500 * (attempt + 1);
+      console.warn(`  [${label}] recovery conflict, retrying in ${backoffMs}ms (${attempt + 1}/${retries})`);
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
   const { rows } = await ethos.query<{
     profile_id: number;
     score: number | null;
     xp_total: number | null;
     human_verification_status: string | null;
+    display_name: string | null;
+    username: string | null;
   }>(
-    `select u.profile_id, u.score, u.xp_total, u.human_verification_status
+    `select u.profile_id, u.score, u.xp_total, u.human_verification_status,
+            u.display_name, u.username
      from users u
      join profiles p on p.id = u.profile_id
      where u.profile_id is not null
@@ -54,6 +98,8 @@ async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
     score: r.score,
     xp_total: r.xp_total,
     human_verified: r.human_verification_status === "VERIFIED",
+    display_name: r.display_name,
+    username: r.username,
   }));
 }
 
@@ -61,15 +107,18 @@ async function fetchActivity(ethos: Client): Promise<ActivityCounts> {
   // Serial, not Promise.all — a single pg client can only run one query at
   // a time. Parallelism here would just get serialized with a deprecation
   // warning; running sequentially is both simpler and cleaner.
-  const reviews = await ethos.query<{ profile_id: number; n: string }>(
+  const reviews = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
     `select "authorProfileId" as profile_id, count(*)::bigint as n
      from reviews
      where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
        and "authorProfileId" is not null
        and archived = false
-     group by "authorProfileId"`
+     group by "authorProfileId"`,
+    "reviews_authored"
   );
-  const vouchesGiven = await ethos.query<{ profile_id: number; n: string; wei: string }>(
+  const vouchesGiven = await queryWithRetry<{ profile_id: number; n: string; wei: string }>(
+    ethos,
     `select "authorProfileId" as profile_id,
             count(*)::bigint as n,
             coalesce(sum(deposited), 0)::text as wei
@@ -77,22 +126,77 @@ async function fetchActivity(ethos: Client): Promise<ActivityCounts> {
      where "vouchedAt" >= now() - interval '${WINDOW_HOURS} hours'
        and "authorProfileId" is not null
        and archived = false
-     group by "authorProfileId"`
+     group by "authorProfileId"`,
+    "vouches_given"
   );
-  const vouchesReceived = await ethos.query<{ profile_id: number; n: string }>(
+  const vouchesReceived = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
     `select "subjectProfileId" as profile_id, count(*)::bigint as n
      from vouches
      where "vouchedAt" >= now() - interval '${WINDOW_HOURS} hours'
        and "subjectProfileId" is not null
        and archived = false
-     group by "subjectProfileId"`
+     group by "subjectProfileId"`,
+    "vouches_received"
   );
-  const invitations = await ethos.query<{ profile_id: number; n: string }>(
+  const invitations = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
     `select "senderProfileId" as profile_id, count(*)::bigint as n
      from invitations
      where "sentAt" >= now() - interval '${WINDOW_HOURS} hours'
        and "senderProfileId" is not null
-     group by "senderProfileId"`
+     group by "senderProfileId"`,
+    "invitations_sent"
+  );
+  const invitationsAccepted = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
+    `select "senderProfileId" as profile_id, count(*)::bigint as n
+     from invitations
+     where "acceptedAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and "senderProfileId" is not null
+     group by "senderProfileId"`,
+    "invitations_accepted"
+  );
+  const attestations = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
+    `select "profileId" as profile_id, count(*)::bigint as n
+     from attestations
+     where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and "profileId" is not null
+       and archived = false
+     group by "profileId"`,
+    "attestations_added"
+  );
+  const slashesAuthored = await queryWithRetry<{ profile_id: number; n: string }>(
+    ethos,
+    `select "authorProfileId" as profile_id, count(*)::bigint as n
+     from slashes
+     where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and "authorProfileId" is not null
+     group by "authorProfileId"`,
+    "slashes_authored"
+  );
+  // XP events are keyed by userkey; only rows of the form 'profileId:N' are
+  // attributable to a profile. Other userkey types (address, service) would
+  // require a userkey→profileId join which hits standby recovery conflicts.
+  const xp = await queryWithRetry<{ profile_id: number; gained: string; spent: string }>(
+    ethos,
+    `select (regexp_replace(userkey::text, '^profileId:', ''))::int as profile_id,
+            sum(case when points > 0 then points else 0 end)::bigint as gained,
+            sum(case when points < 0 then -points else 0 end)::bigint as spent
+     from xp_points_history
+     where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and userkey::text like 'profileId:%'
+     group by 1`,
+    "xp"
+  );
+  const newProfiles = await queryWithRetry<{ n: string }>(
+    ethos,
+    `select count(*)::bigint as n
+     from profiles
+     where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and archived = false`,
+    "new_profiles"
   );
 
   return {
@@ -106,6 +210,19 @@ async function fetchActivity(ethos: Client): Promise<ActivityCounts> {
     invitations_sent: new Map(
       invitations.rows.map((r) => [r.profile_id, Number(r.n)])
     ),
+    invitations_accepted: new Map(
+      invitationsAccepted.rows.map((r) => [r.profile_id, Number(r.n)])
+    ),
+    attestations_added: new Map(
+      attestations.rows.map((r) => [r.profile_id, Number(r.n)])
+    ),
+    slashes_authored: new Map(
+      slashesAuthored.rows.map((r) => [r.profile_id, Number(r.n)])
+    ),
+    xp: new Map(
+      xp.rows.map((r) => [r.profile_id, { gained: Number(r.gained), spent: Number(r.spent) }])
+    ),
+    new_profiles_24h: Number(newProfiles.rows[0]?.n ?? 0),
   };
 }
 
@@ -123,6 +240,12 @@ function buildRows(
     const vouchGivenWei = vouchGiven?.wei ?? "0";
     const vouchesReceived = activity.vouches_received.get(c.profile_id) ?? 0;
     const invitationsSent = activity.invitations_sent.get(c.profile_id) ?? 0;
+    const invitationsAccepted = activity.invitations_accepted.get(c.profile_id) ?? 0;
+    const attestationsAdded = activity.attestations_added.get(c.profile_id) ?? 0;
+    const slashesAuthored = activity.slashes_authored.get(c.profile_id) ?? 0;
+    const xp = activity.xp.get(c.profile_id);
+    const xpGained = xp?.gained ?? 0;
+    const xpSpent = xp?.spent ?? 0;
 
     const priorState = prior.get(c.profile_id);
     const scoreDelta =
@@ -140,7 +263,12 @@ function buildRows(
       reviewsAuthored > 0 ||
       vouchesGivenCount > 0 ||
       vouchesReceived > 0 ||
-      invitationsSent > 0;
+      invitationsSent > 0 ||
+      invitationsAccepted > 0 ||
+      attestationsAdded > 0 ||
+      slashesAuthored > 0 ||
+      xpGained > 0 ||
+      xpSpent > 0;
 
     if (!interesting) continue;
 
@@ -155,7 +283,12 @@ function buildRows(
       vouches_given: vouchesGivenCount,
       vouch_given_wei: vouchGivenWei,
       invitations_sent: invitationsSent,
+      invitations_accepted: invitationsAccepted,
       vouches_received: vouchesReceived,
+      attestations_added: attestationsAdded,
+      slashes_authored: slashesAuthored,
+      xp_gained: xpGained,
+      xp_spent: xpSpent,
       human_verified: c.human_verified,
     });
   }
@@ -180,9 +313,23 @@ async function upsertInBatches<T>(
   }
 }
 
+function profileLink(profile_id: number, display_name: string | null, username: string | null): string {
+  const url = username
+    ? `https://app.ethos.network/profile/x/${username}`
+    : `https://app.ethos.network/profile/${profile_id}`;
+  const name = display_name?.trim() || (username ? `@${username}` : `#${profile_id}`);
+  const suffix = username && display_name ? ` (@${username})` : "";
+  // Discord sanitizes markdown in link text so stray characters in display
+  // names won't break the message, but we still strip brackets defensively.
+  const safe = name.replace(/[\[\]]/g, "");
+  return `[${safe}${suffix}](${url})`;
+}
+
 async function postDiscord(
   webhook: string,
   rows: DailyRow[],
+  names: Map<number, { display_name: string | null; username: string | null }>,
+  newProfiles24h: number,
   durationMs: number,
   today: string
 ): Promise<void> {
@@ -198,17 +345,45 @@ async function postDiscord(
     .filter((r) => r.vouches_given > 3)
     .sort((a, b) => b.vouches_given - a.vouches_given)
     .slice(0, 10);
+  const topInvitersAccepted = [...rows]
+    .filter((r) => r.invitations_accepted > 3)
+    .sort((a, b) => b.invitations_accepted - a.invitations_accepted)
+    .slice(0, 10);
+  const topAttestations = [...rows]
+    .filter((r) => r.attestations_added > 2)
+    .sort((a, b) => b.attestations_added - a.attestations_added)
+    .slice(0, 10);
+  const topXpGainers = [...rows]
+    .filter((r) => r.xp_gained > 0)
+    .sort((a, b) => b.xp_gained - a.xp_gained)
+    .slice(0, 5);
+  const slashers = [...rows]
+    .filter((r) => r.slashes_authored > 0)
+    .sort((a, b) => b.slashes_authored - a.slashes_authored)
+    .slice(0, 10);
 
-  const fmt = (r: DailyRow) => `\`#${r.profile_id}\``;
+  const fmt = (r: DailyRow) => {
+    const n = names.get(r.profile_id);
+    return profileLink(r.profile_id, n?.display_name ?? null, n?.username ?? null);
+  };
   const lines: string[] = [
     `**Ethos monitoring — ${today}**`,
-    `${rows.length} active profile-days written in ${Math.round(durationMs / 1000)}s`,
+    `${rows.length} profiles with activity or score changes · ${newProfiles24h} new profiles · ${Math.round(durationMs / 1000)}s`,
   ];
   if (topScore.length) {
     lines.push("");
     lines.push("**Top score gainers (24h):**");
     for (const r of topScore) {
-      lines.push(`- ${fmt(r)} +${r.score_delta} → ${r.score_end}`);
+      const start =
+        r.score_end != null && r.score_delta != null ? r.score_end - r.score_delta : null;
+      lines.push(`- ${fmt(r)} ${start ?? "?"} → ${r.score_end} (+${r.score_delta})`);
+    }
+  }
+  if (topXpGainers.length) {
+    lines.push("");
+    lines.push("**Top XP gainers (24h):**");
+    for (const r of topXpGainers) {
+      lines.push(`- ${fmt(r)} +${r.xp_gained.toLocaleString()} xp (spent ${r.xp_spent.toLocaleString()})`);
     }
   }
   if (topReviewers.length) {
@@ -220,6 +395,21 @@ async function postDiscord(
     lines.push("");
     lines.push(`**Vouch-giving spikes (>3/day):** ${topVouchers.length}`);
     for (const r of topVouchers) lines.push(`- ${fmt(r)}: ${r.vouches_given} vouches`);
+  }
+  if (topInvitersAccepted.length) {
+    lines.push("");
+    lines.push(`**Invitation-accepted spikes (>3/day):** ${topInvitersAccepted.length}`);
+    for (const r of topInvitersAccepted) lines.push(`- ${fmt(r)}: ${r.invitations_accepted} accepted`);
+  }
+  if (topAttestations.length) {
+    lines.push("");
+    lines.push(`**New-attestation spikes (>2/day):** ${topAttestations.length}`);
+    for (const r of topAttestations) lines.push(`- ${fmt(r)}: ${r.attestations_added} attestations added`);
+  }
+  if (slashers.length) {
+    lines.push("");
+    lines.push(`**Slashes authored (24h):** ${slashers.length}`);
+    for (const r of slashers) lines.push(`- ${fmt(r)}: ${r.slashes_authored} slash(es)`);
   }
 
   const body = { content: lines.join("\n").slice(0, 1900) };
@@ -267,7 +457,7 @@ async function main() {
     console.log(`Fetching ${WINDOW_HOURS}h activity aggregates…`);
     const activity = await fetchActivity(ethos);
     console.log(
-      `  reviews:${activity.reviews_authored.size} vouches-given:${activity.vouches_given.size} vouches-received:${activity.vouches_received.size} invites:${activity.invitations_sent.size}`
+      `  reviews:${activity.reviews_authored.size} vouches-given:${activity.vouches_given.size} vouches-received:${activity.vouches_received.size} invites-sent:${activity.invitations_sent.size} invites-accepted:${activity.invitations_accepted.size} attestations:${activity.attestations_added.size} slashes:${activity.slashes_authored.size} xp:${activity.xp.size} new-profiles:${activity.new_profiles_24h}`
     );
 
     console.log("Loading prior state from profile_latest…");
@@ -299,6 +489,8 @@ async function main() {
       score: c.score,
       xp_total: c.xp_total,
       human_verified: c.human_verified,
+      display_name: c.display_name,
+      username: c.username,
       last_seen: nowIso,
     }));
     await upsertInBatches(supabase, "profile_latest", latestRows, "profile_id");
@@ -315,7 +507,10 @@ async function main() {
       .eq("id", runId);
 
     if (webhook) {
-      await postDiscord(webhook, rows, durationMs, today);
+      const names = new Map(
+        current.map((c) => [c.profile_id, { display_name: c.display_name, username: c.username }])
+      );
+      await postDiscord(webhook, rows, names, activity.new_profiles_24h, durationMs, today);
     }
 
     console.log(`Done in ${Math.round(durationMs / 1000)}s.`);
