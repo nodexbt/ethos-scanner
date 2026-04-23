@@ -1,3 +1,11 @@
+// Load .env.local for local runs. In GitHub Actions the env is set by the
+// workflow, so this is a silent no-op when the file doesn't exist.
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  // intentional: file missing in CI is expected
+}
+
 import { Client } from "pg";
 import { createClient } from "@supabase/supabase-js";
 
@@ -8,6 +16,7 @@ interface EthosCurrent {
   human_verified: boolean;
   display_name: string | null;
   username: string | null;
+  avatar_url: string | null;
 }
 
 interface ActivityCounts {
@@ -85,9 +94,10 @@ async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
     human_verification_status: string | null;
     display_name: string | null;
     username: string | null;
+    avatar_url: string | null;
   }>(
     `select u.profile_id, u.score, u.xp_total, u.human_verification_status,
-            u.display_name, u.username
+            u.display_name, u.username, u.avatar_url
      from users u
      join profiles p on p.id = u.profile_id
      where u.profile_id is not null
@@ -100,6 +110,7 @@ async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
     human_verified: r.human_verification_status === "VERIFIED",
     display_name: r.display_name,
     username: r.username,
+    avatar_url: r.avatar_url,
   }));
 }
 
@@ -491,6 +502,7 @@ async function main() {
       human_verified: c.human_verified,
       display_name: c.display_name,
       username: c.username,
+      avatar_url: c.avatar_url,
       last_seen: nowIso,
     }));
     await upsertInBatches(supabase, "profile_latest", latestRows, "profile_id");

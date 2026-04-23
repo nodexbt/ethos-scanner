@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { Home, Menu, X, Plus } from "lucide-react";
+import { Home, Menu, X, Plus, LineChart } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -61,7 +61,10 @@ export function Sidebar() {
     );
   };
 
-  const navLinks = [{ href: "/", label: "Home", icon: Home }];
+  const navLinks = [
+    { href: "/", label: "Home", icon: Home },
+    { href: "/monitoring", label: "Monitoring", icon: LineChart },
+  ];
 
   return (
     <>

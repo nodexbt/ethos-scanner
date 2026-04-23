@@ -20,10 +20,11 @@ create table if not exists public.profile_latest (
   created_at timestamptz default now()
 );
 
--- display_name / username added after initial migration. Safe to re-run.
+-- display_name / username / avatar_url added after initial migration. Safe to re-run.
 alter table public.profile_latest
   add column if not exists display_name text,
-  add column if not exists username text;
+  add column if not exists username text,
+  add column if not exists avatar_url text;
 
 create table if not exists public.profile_daily (
   profile_id integer not null,
