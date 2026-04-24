@@ -35,20 +35,12 @@ function formatRelative(ts: string): string {
   return `${day}d ago`;
 }
 
-function profileHref(p: { profileId: number; username: string | null }): string {
-  return p.username
-    ? `https://app.ethos.network/profile/x/${p.username}`
-    : `https://app.ethos.network/profile/${p.profileId}`;
-}
-
 function ProfileName({ p }: { p: ProfileSummary & { profileId: number } }) {
   const label = p.displayName?.trim() || (p.username ? `@${p.username}` : `#${p.profileId}`);
   const sub = p.username && p.displayName ? `@${p.username}` : null;
   return (
-    <a
-      href={profileHref(p)}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      href={`/monitoring/${p.profileId}`}
       className="inline-flex items-center gap-2 hover:underline min-w-0 group"
     >
       {p.avatarUrl ? (
@@ -66,7 +58,7 @@ function ProfileName({ p }: { p: ProfileSummary & { profileId: number } }) {
         {p.humanVerified && <HumanVerifiedBadge size={12} />}
         {sub && <span className="text-xs text-muted-foreground truncate">{sub}</span>}
       </span>
-    </a>
+    </Link>
   );
 }
 

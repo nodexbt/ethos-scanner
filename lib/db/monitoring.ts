@@ -41,6 +41,37 @@ export interface NewProfile extends ProfileSummary {
   createdAt: string;
 }
 
+export interface ProfileDetail {
+  profile: {
+    profileId: number;
+    displayName: string | null;
+    username: string | null;
+    avatarUrl: string | null;
+    humanVerified: boolean;
+    score: number | null;
+    xpTotal: number | null;
+    lastSeen: string | null;
+  } | null;
+  days: ProfileDailyRow[];
+}
+
+export interface ProfileDailyRow {
+  snapshotDate: string;
+  scoreEnd: number | null;
+  scoreDelta: number | null;
+  xpTotalEnd: number | null;
+  xpDelta: number | null;
+  reviewsAuthored: number;
+  vouchesGiven: number;
+  vouchesReceived: number;
+  invitationsSent: number;
+  invitationsAccepted: number;
+  attestationsAdded: number;
+  slashesAuthored: number;
+  xpGained: number;
+  xpSpent: number;
+}
+
 export interface MonitoringSummary {
   lastRun: LastRun | null;
   today: string;
@@ -275,4 +306,96 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
     newProfiles,
     newProfileCount: newProfileCountRes.count ?? 0,
   };
+}
+
+/**
+ * Per-profile detail view: current rollup from profile_latest + last 30 days
+ * of activity rows from profile_daily. Days without a row are absent — the
+ * caller is responsible for rendering missing days as "no activity" rather
+ * than trying to zero-fill (simpler, avoids fake data in sparklines).
+ */
+export async function getProfileDetail(profileId: number): Promise<ProfileDetail> {
+  const supabase = getSupabase();
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+  const sinceDate = thirtyDaysAgo.toISOString().slice(0, 10);
+
+  const [latestRes, dailyRes] = await Promise.all([
+    supabase
+      .from("profile_latest")
+      .select(
+        "profile_id, display_name, username, avatar_url, human_verified, score, xp_total, last_seen"
+      )
+      .eq("profile_id", profileId)
+      .maybeSingle(),
+    supabase
+      .from("profile_daily")
+      .select(
+        "snapshot_date, score_end, score_delta, xp_total_end, xp_delta, reviews_authored, vouches_given, vouches_received, invitations_sent, invitations_accepted, attestations_added, slashes_authored, xp_gained, xp_spent"
+      )
+      .eq("profile_id", profileId)
+      .gte("snapshot_date", sinceDate)
+      .order("snapshot_date", { ascending: true }),
+  ]);
+
+  const latestRow = latestRes.data as
+    | {
+        profile_id: number;
+        display_name: string | null;
+        username: string | null;
+        avatar_url: string | null;
+        human_verified: boolean | null;
+        score: number | null;
+        xp_total: number | null;
+        last_seen: string | null;
+      }
+    | null;
+
+  const profile = latestRow
+    ? {
+        profileId: latestRow.profile_id,
+        displayName: latestRow.display_name,
+        username: latestRow.username,
+        avatarUrl: latestRow.avatar_url,
+        humanVerified: Boolean(latestRow.human_verified),
+        score: latestRow.score,
+        xpTotal: latestRow.xp_total,
+        lastSeen: latestRow.last_seen,
+      }
+    : null;
+
+  const days: ProfileDailyRow[] = ((dailyRes.data ?? []) as {
+    snapshot_date: string;
+    score_end: number | null;
+    score_delta: number | null;
+    xp_total_end: number | null;
+    xp_delta: number | null;
+    reviews_authored: number;
+    vouches_given: number;
+    vouches_received: number;
+    invitations_sent: number;
+    invitations_accepted: number;
+    attestations_added: number;
+    slashes_authored: number;
+    xp_gained: number | string;
+    xp_spent: number | string;
+  }[]).map((r) => ({
+    snapshotDate: r.snapshot_date,
+    scoreEnd: r.score_end,
+    scoreDelta: r.score_delta,
+    xpTotalEnd: r.xp_total_end,
+    xpDelta: r.xp_delta,
+    reviewsAuthored: Number(r.reviews_authored ?? 0),
+    vouchesGiven: Number(r.vouches_given ?? 0),
+    vouchesReceived: Number(r.vouches_received ?? 0),
+    invitationsSent: Number(r.invitations_sent ?? 0),
+    invitationsAccepted: Number(r.invitations_accepted ?? 0),
+    attestationsAdded: Number(r.attestations_added ?? 0),
+    slashesAuthored: Number(r.slashes_authored ?? 0),
+    xpGained: Number(r.xp_gained ?? 0),
+    xpSpent: Number(r.xp_spent ?? 0),
+  }));
+
+  return { profile, days };
 }
