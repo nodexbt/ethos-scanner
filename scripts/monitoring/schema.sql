@@ -21,10 +21,14 @@ create table if not exists public.profile_latest (
 );
 
 -- display_name / username / avatar_url added after initial migration. Safe to re-run.
+-- primary_address is the first 0x wallet keyed to the profile's userkeys
+-- row; used to launch a sybil cluster scan from the monitoring dashboard
+-- without a live Ethos-DB round-trip on the web side.
 alter table public.profile_latest
   add column if not exists display_name text,
   add column if not exists username text,
-  add column if not exists avatar_url text;
+  add column if not exists avatar_url text,
+  add column if not exists primary_address text;
 
 create table if not exists public.profile_daily (
   profile_id integer not null,

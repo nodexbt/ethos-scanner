@@ -11,7 +11,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Loader2, AlertTriangle, ArrowLeft, ExternalLink } from "lucide-react";
+import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -158,14 +158,34 @@ export default function ProfileDetailPage({ params }: PageParams) {
                   {profile?.xpTotal != null && ` · XP ${profile.xpTotal.toLocaleString()}`}
                 </div>
               </div>
-              <a
-                href={profile ? ethosProfileUrl(profile) : `https://app.ethos.network/profile/${profileId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors shrink-0"
-              >
-                Ethos profile <ExternalLink className="h-3 w-3 opacity-60" />
-              </a>
+              <div className="flex items-center gap-2 shrink-0">
+                {profile?.primaryAddress ? (
+                  <Link
+                    href={`/scan/${profile.primaryAddress.toLowerCase()}`}
+                    title="Scan for sybil cluster using the profile's primary wallet"
+                    className="inline-flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-md px-2.5 py-1.5 hover:bg-primary/90 transition-colors"
+                  >
+                    <Network className="h-3 w-3" />
+                    Scan cluster
+                  </Link>
+                ) : (
+                  <span
+                    title="No wallet address on file for this profile"
+                    className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 text-muted-foreground opacity-60 cursor-not-allowed"
+                  >
+                    <Network className="h-3 w-3" />
+                    Scan cluster
+                  </span>
+                )}
+                <a
+                  href={profile ? ethosProfileUrl(profile) : `https://app.ethos.network/profile/${profileId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"
+                >
+                  Ethos profile <ExternalLink className="h-3 w-3 opacity-60" />
+                </a>
+              </div>
             </div>
           </Card>
 

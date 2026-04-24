@@ -50,6 +50,7 @@ export interface ProfileDetail {
     humanVerified: boolean;
     score: number | null;
     xpTotal: number | null;
+    primaryAddress: string | null;
     lastSeen: string | null;
   } | null;
   days: ProfileDailyRow[];
@@ -325,7 +326,7 @@ export async function getProfileDetail(profileId: number): Promise<ProfileDetail
     supabase
       .from("profile_latest")
       .select(
-        "profile_id, display_name, username, avatar_url, human_verified, score, xp_total, last_seen"
+        "profile_id, display_name, username, avatar_url, human_verified, score, xp_total, primary_address, last_seen"
       )
       .eq("profile_id", profileId)
       .maybeSingle(),
@@ -348,6 +349,7 @@ export async function getProfileDetail(profileId: number): Promise<ProfileDetail
         human_verified: boolean | null;
         score: number | null;
         xp_total: number | null;
+        primary_address: string | null;
         last_seen: string | null;
       }
     | null;
@@ -361,6 +363,7 @@ export async function getProfileDetail(profileId: number): Promise<ProfileDetail
         humanVerified: Boolean(latestRow.human_verified),
         score: latestRow.score,
         xpTotal: latestRow.xp_total,
+        primaryAddress: latestRow.primary_address,
         lastSeen: latestRow.last_seen,
       }
     : null;

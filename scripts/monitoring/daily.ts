@@ -17,6 +17,7 @@ interface EthosCurrent {
   display_name: string | null;
   username: string | null;
   avatar_url: string | null;
+  primary_address: string | null;
 }
 
 interface ActivityCounts {
@@ -87,7 +88,7 @@ async function queryWithRetry<T extends Record<string, any>>(
 }
 
 async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
-  const { rows } = await ethos.query<{
+  const currentQuery = await queryWithRetry<{
     profile_id: number;
     score: number | null;
     xp_total: number | null;
@@ -96,14 +97,42 @@ async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
     username: string | null;
     avatar_url: string | null;
   }>(
+    ethos,
     `select u.profile_id, u.score, u.xp_total, u.human_verification_status,
             u.display_name, u.username, u.avatar_url
      from users u
      join profiles p on p.id = u.profile_id
      where u.profile_id is not null
-       and p.archived = false`
+       and p.archived = false`,
+    "current_state"
   );
-  return rows.map((r) => ({
+
+  // Fetch one 0x address per profile so the dashboard can launch a sybil
+  // scan without a live Ethos-DB round-trip. Correlated subquery is an
+  // index seek per profile on userkeys(user_id), which is consistently
+  // fast even against the 26M-row userkeys table.
+  const addressQuery = await queryWithRetry<{ profile_id: number; primary_address: string | null }>(
+    ethos,
+    `select u.profile_id,
+            (
+              select regexp_replace(uk.userkey::text, '^address:', '')
+              from userkeys uk
+              where uk.user_id = u.id
+                and uk.key_type = 'ADDRESS'
+              order by uk.id
+              limit 1
+            ) as primary_address
+     from users u
+     join profiles p on p.id = u.profile_id
+     where u.profile_id is not null
+       and p.archived = false`,
+    "primary_addresses"
+  );
+  const addresses = new Map<number, string | null>(
+    addressQuery.rows.map((r) => [r.profile_id, r.primary_address])
+  );
+
+  return currentQuery.rows.map((r) => ({
     profile_id: r.profile_id,
     score: r.score,
     xp_total: r.xp_total,
@@ -111,6 +140,7 @@ async function fetchEthosCurrent(ethos: Client): Promise<EthosCurrent[]> {
     display_name: r.display_name,
     username: r.username,
     avatar_url: r.avatar_url,
+    primary_address: addresses.get(r.profile_id) ?? null,
   }));
 }
 
@@ -503,6 +533,7 @@ async function main() {
       display_name: c.display_name,
       username: c.username,
       avatar_url: c.avatar_url,
+      primary_address: c.primary_address,
       last_seen: nowIso,
     }));
     await upsertInBatches(supabase, "profile_latest", latestRows, "profile_id");
