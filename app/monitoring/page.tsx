@@ -11,9 +11,9 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { ArrowLeft, Loader2, AlertTriangle, Shield, CheckCircle2, XCircle } from "lucide-react";
-import DecryptedText from "@/components/ui/decrypted-text";
+import { Loader2, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
+import { AppHeader } from "@/components/app-header";
 import type {
   MonitoringSummary,
   ProfileSummary,
@@ -294,47 +294,22 @@ export default function MonitoringPage() {
   }
 
   return (
-    <div className="min-h-screen p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <Link
-          href="/"
-          className="group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors min-w-0"
-        >
-          <Shield className="h-4.5 w-4.5 shrink-0" />
-          <DecryptedText
-            text="Ethos Scanner"
-            speed={40}
-            maxIterations={12}
-            sequential
-            revealDirection="start"
-            animateOn="hover"
-            replayInterval={30000}
-            useOriginalCharsOnly={false}
-            parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
-            className="text-foreground"
-            encryptedClassName="text-muted-foreground"
-          />
-        </Link>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to scanner
-        </Link>
-      </div>
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+      <AppHeader />
 
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold">Monitoring</h1>
-        <p className="text-sm text-muted-foreground">
-          Score movers, XP gainers, and activity spikes across Ethos in the last 24h.
-          {data && (
-            <>
-              {" "}Baseline date: <span className="font-mono">{data.today}</span>.
-            </>
-          )}
-        </p>
-      </div>
+      <Card className="mb-4">
+        <div className="p-4">
+          <h1 className="text-xl font-semibold">Monitoring</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Score movers, XP gainers, and activity spikes across Ethos in the last 24h.
+            {data && (
+              <>
+                {" "}Baseline date: <span className="font-mono">{data.today}</span>.
+              </>
+            )}
+          </p>
+        </div>
+      </Card>
 
       {loading && !data && (
         <div className="flex justify-center py-16">

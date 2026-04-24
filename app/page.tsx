@@ -29,6 +29,7 @@ import {
   ArrowRight,
   LogOut,
   ShieldCheck,
+  LineChart,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -49,6 +50,7 @@ import { OverviewCard } from "@/components/results/overview-card";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
 import { EvidenceCard } from "@/components/evidence/evidence-card";
+import { AppHeader } from "@/components/app-header";
 
 // --- Saved Investigations ---
 
@@ -762,75 +764,19 @@ export default function Home() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 pb-4">
-        <button
-          onClick={() => {
-            setActiveTab("scanner");
-            setClusterResult(null);
-            setClusterLogs([]);
-            setScanProgress(null);
-            setWalletInput("");
-            setError(null);
-            setCurrentInvestigationId(null);
-            setScreenshots(new Map());
-            window.history.pushState({}, "", "/");
-          }}
-          className="group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0"
-        >
-          <Shield className="h-4.5 w-4.5 shrink-0" />
-          <DecryptedText
-            text="Ethos Scanner"
-            speed={40}
-            maxIterations={12}
-            sequential
-            revealDirection="start"
-            animateOn="hover"
-            replayInterval={30000}
-            useOriginalCharsOnly={false}
-            parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
-            className="text-foreground"
-            encryptedClassName="text-muted-foreground"
-          />
-        </button>
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
-          {session && (
-            <div className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg pl-1 pr-1 sm:pr-2">
-              {session.user?.image ? (
-                <img src={session.user.image} alt="" className="h-7 w-7 rounded-md shrink-0" />
-              ) : (
-                <div className="h-7 w-7 rounded-md bg-muted shrink-0" />
-              )}
-              <div className="hidden sm:flex items-center gap-1.5 text-xs">
-                <span className="font-medium truncate max-w-30">{session.user?.name || "Admin"}</span>
-                {/* @ts-expect-error - ethos field added in session callback */}
-                {session.user?.ethos?.score !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
-                    {/* @ts-expect-error - ethos field added in session callback */}
-                    {session.user.ethos.score}
-                  </span>
-                )}
-              </div>
-              {isAdmin && (
-                <Link
-                  href="/admin/users"
-                  title="Admin: manage allowlist"
-                  className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                </Link>
-              )}
-              <button
-                onClick={() => signOut()}
-                title="Sign out"
-                className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-          <ThemeToggle />
-        </div>
-      </div>
+      <AppHeader
+        onLogoClick={() => {
+          setActiveTab("scanner");
+          setClusterResult(null);
+          setClusterLogs([]);
+          setScanProgress(null);
+          setWalletInput("");
+          setError(null);
+          setCurrentInvestigationId(null);
+          setScreenshots(new Map());
+          window.history.pushState({}, "", "/");
+        }}
+      />
 
       {/* Tabs */}
       <div className="mb-4 -mx-1 px-1 overflow-x-auto scrollbar-hide">

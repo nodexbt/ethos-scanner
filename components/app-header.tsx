@@ -1,0 +1,120 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
+import { Shield, ShieldCheck, LineChart, LogOut } from "lucide-react";
+import DecryptedText from "@/components/ui/decrypted-text";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+interface AppHeaderProps {
+  /**
+   * When present, the Ethos Scanner logo renders as a <button> that invokes
+   * this handler instead of a <Link>. The home page uses it to reset in-page
+   * state; other pages leave it undefined so the logo just links back to "/".
+   */
+  onLogoClick?: () => void;
+}
+
+export function AppHeader({ onLogoClick }: AppHeaderProps) {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  // @ts-expect-error - isAdmin field added in session callback
+  const isAdmin = Boolean(session?.user?.isAdmin);
+
+  const logoContent = (
+    <>
+      <Shield className="h-4.5 w-4.5 shrink-0" />
+      <DecryptedText
+        text="Ethos Scanner"
+        speed={40}
+        maxIterations={12}
+        sequential
+        revealDirection="start"
+        animateOn="hover"
+        replayInterval={30000}
+        useOriginalCharsOnly={false}
+        parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
+        className="text-foreground"
+        encryptedClassName="text-muted-foreground"
+      />
+    </>
+  );
+
+  const logoClasses =
+    "group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0";
+
+  const iconClass = (active: boolean) =>
+    `h-7 w-7 flex items-center justify-center rounded transition-colors ${
+      active
+        ? "bg-muted text-foreground"
+        : "hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+    }`;
+
+  return (
+    <div className="flex items-center justify-between gap-3 pb-4">
+      {onLogoClick ? (
+        <button onClick={onLogoClick} className={logoClasses}>
+          {logoContent}
+        </button>
+      ) : (
+        <Link href="/" className={logoClasses}>
+          {logoContent}
+        </Link>
+      )}
+
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
+        {session && (
+          <div className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg pl-1 pr-1 sm:pr-2">
+            {session.user?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={session.user.image}
+                alt=""
+                className="h-7 w-7 rounded-md shrink-0"
+              />
+            ) : (
+              <div className="h-7 w-7 rounded-md bg-muted shrink-0" />
+            )}
+            <div className="hidden sm:flex items-center gap-1.5 text-xs">
+              <span className="font-medium truncate max-w-30">
+                {session.user?.name || "Admin"}
+              </span>
+              {/* @ts-expect-error - ethos field added in session callback */}
+              {session.user?.ethos?.score !== undefined && (
+                <span className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
+                  {/* @ts-expect-error - ethos field added in session callback */}
+                  {session.user.ethos.score}
+                </span>
+              )}
+            </div>
+            <Link
+              href="/monitoring"
+              title="Monitoring dashboard"
+              className={iconClass(pathname?.startsWith("/monitoring") ?? false)}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+            </Link>
+            {isAdmin && (
+              <Link
+                href="/admin/users"
+                title="Admin: manage allowlist"
+                className={iconClass(pathname?.startsWith("/admin") ?? false)}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+              </Link>
+            )}
+            <button
+              onClick={() => signOut()}
+              title="Sign out"
+              className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        <ThemeToggle />
+      </div>
+    </div>
+  );
+}
