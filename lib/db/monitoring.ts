@@ -65,6 +65,8 @@ export interface ProfileDetail {
     lastSeen: string | null;
   } | null;
   days: ProfileDailyRow[];
+  /** Aggregated over the last 30 days, sorted by |sent-received| desc. */
+  tipCounterparties: XpTipCounterparty[];
 }
 
 export interface ProfileDailyRow {
@@ -82,6 +84,15 @@ export interface ProfileDailyRow {
   slashesAuthored: number;
   xpGained: number;
   xpSpent: number;
+  xpByType: Record<string, number>;
+  /** {counterpartyProfileId: points}, points always positive. */
+  xpTips: { sent: Record<string, number>; received: Record<string, number> };
+}
+
+export interface XpTipCounterparty extends ProfileSummary {
+  profileId: number;
+  sent: number;
+  received: number;
 }
 
 export interface MonitoringSummary {
@@ -466,17 +477,24 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
 }
 
 /**
- * Per-profile detail view: current rollup from profile_latest + last 30 days
- * of activity rows from profile_daily. Days without a row are absent — the
+ * Per-profile detail view: current rollup from profile_latest + recent
+ * activity rows from profile_daily. Days without a row are absent — the
  * caller is responsible for rendering missing days as "no activity" rather
  * than trying to zero-fill (simpler, avoids fake data in sparklines).
+ *
+ * rangeDays = how far back to look. 1 = today only, 7 = past week, etc.
+ * Capped at 365 so a malformed query can't ask for every row ever.
  */
-export async function getProfileDetail(profileId: number): Promise<ProfileDetail> {
+export async function getProfileDetail(
+  profileId: number,
+  rangeDays = 30
+): Promise<ProfileDetail> {
   const supabase = getSupabase();
 
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
-  const sinceDate = thirtyDaysAgo.toISOString().slice(0, 10);
+  const clampedDays = Math.max(1, Math.min(365, Math.round(rangeDays)));
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (clampedDays - 1));
+  const sinceDate = since.toISOString().slice(0, 10);
 
   const [latestRes, dailyRes] = await Promise.all([
     supabase
@@ -489,7 +507,7 @@ export async function getProfileDetail(profileId: number): Promise<ProfileDetail
     supabase
       .from("profile_daily")
       .select(
-        "snapshot_date, score_end, score_delta, xp_total_end, xp_delta, reviews_authored, vouches_given, vouches_received, invitations_sent, invitations_accepted, attestations_added, slashes_authored, xp_gained, xp_spent"
+        "snapshot_date, score_end, score_delta, xp_total_end, xp_delta, reviews_authored, vouches_given, vouches_received, invitations_sent, invitations_accepted, attestations_added, slashes_authored, xp_gained, xp_spent, xp_by_type, xp_tips"
       )
       .eq("profile_id", profileId)
       .gte("snapshot_date", sinceDate)
@@ -539,22 +557,94 @@ export async function getProfileDetail(profileId: number): Promise<ProfileDetail
     slashes_authored: number;
     xp_gained: number | string;
     xp_spent: number | string;
-  }[]).map((r) => ({
-    snapshotDate: r.snapshot_date,
-    scoreEnd: r.score_end,
-    scoreDelta: r.score_delta,
-    xpTotalEnd: r.xp_total_end,
-    xpDelta: r.xp_delta,
-    reviewsAuthored: Number(r.reviews_authored ?? 0),
-    vouchesGiven: Number(r.vouches_given ?? 0),
-    vouchesReceived: Number(r.vouches_received ?? 0),
-    invitationsSent: Number(r.invitations_sent ?? 0),
-    invitationsAccepted: Number(r.invitations_accepted ?? 0),
-    attestationsAdded: Number(r.attestations_added ?? 0),
-    slashesAuthored: Number(r.slashes_authored ?? 0),
-    xpGained: Number(r.xp_gained ?? 0),
-    xpSpent: Number(r.xp_spent ?? 0),
-  }));
+    xp_by_type: Record<string, number | string> | null;
+    xp_tips: { sent?: Record<string, number | string>; received?: Record<string, number | string> } | null;
+  }[]).map((r) => {
+    const rawByType = r.xp_by_type ?? {};
+    const xpByType: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawByType)) xpByType[k] = Number(v);
+    const rawTips = r.xp_tips ?? {};
+    const tipSent: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawTips.sent ?? {})) tipSent[k] = Number(v);
+    const tipRecv: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawTips.received ?? {})) tipRecv[k] = Number(v);
+    return {
+      snapshotDate: r.snapshot_date,
+      scoreEnd: r.score_end,
+      scoreDelta: r.score_delta,
+      xpTotalEnd: r.xp_total_end,
+      xpDelta: r.xp_delta,
+      reviewsAuthored: Number(r.reviews_authored ?? 0),
+      vouchesGiven: Number(r.vouches_given ?? 0),
+      vouchesReceived: Number(r.vouches_received ?? 0),
+      invitationsSent: Number(r.invitations_sent ?? 0),
+      invitationsAccepted: Number(r.invitations_accepted ?? 0),
+      attestationsAdded: Number(r.attestations_added ?? 0),
+      slashesAuthored: Number(r.slashes_authored ?? 0),
+      xpGained: Number(r.xp_gained ?? 0),
+      xpSpent: Number(r.xp_spent ?? 0),
+      xpByType,
+      xpTips: { sent: tipSent, received: tipRecv },
+    };
+  });
 
-  return { profile, days };
+  // Aggregate tips across all days, then resolve counterparty profile info
+  // in one bulk lookup against profile_latest so the detail page can render
+  // names/avatars without round-tripping per row.
+  const tipTotals = new Map<number, { sent: number; received: number }>();
+  for (const d of days) {
+    for (const [id, pts] of Object.entries(d.xpTips.sent)) {
+      const n = Number(id);
+      const e = tipTotals.get(n) ?? { sent: 0, received: 0 };
+      e.sent += pts;
+      tipTotals.set(n, e);
+    }
+    for (const [id, pts] of Object.entries(d.xpTips.received)) {
+      const n = Number(id);
+      const e = tipTotals.get(n) ?? { sent: 0, received: 0 };
+      e.received += pts;
+      tipTotals.set(n, e);
+    }
+  }
+  let tipCounterparties: XpTipCounterparty[] = [];
+  if (tipTotals.size > 0) {
+    const ids = [...tipTotals.keys()];
+    const { data: latestRows } = await supabase
+      .from("profile_latest")
+      .select("profile_id, display_name, username, avatar_url, human_verified, score")
+      .in("profile_id", ids);
+    const latestById = new Map<
+      number,
+      {
+        profile_id: number;
+        display_name: string | null;
+        username: string | null;
+        avatar_url: string | null;
+        human_verified: boolean | null;
+        score: number | null;
+      }
+    >();
+    for (const row of (latestRows ?? []) as Parameters<typeof latestById.set>[1][]) {
+      latestById.set(row.profile_id, row);
+    }
+    tipCounterparties = [...tipTotals.entries()]
+      .map(([id, totals]) => {
+        const l = latestById.get(id);
+        return {
+          profileId: id,
+          displayName: l?.display_name ?? null,
+          username: l?.username ?? null,
+          avatarUrl: l?.avatar_url ?? null,
+          humanVerified: Boolean(l?.human_verified),
+          score: l?.score ?? null,
+          sent: totals.sent,
+          received: totals.received,
+        };
+      })
+      .sort(
+        (a, b) => Math.abs(b.sent + b.received) - Math.abs(a.sent + a.received)
+      );
+  }
+
+  return { profile, days, tipCounterparties };
 }

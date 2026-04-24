@@ -48,12 +48,20 @@ create table if not exists public.profile_daily (
 );
 
 -- Added after initial migration. Safe to re-run.
+-- xp_by_type stores a per-type breakdown (e.g. VOTE_COST, VOUCH_POOL_REWARD)
+-- as {type: signed_points} so the dashboard can distinguish "earned from
+-- rewards" from "farmed via passive events" without a schema change per
+-- new Ethos XP event type.
 alter table public.profile_daily
   add column if not exists invitations_accepted integer default 0,
   add column if not exists attestations_added integer default 0,
   add column if not exists slashes_authored integer default 0,
   add column if not exists xp_gained bigint default 0,
-  add column if not exists xp_spent bigint default 0;
+  add column if not exists xp_spent bigint default 0,
+  add column if not exists xp_by_type jsonb default '{}'::jsonb,
+  -- xp_tips shape: {"sent":{"<counterpartyProfileId>":<points>,...},
+  --                 "received":{"<counterpartyProfileId>":<points>,...}}
+  add column if not exists xp_tips jsonb default '{}'::jsonb;
 
 create index if not exists idx_profile_daily_date_score
   on public.profile_daily (snapshot_date, score_delta desc);

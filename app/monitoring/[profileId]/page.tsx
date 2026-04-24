@@ -15,7 +15,7 @@ import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network } from "lucide
 import { AppHeader } from "@/components/app-header";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { Sparkline } from "@/components/ui/sparkline";
-import type { ProfileDetail } from "@/lib/db/monitoring";
+import type { ProfileDetail, ProfileDailyRow, XpTipCounterparty } from "@/lib/db/monitoring";
 
 function fmtDate(isoDate: string): string {
   const [, m, d] = isoDate.split("-");
@@ -32,6 +32,17 @@ interface PageParams {
   params: Promise<{ profileId: string }>;
 }
 
+const RANGE_OPTIONS: { days: number; label: string }[] = [
+  { days: 1, label: "1d" },
+  { days: 7, label: "7d" },
+  { days: 30, label: "30d" },
+  { days: 90, label: "90d" },
+];
+
+function rangeLabel(days: number): string {
+  return RANGE_OPTIONS.find((r) => r.days === days)?.label ?? `${days}d`;
+}
+
 export default function ProfileDetailPage({ params }: PageParams) {
   const { profileId: profileIdRaw } = use(params);
   const profileId = Number(profileIdRaw);
@@ -42,6 +53,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
   const [data, setData] = useState<ProfileDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState(30);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -55,7 +67,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/monitoring/profile/${profileId}`);
+        const res = await fetch(`/api/monitoring/profile/${profileId}?range=${range}`);
         if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
         const json = (await res.json()) as ProfileDetail;
         if (!cancelled) setData(json);
@@ -68,7 +80,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
     return () => {
       cancelled = true;
     };
-  }, [session, profileId]);
+  }, [session, profileId, range]);
 
   if (status === "loading" || !session) {
     return (
@@ -103,7 +115,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       <AppHeader />
 
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href="/monitoring"
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -111,6 +123,21 @@ export default function ProfileDetailPage({ params }: PageParams) {
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to monitoring
         </Link>
+        <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
+          {RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.days}
+              onClick={() => setRange(opt.days)}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                range === opt.days
+                  ? "bg-muted text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading && !data && (
@@ -193,7 +220,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Score (30d)</CardTitle>
+                <CardTitle className="text-base">Score ({rangeLabel(range)})</CardTitle>
                 <CardDescription className="text-xs">
                   {days.length} day{days.length === 1 ? "" : "s"} with activity
                 </CardDescription>
@@ -206,7 +233,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">XP total (30d)</CardTitle>
+                <CardTitle className="text-base">XP total ({rangeLabel(range)})</CardTitle>
                 <CardDescription className="text-xs">
                   +{totalsRow.xpGained.toLocaleString()} earned · -{totalsRow.xpSpent.toLocaleString()} spent
                 </CardDescription>
@@ -219,12 +246,18 @@ export default function ProfileDetailPage({ params }: PageParams) {
             </Card>
           </div>
 
+          {/* XP breakdown */}
+          <XpBreakdownCard days={days} rangeLabel={rangeLabel(range)} />
+
+          {/* XP tip counterparties */}
+          <XpTipsCard counterparties={data.tipCounterparties} rangeLabel={rangeLabel(range)} />
+
           {/* Activity totals */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">30-day totals</CardTitle>
+              <CardTitle className="text-base">{rangeLabel(range)} totals</CardTitle>
               <CardDescription className="text-xs">
-                Summed across all days with a profile_daily row in the last 30 days
+                Summed across all days with a profile_daily row in the selected window
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-0">
@@ -243,7 +276,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
           {/* Daily breakdown */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Daily activity</CardTitle>
+              <CardTitle className="text-base">Daily activity ({rangeLabel(range)})</CardTitle>
               <CardDescription className="text-xs">
                 One row per day with activity or a score/xp change
               </CardDescription>
@@ -251,7 +284,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
             <CardContent className="pt-0">
               {days.length === 0 ? (
                 <div className="text-xs text-muted-foreground py-4">
-                  No activity recorded in the last 30 days.
+                  No activity recorded in the selected window.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -323,5 +356,151 @@ function Stat({ label, value }: { label: string; value: number }) {
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="font-semibold tabular-nums">{value.toLocaleString()}</div>
     </div>
+  );
+}
+
+function XpTipsCard({
+  counterparties,
+  rangeLabel,
+}: {
+  counterparties: XpTipCounterparty[];
+  rangeLabel: string;
+}) {
+  if (counterparties.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">XP tip flows ({rangeLabel})</CardTitle>
+          <CardDescription className="text-xs">
+            Who this profile has tipped and who has tipped them
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="text-xs text-muted-foreground py-4">
+            No tips in the selected window.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">XP tip flows ({rangeLabel})</CardTitle>
+        <CardDescription className="text-xs">
+          Sorted by total volume (sent + received). Click to open the counterparty&apos;s detail view.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr_auto_auto] gap-x-4 gap-y-1.5 text-sm">
+          <div className="hidden sm:contents text-[10px] uppercase tracking-wide text-muted-foreground">
+            <div></div>
+            <div>Counterparty</div>
+            <div className="text-right">Received</div>
+            <div className="text-right">Sent</div>
+          </div>
+          {counterparties.map((cp) => (
+            <div key={cp.profileId} className="contents">
+              <div className="shrink-0">
+                <Link
+                  href={`/monitoring/${cp.profileId}`}
+                  className="inline-flex items-center hover:opacity-80"
+                >
+                  {cp.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={cp.avatarUrl} alt="" className="h-6 w-6 rounded-full ring-1 ring-border" />
+                  ) : (
+                    <div className="h-6 w-6 rounded-full bg-muted" />
+                  )}
+                </Link>
+              </div>
+              <div className="min-w-0">
+                <Link
+                  href={`/monitoring/${cp.profileId}`}
+                  className="inline-flex items-center gap-1.5 min-w-0 hover:underline"
+                >
+                  <span className="font-medium truncate">
+                    {cp.displayName?.trim() || (cp.username ? `@${cp.username}` : `#${cp.profileId}`)}
+                  </span>
+                  {cp.humanVerified && <HumanVerifiedBadge size={12} />}
+                  {cp.username && cp.displayName && (
+                    <span className="text-xs text-muted-foreground truncate">@{cp.username}</span>
+                  )}
+                </Link>
+              </div>
+              <div className="text-right tabular-nums text-green-500">
+                {cp.received > 0 ? `+${cp.received.toLocaleString()}` : "-"}
+              </div>
+              <div className="text-right tabular-nums text-destructive">
+                {cp.sent > 0 ? `-${cp.sent.toLocaleString()}` : "-"}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatXpType(key: string): string {
+  // Humanize e.g. "VOUCH_POOL_REWARD" -> "Vouch pool reward". Keeps raw
+  // identifiers readable without pulling in a dictionary of every possible
+  // type — new types the Ethos team adds will surface automatically.
+  return key
+    .toLowerCase()
+    .split("_")
+    .map((w, i) => (i === 0 ? w[0]?.toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function XpBreakdownCard({
+  days,
+  rangeLabel,
+}: {
+  days: ProfileDailyRow[];
+  rangeLabel: string;
+}) {
+  const totals = new Map<string, number>();
+  for (const d of days) {
+    for (const [type, points] of Object.entries(d.xpByType ?? {})) {
+      totals.set(type, (totals.get(type) ?? 0) + Number(points));
+    }
+  }
+  const sorted = [...totals.entries()]
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">XP by event type ({rangeLabel})</CardTitle>
+        <CardDescription className="text-xs">
+          Signed per-type totals — helps distinguish earned-from-rewards from
+          passive farming. Sorted by magnitude.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {sorted.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4">
+            No XP events attributable to this profile in the selected window.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+            {sorted.map(([type, points]) => (
+              <div key={type} className="flex items-center justify-between gap-3 py-0.5">
+                <span className="truncate text-muted-foreground">{formatXpType(type)}</span>
+                <span
+                  className={`tabular-nums font-medium shrink-0 ${
+                    points > 0 ? "text-green-500" : points < 0 ? "text-destructive" : ""
+                  }`}
+                >
+                  {points > 0 ? "+" : ""}
+                  {points.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

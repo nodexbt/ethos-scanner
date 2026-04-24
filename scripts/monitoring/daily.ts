@@ -29,6 +29,8 @@ interface ActivityCounts {
   attestations_added: Map<number, number>;
   slashes_authored: Map<number, number>;
   xp: Map<number, { gained: number; spent: number }>;
+  xp_by_type: Map<number, Record<string, number>>;
+  xp_tips: Map<number, { sent: Record<string, number>; received: Record<string, number> }>;
   new_profiles_24h: number;
 }
 
@@ -49,6 +51,8 @@ interface DailyRow {
   slashes_authored: number;
   xp_gained: number;
   xp_spent: number;
+  xp_by_type: Record<string, number>;
+  xp_tips: { sent: Record<string, number>; received: Record<string, number> };
   human_verified: boolean;
 }
 
@@ -231,6 +235,60 @@ async function fetchActivity(ethos: Client): Promise<ActivityCounts> {
      group by 1`,
     "xp"
   );
+  // XP grouped by (profile_id, type). Stored as a signed sum per type so
+  // a cost type like VOTE_COST surfaces as negative in the breakdown.
+  const xpByTypeQuery = await queryWithRetry<{
+    profile_id: number;
+    xp_type: string;
+    points: string;
+  }>(
+    ethos,
+    `select (regexp_replace(userkey::text, '^profileId:', ''))::int as profile_id,
+            type::text as xp_type,
+            sum(points)::bigint as points
+     from xp_points_history
+     where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+       and userkey::text like 'profileId:%'
+     group by 1, 2`,
+    "xp_by_type"
+  );
+  // XP tip flows — one row per (sender, receiver) pair. The sender side
+  // carries the absolute amount as a positive number in "sent", the
+  // receiver side carries it in "received". Both sides are keyed by
+  // counterpartyProfileId, resolved from either the metadata field or
+  // parsed from the sender's userkey depending on direction.
+  const xpTipsQuery = await queryWithRetry<{
+    profile_id: number;
+    direction: "sent" | "received";
+    counterparty_id: number;
+    points: string;
+  }>(
+    ethos,
+    `select profile_id, direction, counterparty_id, sum(points)::bigint as points
+     from (
+       select (regexp_replace(userkey::text, '^profileId:', ''))::int as profile_id,
+              'sent'::text as direction,
+              (regexp_replace(metadata->>'counterpartyUserkey', '^profileId:', ''))::int as counterparty_id,
+              -points as points
+       from xp_points_history
+       where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+         and type::text = 'XP_TIP_SENT'
+         and userkey::text like 'profileId:%'
+         and metadata->>'counterpartyUserkey' like 'profileId:%'
+       union all
+       select (regexp_replace(userkey::text, '^profileId:', ''))::int as profile_id,
+              'received'::text as direction,
+              (metadata->>'counterpartyProfileId')::int as counterparty_id,
+              points as points
+       from xp_points_history
+       where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+         and type::text = 'XP_TIP_RECEIVED'
+         and userkey::text like 'profileId:%'
+         and metadata->>'counterpartyProfileId' is not null
+     ) t
+     group by 1, 2, 3`,
+    "xp_tips"
+  );
   const newProfiles = await queryWithRetry<{ n: string }>(
     ethos,
     `select count(*)::bigint as n
@@ -263,6 +321,33 @@ async function fetchActivity(ethos: Client): Promise<ActivityCounts> {
     xp: new Map(
       xp.rows.map((r) => [r.profile_id, { gained: Number(r.gained), spent: Number(r.spent) }])
     ),
+    xp_by_type: (() => {
+      const map = new Map<number, Record<string, number>>();
+      for (const row of xpByTypeQuery.rows) {
+        let entry = map.get(row.profile_id);
+        if (!entry) {
+          entry = {};
+          map.set(row.profile_id, entry);
+        }
+        entry[row.xp_type] = Number(row.points);
+      }
+      return map;
+    })(),
+    xp_tips: (() => {
+      const map = new Map<
+        number,
+        { sent: Record<string, number>; received: Record<string, number> }
+      >();
+      for (const row of xpTipsQuery.rows) {
+        let entry = map.get(row.profile_id);
+        if (!entry) {
+          entry = { sent: {}, received: {} };
+          map.set(row.profile_id, entry);
+        }
+        entry[row.direction][String(row.counterparty_id)] = Number(row.points);
+      }
+      return map;
+    })(),
     new_profiles_24h: Number(newProfiles.rows[0]?.n ?? 0),
   };
 }
@@ -287,6 +372,8 @@ function buildRows(
     const xp = activity.xp.get(c.profile_id);
     const xpGained = xp?.gained ?? 0;
     const xpSpent = xp?.spent ?? 0;
+    const xpByType = activity.xp_by_type.get(c.profile_id) ?? {};
+    const xpTips = activity.xp_tips.get(c.profile_id) ?? { sent: {}, received: {} };
 
     const priorState = prior.get(c.profile_id);
     const scoreDelta =
@@ -330,6 +417,8 @@ function buildRows(
       slashes_authored: slashesAuthored,
       xp_gained: xpGained,
       xp_spent: xpSpent,
+      xp_by_type: xpByType,
+      xp_tips: xpTips,
       human_verified: c.human_verified,
     });
   }
