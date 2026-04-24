@@ -41,6 +41,17 @@ export interface NewProfile extends ProfileSummary {
   createdAt: string;
 }
 
+export interface InvestigatedMover extends ProfileSummary {
+  profileId: number;
+  primaryAddress: string | null;
+  scoreDelta: number | null;
+  scoreEnd: number | null;
+  xpGained: number;
+  reviewsAuthored: number;
+  vouchesGiven: number;
+  investigationUpdatedAt: string;
+}
+
 export interface ProfileDetail {
   profile: {
     profileId: number;
@@ -84,6 +95,7 @@ export interface MonitoringSummary {
   topAttestationAdders: ActivitySpike[];
   newProfiles: NewProfile[];
   newProfileCount: number;
+  investigatedMovers: InvestigatedMover[];
 }
 
 const LIMIT = 5;
@@ -117,6 +129,7 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
     attestationsRes,
     newProfilesRes,
     newProfileCountRes,
+    investigationsRes,
   ] = await Promise.all([
     supabase
       .from("monitoring_runs")
@@ -183,6 +196,10 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
       .from("profile_latest")
       .select("profile_id", { count: "exact", head: true })
       .gte("created_at", `${today}T00:00:00Z`),
+    // All investigated wallet addresses — small set (investigations grows
+    // slowly), so it's cheaper to pull them and filter profile_latest by
+    // primary_address in two steps than to attempt a cross-schema join.
+    supabase.from("investigations").select("id, target, updated_at"),
   ]);
 
   // Step 2: collect every profile_id we need names for, and bulk-fetch
@@ -295,6 +312,144 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
     createdAt: r.created_at,
   }));
 
+  // Cross-reference: profiles that have an existing investigation AND had
+  // activity today. Three-step lookup (list investigated addresses, map to
+  // profile_ids, fetch today's rows) instead of a cross-table join, which
+  // the Supabase query builder doesn't support cleanly.
+  const investigations = ((investigationsRes.data ?? []) as {
+    id: string;
+    target: string;
+    updated_at: string;
+  }[]);
+  const INVESTIGATED_LIMIT = 10;
+  let investigatedMovers: InvestigatedMover[] = [];
+  if (investigations.length > 0) {
+    const targets = [...new Set(investigations.map((i) => i.target.toLowerCase()))];
+
+    // Match against any of the profile's wallets (profile_addresses), not
+    // just the primary. A scanner user could have investigated any of a
+    // profile's addresses.
+    const { data: addressMatches } = await supabase
+      .from("profile_addresses")
+      .select("profile_id, address")
+      .in("address", targets);
+    const matchedAddresses = (addressMatches ?? []) as {
+      profile_id: number;
+      address: string;
+    }[];
+    const profileIdToMatchedAddress = new Map<number, string>();
+    for (const m of matchedAddresses) {
+      if (!profileIdToMatchedAddress.has(m.profile_id)) {
+        profileIdToMatchedAddress.set(m.profile_id, m.address);
+      }
+    }
+    const matchedProfileIds = [...profileIdToMatchedAddress.keys()];
+
+    const { data: matchedLatest } = matchedProfileIds.length
+      ? await supabase
+          .from("profile_latest")
+          .select(
+            "profile_id, primary_address, display_name, username, avatar_url, human_verified, score"
+          )
+          .in("profile_id", matchedProfileIds)
+      : { data: [] };
+
+    const matched = (matchedLatest ?? []) as {
+      profile_id: number;
+      primary_address: string | null;
+      display_name: string | null;
+      username: string | null;
+      avatar_url: string | null;
+      human_verified: boolean | null;
+      score: number | null;
+    }[];
+
+    if (matched.length > 0) {
+      // Pick the most-recent investigation per target address, then roll
+      // up to profile_id via the matched-address map so each profile gets
+      // its most recent scan timestamp.
+      const latestByTarget = new Map<string, string>();
+      for (const inv of investigations) {
+        const key = inv.target.toLowerCase();
+        const prior = latestByTarget.get(key);
+        if (!prior || new Date(inv.updated_at) > new Date(prior)) {
+          latestByTarget.set(key, inv.updated_at);
+        }
+      }
+
+      const profileIds = matched.map((m) => m.profile_id);
+      const { data: dailyRows } = await supabase
+        .from("profile_daily")
+        .select(
+          "profile_id, score_end, score_delta, reviews_authored, vouches_given, xp_gained"
+        )
+        .eq("snapshot_date", today)
+        .in("profile_id", profileIds);
+
+      const dailyByProfile = new Map<
+        number,
+        {
+          score_end: number | null;
+          score_delta: number | null;
+          reviews_authored: number;
+          vouches_given: number;
+          xp_gained: number | string;
+        }
+      >();
+      for (const r of (dailyRows ?? []) as {
+        profile_id: number;
+        score_end: number | null;
+        score_delta: number | null;
+        reviews_authored: number;
+        vouches_given: number;
+        xp_gained: number | string;
+      }[]) {
+        dailyByProfile.set(r.profile_id, r);
+      }
+
+      investigatedMovers = matched
+        .map((m) => {
+          const d = dailyByProfile.get(m.profile_id);
+          if (!d) return null;
+          // Resolve the investigation timestamp via the wallet that
+          // actually matched, not just the primary — those can differ.
+          const matchedAddress = profileIdToMatchedAddress.get(m.profile_id);
+          const inv = matchedAddress ? latestByTarget.get(matchedAddress) : undefined;
+          if (!inv) return null;
+          return {
+            profileId: m.profile_id,
+            primaryAddress: m.primary_address,
+            displayName: m.display_name,
+            username: m.username,
+            avatarUrl: m.avatar_url,
+            humanVerified: Boolean(m.human_verified),
+            score: m.score,
+            scoreDelta: d.score_delta,
+            scoreEnd: d.score_end,
+            xpGained: Number(d.xp_gained ?? 0),
+            reviewsAuthored: Number(d.reviews_authored ?? 0),
+            vouchesGiven: Number(d.vouches_given ?? 0),
+            investigationUpdatedAt: inv,
+          };
+        })
+        .filter((r): r is InvestigatedMover => r !== null)
+        // Rank by a weighted magnitude of today's change — score and vouch
+        // activity dominate because they're rarer than XP ticks, which
+        // accumulate from routine interactions. XP contributes at a much
+        // lower weight so an active-but-not-unusual day still ranks below
+        // a clear score or vouch spike.
+        .sort((a, b) => {
+          const weight = (r: InvestigatedMover) =>
+            Math.abs(r.scoreDelta ?? 0) * 50 +
+            r.vouchesGiven * 20 +
+            r.reviewsAuthored * 10 +
+            r.xpGained / 1000;
+          return weight(b) - weight(a);
+        })
+        .slice(0, INVESTIGATED_LIMIT);
+    }
+  }
+
   return {
     lastRun,
     today,
@@ -306,6 +461,7 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
     topAttestationAdders: spike(attestationsRes, "attestations_added"),
     newProfiles,
     newProfileCount: newProfileCountRes.count ?? 0,
+    investigatedMovers,
   };
 }
 

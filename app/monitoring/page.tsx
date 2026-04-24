@@ -21,6 +21,7 @@ import type {
   XpGainer,
   ActivitySpike,
   NewProfile,
+  InvestigatedMover,
 } from "@/lib/db/monitoring";
 
 function formatRelative(ts: string): string {
@@ -214,6 +215,48 @@ function SpikeCard({
   );
 }
 
+function InvestigatedMoversCard({ rows }: { rows: InvestigatedMover[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Previously investigated</CardTitle>
+        <CardDescription className="text-xs">
+          Profiles with an existing sybil scan that also had activity today
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {rows.length === 0 ? (
+          <EmptySlot label="investigated profiles with activity" />
+        ) : (
+          rows.map((r) => {
+            const signals: string[] = [];
+            if (r.scoreDelta != null && r.scoreDelta !== 0) {
+              signals.push(`${r.scoreDelta > 0 ? "+" : ""}${r.scoreDelta} score`);
+            }
+            if (r.xpGained > 0) signals.push(`+${r.xpGained.toLocaleString()} xp`);
+            if (r.reviewsAuthored > 0) signals.push(`${r.reviewsAuthored} reviews`);
+            if (r.vouchesGiven > 0) signals.push(`${r.vouchesGiven} vouches`);
+            return (
+              <Row
+                key={r.profileId}
+                left={<ProfileName p={r} />}
+                right={
+                  <span className="inline-flex items-center gap-2">
+                    <span>{signals.join(" · ") || "—"}</span>
+                    <span className="text-[10px] uppercase tracking-wide bg-muted px-1.5 py-0.5 rounded">
+                      scanned
+                    </span>
+                  </span>
+                }
+              />
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function NewProfilesCard({ rows, total }: { rows: NewProfile[]; total: number }) {
   return (
     <Card>
@@ -346,6 +389,9 @@ export default function MonitoringPage() {
               unit="attestations"
               emptyLabel="attestation activity"
             />
+            <div className="md:col-span-2">
+              <InvestigatedMoversCard rows={data.investigatedMovers} />
+            </div>
             <div className="md:col-span-2">
               <NewProfilesCard rows={data.newProfiles} total={data.newProfileCount} />
             </div>

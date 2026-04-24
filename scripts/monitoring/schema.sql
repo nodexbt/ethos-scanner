@@ -75,3 +75,19 @@ create table if not exists public.monitoring_runs (
 alter table public.profile_latest enable row level security;
 alter table public.profile_daily enable row level security;
 alter table public.monitoring_runs enable row level security;
+
+-- Every wallet address keyed to a profile. primary_address on profile_latest
+-- is only a display/launch convenience; this table is the canonical mapping
+-- used to cross-reference arbitrary scanner targets (which can be any of a
+-- profile's wallets) against the monitored profiles.
+create table if not exists public.profile_addresses (
+  profile_id integer not null,
+  address text not null,
+  created_at timestamptz default now(),
+  primary key (profile_id, address)
+);
+
+create index if not exists idx_profile_addresses_address
+  on public.profile_addresses (address);
+
+alter table public.profile_addresses enable row level security;

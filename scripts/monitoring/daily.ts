@@ -538,6 +538,37 @@ async function main() {
     }));
     await upsertInBatches(supabase, "profile_latest", latestRows, "profile_id");
 
+    console.log("Fetching all profile→address mappings from Ethos…");
+    const allAddressesQuery = await queryWithRetry<{ profile_id: number; address: string }>(
+      ethos,
+      `select u.profile_id,
+              regexp_replace(uk.userkey::text, '^address:', '') as address
+       from users u
+       join profiles p on p.id = u.profile_id
+       join userkeys uk on uk.user_id = u.id
+       where u.profile_id is not null
+         and p.archived = false
+         and uk.key_type = 'ADDRESS'`,
+      "all_addresses"
+    );
+    const addressRows = allAddressesQuery.rows.map((r) => ({
+      profile_id: r.profile_id,
+      address: r.address.toLowerCase(),
+    }));
+    console.log(`  ${addressRows.length} (profile, address) pairs`);
+    // onConflict ignoreDuplicates keeps prior rows alive across runs — we
+    // accept a little drift (if a profile drops an address we still have
+    // the stale mapping) in exchange for a simple, append-only upsert.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (let i = 0; i < addressRows.length; i += 500) {
+      const chunk = addressRows.slice(i, i + 500);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("profile_addresses")
+        .upsert(chunk, { onConflict: "profile_id,address", ignoreDuplicates: true });
+      if (error) throw new Error(`profile_addresses upsert failed: ${error.message}`);
+    }
+
     const durationMs = Date.now() - startedAt;
     await supabase
       .from("monitoring_runs")
