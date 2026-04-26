@@ -99,3 +99,24 @@ create index if not exists idx_profile_addresses_address
   on public.profile_addresses (address);
 
 alter table public.profile_addresses enable row level security;
+
+-- Per-user watchlist. user_profile_id is the Ethos profile ID of the signed-in
+-- user (from session.user.ethos.profileId); watched_profile_id is the
+-- Ethos profile being tracked.
+create table if not exists public.watchlist (
+  user_profile_id integer not null,
+  watched_profile_id integer not null,
+  note text,
+  added_at timestamptz default now(),
+  primary key (user_profile_id, watched_profile_id)
+);
+
+create index if not exists idx_watchlist_user
+  on public.watchlist (user_profile_id);
+
+alter table public.watchlist enable row level security;
+
+-- Nudge PostgREST to refresh its schema cache after adding tables.
+-- Supabase-hosted instances occasionally miss the auto-reload; this makes
+-- sure the REST layer sees any new tables as soon as this file is run.
+notify pgrst, 'reload schema';

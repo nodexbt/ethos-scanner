@@ -22,7 +22,9 @@ import type {
   ActivitySpike,
   NewProfile,
   InvestigatedMover,
+  WatchlistEntry,
 } from "@/lib/db/monitoring";
+import { Star } from "lucide-react";
 
 function formatRelative(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
@@ -215,6 +217,57 @@ function SpikeCard({
   );
 }
 
+function WatchlistCard({ rows }: { rows: WatchlistEntry[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base inline-flex items-center gap-1.5">
+          <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
+          Your watchlist
+        </CardTitle>
+        <CardDescription className="text-xs">
+          {rows.length === 0
+            ? "Pin profiles from their detail page to track them here."
+            : `${rows.length} watched · today's activity shown when present`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {rows.length === 0 ? (
+          <EmptySlot label="watched profiles" />
+        ) : (
+          rows.map((r) => {
+            const signals: string[] = [];
+            if (r.today) {
+              if (r.today.scoreDelta != null && r.today.scoreDelta !== 0) {
+                signals.push(
+                  `${r.today.scoreDelta > 0 ? "+" : ""}${r.today.scoreDelta} score`
+                );
+              }
+              if (r.today.xpGained > 0)
+                signals.push(`+${r.today.xpGained.toLocaleString()} xp`);
+              if (r.today.reviewsAuthored > 0)
+                signals.push(`${r.today.reviewsAuthored} reviews`);
+              if (r.today.vouchesGiven > 0)
+                signals.push(`${r.today.vouchesGiven} vouches`);
+            }
+            return (
+              <Row
+                key={r.profileId}
+                left={<ProfileName p={r} />}
+                right={
+                  <span className="text-muted-foreground">
+                    {signals.length ? signals.join(" · ") : "no activity today"}
+                  </span>
+                }
+              />
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function InvestigatedMoversCard({ rows }: { rows: InvestigatedMover[] }) {
   return (
     <Card>
@@ -288,6 +341,7 @@ export default function MonitoringPage() {
   const router = useRouter();
 
   const [data, setData] = useState<MonitoringSummary | null>(null);
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -305,10 +359,19 @@ export default function MonitoringPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/monitoring/summary");
-        if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
-        const json = (await res.json()) as MonitoringSummary;
-        if (!cancelled) setData(json);
+        // Fetch both in parallel. Summary failure is fatal; watchlist
+        // failure just hides the card.
+        const [sRes, wRes] = await Promise.all([
+          fetch("/api/monitoring/summary"),
+          fetch("/api/monitoring/watchlist"),
+        ]);
+        if (!sRes.ok) throw new Error(`Failed to load summary: ${sRes.status}`);
+        const summary = (await sRes.json()) as MonitoringSummary;
+        const wl = wRes.ok ? ((await wRes.json()) as WatchlistEntry[]) : [];
+        if (!cancelled) {
+          setData(summary);
+          setWatchlist(wl);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
       } finally {
@@ -362,6 +425,7 @@ export default function MonitoringPage() {
       {data && (
         <div className="space-y-4">
           <LastRunCard run={data.lastRun} />
+          {watchlist && <WatchlistCard rows={watchlist} />}
           <div className="grid gap-4 md:grid-cols-2">
             <ScoreGainersCard rows={data.topScoreGainers} />
             <XpGainersCard rows={data.topXpGainers} />

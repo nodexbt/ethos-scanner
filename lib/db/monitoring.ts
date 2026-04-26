@@ -95,6 +95,21 @@ export interface XpTipCounterparty extends ProfileSummary {
   received: number;
 }
 
+export interface WatchlistEntry extends ProfileSummary {
+  profileId: number;
+  primaryAddress: string | null;
+  addedAt: string;
+  note: string | null;
+  /** Today's activity (null if no profile_daily row for today). */
+  today: {
+    scoreDelta: number | null;
+    scoreEnd: number | null;
+    xpGained: number;
+    reviewsAuthored: number;
+    vouchesGiven: number;
+  } | null;
+}
+
 export interface MonitoringSummary {
   lastRun: LastRun | null;
   today: string;
@@ -474,6 +489,147 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
     newProfileCount: newProfileCountRes.count ?? 0,
     investigatedMovers,
   };
+}
+
+/**
+ * Load a user's watchlist, joined to profile_latest for display info and
+ * to today's profile_daily row for recent activity.
+ */
+export async function getWatchlist(userProfileId: number): Promise<WatchlistEntry[]> {
+  const supabase = getSupabase();
+  const today = todayUtcDate();
+
+  const { data: watchRows, error } = await supabase
+    .from("watchlist")
+    .select("watched_profile_id, note, added_at")
+    .eq("user_profile_id", userProfileId)
+    .order("added_at", { ascending: false });
+  if (error) throw new Error(`watchlist select: ${error.message}`);
+  const watched = (watchRows ?? []) as {
+    watched_profile_id: number;
+    note: string | null;
+    added_at: string;
+  }[];
+  if (watched.length === 0) return [];
+
+  const ids = watched.map((w) => w.watched_profile_id);
+  const [{ data: latest }, { data: daily }] = await Promise.all([
+    supabase
+      .from("profile_latest")
+      .select(
+        "profile_id, display_name, username, avatar_url, human_verified, score, primary_address"
+      )
+      .in("profile_id", ids),
+    supabase
+      .from("profile_daily")
+      .select("profile_id, score_delta, score_end, xp_gained, reviews_authored, vouches_given")
+      .eq("snapshot_date", today)
+      .in("profile_id", ids),
+  ]);
+
+  const latestById = new Map<
+    number,
+    {
+      profile_id: number;
+      display_name: string | null;
+      username: string | null;
+      avatar_url: string | null;
+      human_verified: boolean | null;
+      score: number | null;
+      primary_address: string | null;
+    }
+  >();
+  for (const row of (latest ?? []) as Parameters<typeof latestById.set>[1][]) {
+    latestById.set(row.profile_id, row);
+  }
+  const dailyById = new Map<
+    number,
+    {
+      score_delta: number | null;
+      score_end: number | null;
+      xp_gained: number | string;
+      reviews_authored: number;
+      vouches_given: number;
+    }
+  >();
+  for (const row of (daily ?? []) as {
+    profile_id: number;
+    score_delta: number | null;
+    score_end: number | null;
+    xp_gained: number | string;
+    reviews_authored: number;
+    vouches_given: number;
+  }[]) {
+    dailyById.set(row.profile_id, row);
+  }
+
+  return watched.map((w) => {
+    const l = latestById.get(w.watched_profile_id);
+    const d = dailyById.get(w.watched_profile_id);
+    return {
+      profileId: w.watched_profile_id,
+      primaryAddress: l?.primary_address ?? null,
+      displayName: l?.display_name ?? null,
+      username: l?.username ?? null,
+      avatarUrl: l?.avatar_url ?? null,
+      humanVerified: Boolean(l?.human_verified),
+      score: l?.score ?? null,
+      addedAt: w.added_at,
+      note: w.note,
+      today: d
+        ? {
+            scoreDelta: d.score_delta,
+            scoreEnd: d.score_end,
+            xpGained: Number(d.xp_gained ?? 0),
+            reviewsAuthored: Number(d.reviews_authored ?? 0),
+            vouchesGiven: Number(d.vouches_given ?? 0),
+          }
+        : null,
+    };
+  });
+}
+
+export async function isWatching(
+  userProfileId: number,
+  watchedProfileId: number
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("watchlist")
+    .select("watched_profile_id")
+    .eq("user_profile_id", userProfileId)
+    .eq("watched_profile_id", watchedProfileId)
+    .maybeSingle();
+  if (error) throw new Error(`isWatching: ${error.message}`);
+  return !!data;
+}
+
+export async function addToWatchlist(
+  userProfileId: number,
+  watchedProfileId: number
+): Promise<void> {
+  const supabase = getSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
+    .from("watchlist")
+    .upsert(
+      { user_profile_id: userProfileId, watched_profile_id: watchedProfileId },
+      { onConflict: "user_profile_id,watched_profile_id", ignoreDuplicates: true }
+    );
+  if (error) throw new Error(`addToWatchlist: ${error.message}`);
+}
+
+export async function removeFromWatchlist(
+  userProfileId: number,
+  watchedProfileId: number
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("watchlist")
+    .delete()
+    .eq("user_profile_id", userProfileId)
+    .eq("watched_profile_id", watchedProfileId);
+  if (error) throw new Error(`removeFromWatchlist: ${error.message}`);
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network } from "lucide-react";
+import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network, Star } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -54,6 +54,8 @@ export default function ProfileDetailPage({ params }: PageParams) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState(30);
+  const [watching, setWatching] = useState<boolean | null>(null);
+  const [watchBusy, setWatchBusy] = useState(false);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -81,6 +83,42 @@ export default function ProfileDetailPage({ params }: PageParams) {
       cancelled = true;
     };
   }, [session, profileId, range]);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/monitoring/watchlist/${profileId}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { watching: boolean };
+        if (!cancelled) setWatching(json.watching);
+      } catch {
+        // non-critical — leave null so button shows neutral state
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, profileId]);
+
+  const toggleWatching = async () => {
+    if (watchBusy || watching === null) return;
+    const next = !watching;
+    setWatchBusy(true);
+    setWatching(next); // optimistic
+    try {
+      const res = await fetch(`/api/monitoring/watchlist/${profileId}`, {
+        method: next ? "POST" : "DELETE",
+      });
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+    } catch (err) {
+      setWatching(!next); // rollback on error
+      console.error(err);
+    } finally {
+      setWatchBusy(false);
+    }
+  };
 
   if (status === "loading" || !session) {
     return (
@@ -186,6 +224,21 @@ export default function ProfileDetailPage({ params }: PageParams) {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={toggleWatching}
+                  disabled={watching === null || watchBusy}
+                  title={watching ? "Remove from watchlist" : "Add to watchlist"}
+                  className={`inline-flex items-center gap-1.5 text-xs rounded-md px-2.5 py-1.5 border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    watching
+                      ? "bg-amber-500/10 border-amber-500/40 text-amber-500 hover:bg-amber-500/20"
+                      : "border-border hover:bg-muted/50"
+                  }`}
+                >
+                  <Star
+                    className={`h-3 w-3 ${watching ? "fill-current" : ""}`}
+                  />
+                  {watching ? "Watching" : "Watch"}
+                </button>
                 {profile?.primaryAddress ? (
                   <Link
                     href={`/scan/${profile.primaryAddress.toLowerCase()}`}
