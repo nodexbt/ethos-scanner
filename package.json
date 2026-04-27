@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "monitor": "tsx scripts/monitoring/daily.ts"
+    "monitor": "tsx scripts/monitoring/daily.ts",
+    "monitor:backfill-markets": "tsx scripts/monitoring/daily.ts --backfill-markets"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

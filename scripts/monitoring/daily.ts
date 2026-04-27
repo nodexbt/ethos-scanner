@@ -553,6 +553,102 @@ async function postDiscord(
   }
 }
 
+/**
+ * One-off backfill: walk MARKET_VOTE activities for the last N days and
+ * write per-(profile_id, day) market aggregates into profile_daily. Skips
+ * the rest of the cron entirely. Existing profile_daily rows keep their
+ * non-market columns intact because the upsert input only mentions
+ * market_* fields plus the conflict keys, so DO UPDATE only touches those.
+ */
+async function backfillMarkets(
+  ethos: Client,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  days: number
+): Promise<void> {
+  console.log(`Backfilling MARKET_VOTE activities for last ${days} days…`);
+  const tradeRows = await queryWithRetry<{
+    profile_id: number;
+    side: string;
+    funds_wei: string;
+    market_subject: number;
+    created_at: string;
+  }>(
+    ethos,
+    `with canon as (
+       select distinct user_id as canonical, merged_from_user_id as alias
+       from userkeys
+       where merged_from_user_id is not null
+     )
+     select u.profile_id::int as profile_id,
+            a.metadata->>'type' as side,
+            (a.metadata->>'funds')::text as funds_wei,
+            a."subjectId"::int as market_subject,
+            to_char(a."createdAt", 'YYYY-MM-DD') as created_at
+     from activities a
+     left join canon c on c.alias = a."authorId"
+     left join users u on u.id = coalesce(c.canonical, a."authorId")
+     where a."activityType"::text = 'MARKET_VOTE'
+       and a."createdAt" >= now() - interval '${days} days'
+       and u.profile_id is not null`,
+    "backfill_market_trades"
+  );
+  console.log(`  ${tradeRows.rows.length} trade events`);
+
+  const ZERO = BigInt(0);
+  const aggMap = new Map<
+    string,
+    {
+      profile_id: number;
+      day: string;
+      bought: bigint;
+      sold: bigint;
+      trades: number;
+      markets: Set<number>;
+    }
+  >();
+  for (const r of tradeRows.rows) {
+    const key = `${r.profile_id}|${r.created_at}`;
+    let agg = aggMap.get(key);
+    if (!agg) {
+      agg = {
+        profile_id: r.profile_id,
+        day: r.created_at,
+        bought: ZERO,
+        sold: ZERO,
+        trades: 0,
+        markets: new Set<number>(),
+      };
+      aggMap.set(key, agg);
+    }
+    const wei = BigInt(r.funds_wei || "0");
+    if (r.side === "BUY") agg.bought += wei;
+    else if (r.side === "SELL") agg.sold += wei;
+    agg.trades += 1;
+    agg.markets.add(r.market_subject);
+  }
+  console.log(`  ${aggMap.size} (profile, day) buckets to write`);
+
+  const updates = [...aggMap.values()].map((agg) => ({
+    profile_id: agg.profile_id,
+    snapshot_date: agg.day,
+    market_bought_wei: agg.bought.toString(),
+    market_sold_wei: agg.sold.toString(),
+    market_profit_delta_wei: (agg.sold - agg.bought).toString(),
+    market_active_positions: agg.markets.size,
+    market_trades_count: agg.trades,
+  }));
+
+  for (let i = 0; i < updates.length; i += 500) {
+    const chunk = updates.slice(i, i + 500);
+    const { error } = await supabase
+      .from("profile_daily")
+      .upsert(chunk, { onConflict: "profile_id,snapshot_date" });
+    if (error) throw new Error(`backfill upsert: ${error.message}`);
+  }
+  console.log(`  wrote ${updates.length} profile_daily market rows`);
+}
+
 async function main() {
   const ethosUrl = process.env.ETHOS_DB_URL;
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -560,6 +656,26 @@ async function main() {
   const webhook = process.env.DISCORD_WEBHOOK;
   if (!ethosUrl) throw new Error("ETHOS_DB_URL not set");
   if (!supabaseUrl || !supabaseKey) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_KEY not set");
+
+  // Backfill mode: skip the daily aggregation pipeline and just rewrite the
+  // market_* columns on profile_daily for the last N days. Run as
+  // `npm run monitor -- --backfill-markets [days]`. Idempotent.
+  const backfillIdx = process.argv.indexOf("--backfill-markets");
+  if (backfillIdx !== -1) {
+    const daysRaw = process.argv[backfillIdx + 1];
+    const days = daysRaw && /^\d+$/.test(daysRaw) ? parseInt(daysRaw, 10) : 600;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const ethos = new Client({ connectionString: ethosUrl, ssl: { rejectUnauthorized: false } });
+    const startedAt = Date.now();
+    try {
+      await ethos.connect();
+      await backfillMarkets(ethos, supabase, days);
+      console.log(`Backfill done in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
+    } finally {
+      await ethos.end().catch(() => {});
+    }
+    return;
+  }
 
   const startedAt = Date.now();
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -790,98 +906,33 @@ async function main() {
       }
     }
 
-    console.log("Aggregating MARKET_VOTE activities (last 24h)…");
-    // Activities are author-attributed via users.id which is the canonical
-    // identity (wallets, social accounts, and old-merged user records all
-    // resolve through userkeys.merged_from_user_id). This gives us full
-    // profile_id attribution regardless of which wallet signed the trade.
-    const tradeRows = await queryWithRetry<{
-      profile_id: number;
-      side: string;
-      funds_wei: string;
-      market_subject: number;
-    }>(
-      ethos,
-      `with canon as (
-         select distinct user_id as canonical, merged_from_user_id as alias
-         from userkeys
-         where merged_from_user_id is not null
-       )
-       select u.profile_id::int as profile_id,
-              a.metadata->>'type' as side,
-              (a.metadata->>'funds')::text as funds_wei,
-              a."subjectId"::int as market_subject
-       from activities a
-       left join canon c on c.alias = a."authorId"
-       left join users u on u.id = coalesce(c.canonical, a."authorId")
-       where a."activityType"::text = 'MARKET_VOTE'
-         and a."createdAt" >= now() - interval '${WINDOW_HOURS} hours'
-         and u.profile_id is not null`,
-      "market_trades"
-    );
-    console.log(`  ${tradeRows.rows.length} attributable trade activities`);
-
-    const ZERO = BigInt(0);
-    const marketAggByProfile = new Map<
-      number,
-      {
-        bought: bigint;
-        sold: bigint;
-        trades: number;
-        markets: Set<number>;
-      }
-    >();
-    for (const r of tradeRows.rows) {
-      const agg =
-        marketAggByProfile.get(r.profile_id) ?? {
-          bought: ZERO,
-          sold: ZERO,
-          trades: 0,
-          markets: new Set<number>(),
-        };
-      const wei = BigInt(r.funds_wei || "0");
-      if (r.side === "BUY") agg.bought += wei;
-      else if (r.side === "SELL") agg.sold += wei;
-      agg.trades += 1;
-      agg.markets.add(r.market_subject);
-      marketAggByProfile.set(r.profile_id, agg);
+    // Reuse the per-calendar-day backfill logic for the last 2 days so the
+    // main cron writes today's and yesterday's market rows correctly. A
+    // rolling 24h window would smear cross-midnight trades into a single
+    // snapshot_date and double-count them on the following day's run.
+    //
+    // First zero out market_* for any rows in the window — profiles that
+    // had activity in the window but not today shouldn't carry stale
+    // values from a previous run. Bound by a non-zero filter so we only
+    // touch rows that actually have something to clear.
+    {
+      const yesterday = new Date();
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const sinceDate = yesterday.toISOString().slice(0, 10);
+      const { error } = await supabase
+        .from("profile_daily")
+        .update({
+          market_bought_wei: 0,
+          market_sold_wei: 0,
+          market_profit_delta_wei: 0,
+          market_active_positions: 0,
+          market_trades_count: 0,
+        })
+        .gte("snapshot_date", sinceDate)
+        .gt("market_trades_count", 0);
+      if (error) console.error(`market reset failed: ${error.message}`);
     }
-    console.log(`  ${marketAggByProfile.size} profiles with market activity in window`);
-
-    if (marketAggByProfile.size > 0) {
-      const today = todayUtcDate();
-      const marketUpdates: {
-        profile_id: number;
-        snapshot_date: string;
-        market_bought_wei: string;
-        market_sold_wei: string;
-        market_profit_delta_wei: string;
-        market_active_positions: number;
-        market_trades_count: number;
-      }[] = [];
-      for (const [profileId, agg] of marketAggByProfile) {
-        // Net cash flow = sold - bought. Near-zero with high (bought + sold)
-        // is the wash-trade fingerprint.
-        const net = agg.sold - agg.bought;
-        marketUpdates.push({
-          profile_id: profileId,
-          snapshot_date: today,
-          market_bought_wei: agg.bought.toString(),
-          market_sold_wei: agg.sold.toString(),
-          market_profit_delta_wei: net.toString(),
-          market_active_positions: agg.markets.size,
-          market_trades_count: agg.trades,
-        });
-      }
-      for (let i = 0; i < marketUpdates.length; i += 500) {
-        const chunk = marketUpdates.slice(i, i + 500);
-        const { error } = await supabase
-          .from("profile_daily")
-          .upsert(chunk, { onConflict: "profile_id,snapshot_date" });
-        if (error)
-          throw new Error(`profile_daily market_* upsert: ${error.message}`);
-      }
-    }
+    await backfillMarkets(ethos, supabase, 2);
 
     const durationMs = Date.now() - startedAt;
     await supabase

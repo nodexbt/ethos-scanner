@@ -571,27 +571,14 @@ function MarketsCard({
       totalMarketXp += mxp;
     }
   }
-  // Wash-trade flag: high volume with absolute net P&L < 5% of avg leg.
-  // Skip when bought is small.
-  const minThreshold = BigInt("100000000000000000"); // 0.1 ETH
-  const meanLeg = (totalBought + totalSold) / BigInt(2);
-  const absProfit = totalProfit < ZERO ? -totalProfit : totalProfit;
-  const washSuspect =
-    meanLeg > minThreshold && absProfit * BigInt(20) < meanLeg; // |profit| < 5% of mean leg
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base inline-flex items-center gap-2">
-          Markets activity ({rangeLabel})
-          {washSuspect && (
-            <span className="text-[10px] uppercase tracking-wide bg-destructive/15 text-destructive px-1.5 py-0.5 rounded">
-              wash-trade pattern
-            </span>
-          )}
-        </CardTitle>
+        <CardTitle className="text-base">Markets activity ({rangeLabel})</CardTitle>
         <CardDescription className="text-xs">
-          Daily aggregates derived from market_holdings deltas. High bought + sold with
-          near-zero net P&L is a wash-trade fingerprint.
+          Daily aggregates from <code>MARKET_VOTE</code> activities. <strong>Net cash flow</strong> is
+          sold − bought; it does <em>not</em> include unrealized PNL on positions still open. High
+          churn with high market-pool XP is the wash-trade pattern.
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
