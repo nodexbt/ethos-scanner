@@ -87,6 +87,15 @@ export interface ProfileDailyRow {
   xpByType: Record<string, number>;
   /** {counterpartyProfileId: points}, points always positive. */
   xpTips: { sent: Record<string, number>; received: Record<string, number> };
+  /** Wei-scale strings; UI converts to ETH for display. */
+  marketBoughtWei: string;
+  marketSoldWei: string;
+  /** Net cash flow = sold - bought. Near-zero with high (bought+sold) = wash-trade fingerprint. */
+  marketProfitDeltaWei: string;
+  /** Distinct markets traded in the day. */
+  marketActivePositions: number;
+  /** Number of individual MARKET_VOTE activity rows. */
+  marketTradesCount: number;
 }
 
 export interface XpTipCounterparty extends ProfileSummary {
@@ -142,7 +151,11 @@ interface LatestRow {
   score: number | null;
 }
 
-export async function getMonitoringSummary(rangeDays = 1): Promise<MonitoringSummary> {
+export async function getMonitoringSummary(
+  rangeDays = 1,
+  /** When set, the topXpGainers card is filtered to that XP type. */
+  xpType?: string | null
+): Promise<MonitoringSummary> {
   const supabase = getSupabase();
   const today = todayUtcDate();
   const clampedRange = Math.max(1, Math.min(365, Math.round(rangeDays)));
@@ -174,7 +187,13 @@ export async function getMonitoringSummary(rangeDays = 1): Promise<MonitoringSum
       .limit(1)
       .maybeSingle(),
     supabase.rpc("monitoring_top_score_movers", { start_date: startDate, lim: LIMIT }),
-    supabase.rpc("monitoring_top_xp_gainers", { start_date: startDate, lim: LIMIT }),
+    xpType
+      ? supabase.rpc("monitoring_top_xp_by_type", {
+          xp_type: xpType,
+          start_date: startDate,
+          lim: LIMIT,
+        })
+      : supabase.rpc("monitoring_top_xp_gainers", { start_date: startDate, lim: LIMIT }),
     supabase.rpc("monitoring_top_spikes", {
       metric: "reviews_authored",
       start_date: startDate,
@@ -295,13 +314,20 @@ export async function getMonitoringSummary(rangeDays = 1): Promise<MonitoringSum
     };
   });
 
+  // The two top-XP RPCs return slightly different shapes:
+  //   monitoring_top_xp_gainers      → { profile_id, xp_gained_sum, xp_spent_sum }
+  //   monitoring_top_xp_by_type      → { profile_id, points_sum }
+  // Normalize both into XpGainer.xpGained; xpSpent is only meaningful when
+  // the user is looking at total (no specific type) so it stays 0 in the
+  // type-filtered case.
   const topXpGainers: XpGainer[] = ((xpRes.data ?? []) as {
     profile_id: number;
-    xp_gained_sum: number | string | null;
-    xp_spent_sum: number | string | null;
+    xp_gained_sum?: number | string | null;
+    xp_spent_sum?: number | string | null;
+    points_sum?: number | string | null;
   }[]).map((r) => ({
     profileId: r.profile_id,
-    xpGained: Number(r.xp_gained_sum ?? 0),
+    xpGained: Number(r.xp_gained_sum ?? r.points_sum ?? 0),
     xpSpent: Number(r.xp_spent_sum ?? 0),
     ...summary(r.profile_id),
   }));
@@ -662,7 +688,7 @@ export async function getProfileDetail(
     supabase
       .from("profile_daily")
       .select(
-        "snapshot_date, score_end, score_delta, xp_total_end, xp_delta, reviews_authored, vouches_given, vouches_received, invitations_sent, invitations_accepted, attestations_added, slashes_authored, xp_gained, xp_spent, xp_by_type, xp_tips"
+        "snapshot_date, score_end, score_delta, xp_total_end, xp_delta, reviews_authored, vouches_given, vouches_received, invitations_sent, invitations_accepted, attestations_added, slashes_authored, xp_gained, xp_spent, xp_by_type, xp_tips, market_bought_wei, market_sold_wei, market_profit_delta_wei, market_active_positions, market_trades_count"
       )
       .eq("profile_id", profileId)
       .gte("snapshot_date", sinceDate)
@@ -740,6 +766,21 @@ export async function getProfileDetail(
       xpSpent: Number(r.xp_spent ?? 0),
       xpByType,
       xpTips: { sent: tipSent, received: tipRecv },
+      marketBoughtWei: String(
+        (r as { market_bought_wei?: string | number | null }).market_bought_wei ?? "0"
+      ),
+      marketSoldWei: String(
+        (r as { market_sold_wei?: string | number | null }).market_sold_wei ?? "0"
+      ),
+      marketProfitDeltaWei: String(
+        (r as { market_profit_delta_wei?: string | number | null }).market_profit_delta_wei ?? "0"
+      ),
+      marketActivePositions: Number(
+        (r as { market_active_positions?: number | null }).market_active_positions ?? 0
+      ),
+      marketTradesCount: Number(
+        (r as { market_trades_count?: number | null }).market_trades_count ?? 0
+      ),
     };
   });
 

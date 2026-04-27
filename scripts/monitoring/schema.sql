@@ -118,6 +118,65 @@ create index if not exists idx_profile_service_keys_lookup
 
 alter table public.profile_service_keys enable row level security;
 
+-- Snapshot of Ethos's market_holdings, mirrored locally so the cron can
+-- diff today's cumulative bought/sold/profit against the previous run and
+-- produce per-day trade aggregates on profile_daily. Without trade-level
+-- events (market_v2_trade_events is empty), this is the only way to
+-- attribute market activity to a window.
+create table if not exists public.market_holdings_latest (
+  market_profile_id integer not null,
+  actor_address text not null,
+  vote_type text not null,
+  bought_total numeric default 0,
+  sold_total numeric default 0,
+  profit numeric default 0,
+  current_value numeric default 0,
+  last_seen timestamptz default now(),
+  primary key (market_profile_id, actor_address, vote_type)
+);
+
+create index if not exists idx_market_holdings_latest_actor
+  on public.market_holdings_latest (actor_address);
+
+alter table public.market_holdings_latest enable row level security;
+
+-- Daily market-trade aggregates derived from MARKET_VOTE activities (one
+-- row per trade with metadata.type = BUY/SELL and metadata.funds in wei).
+-- Activities are author-attributed to users.id so we can resolve to profile
+-- regardless of which wallet signed the transaction. market_profit_delta_wei
+-- stores (sold - bought) — positive means net cash out, near-zero with high
+-- bought+sold is the wash-trade fingerprint.
+alter table public.profile_daily
+  add column if not exists market_bought_wei numeric default 0,
+  add column if not exists market_sold_wei numeric default 0,
+  add column if not exists market_profit_delta_wei numeric default 0,
+  add column if not exists market_active_positions integer default 0,
+  add column if not exists market_trades_count integer default 0;
+
+-- Top-N earners of a specific XP type (e.g. MARKET_TRADE_POOL_REWARD) over
+-- a date range. Reads xp_by_type JSONB and sums the requested key. Returns
+-- empty rows for types nobody earned within the window.
+create or replace function public.monitoring_top_xp_by_type(
+  xp_type text,
+  start_date date,
+  lim int default 5
+)
+returns table (profile_id integer, points_sum bigint)
+language sql
+stable
+as $$
+  select profile_id,
+         sum((xp_by_type->>xp_type)::bigint)::bigint as points_sum
+  from public.profile_daily
+  where snapshot_date >= start_date
+    and xp_by_type ? xp_type
+    and (xp_by_type->>xp_type)::bigint > 0
+  group by profile_id
+  having sum((xp_by_type->>xp_type)::bigint) > 0
+  order by points_sum desc
+  limit lim;
+$$;
+
 -- Per-user watchlist. user_profile_id is the Ethos profile ID of the signed-in
 -- user (from session.user.ethos.profileId); watched_profile_id is the
 -- Ethos profile being tracked.

@@ -790,6 +790,99 @@ async function main() {
       }
     }
 
+    console.log("Aggregating MARKET_VOTE activities (last 24h)…");
+    // Activities are author-attributed via users.id which is the canonical
+    // identity (wallets, social accounts, and old-merged user records all
+    // resolve through userkeys.merged_from_user_id). This gives us full
+    // profile_id attribution regardless of which wallet signed the trade.
+    const tradeRows = await queryWithRetry<{
+      profile_id: number;
+      side: string;
+      funds_wei: string;
+      market_subject: number;
+    }>(
+      ethos,
+      `with canon as (
+         select distinct user_id as canonical, merged_from_user_id as alias
+         from userkeys
+         where merged_from_user_id is not null
+       )
+       select u.profile_id::int as profile_id,
+              a.metadata->>'type' as side,
+              (a.metadata->>'funds')::text as funds_wei,
+              a."subjectId"::int as market_subject
+       from activities a
+       left join canon c on c.alias = a."authorId"
+       left join users u on u.id = coalesce(c.canonical, a."authorId")
+       where a."activityType"::text = 'MARKET_VOTE'
+         and a."createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+         and u.profile_id is not null`,
+      "market_trades"
+    );
+    console.log(`  ${tradeRows.rows.length} attributable trade activities`);
+
+    const ZERO = BigInt(0);
+    const marketAggByProfile = new Map<
+      number,
+      {
+        bought: bigint;
+        sold: bigint;
+        trades: number;
+        markets: Set<number>;
+      }
+    >();
+    for (const r of tradeRows.rows) {
+      const agg =
+        marketAggByProfile.get(r.profile_id) ?? {
+          bought: ZERO,
+          sold: ZERO,
+          trades: 0,
+          markets: new Set<number>(),
+        };
+      const wei = BigInt(r.funds_wei || "0");
+      if (r.side === "BUY") agg.bought += wei;
+      else if (r.side === "SELL") agg.sold += wei;
+      agg.trades += 1;
+      agg.markets.add(r.market_subject);
+      marketAggByProfile.set(r.profile_id, agg);
+    }
+    console.log(`  ${marketAggByProfile.size} profiles with market activity in window`);
+
+    if (marketAggByProfile.size > 0) {
+      const today = todayUtcDate();
+      const marketUpdates: {
+        profile_id: number;
+        snapshot_date: string;
+        market_bought_wei: string;
+        market_sold_wei: string;
+        market_profit_delta_wei: string;
+        market_active_positions: number;
+        market_trades_count: number;
+      }[] = [];
+      for (const [profileId, agg] of marketAggByProfile) {
+        // Net cash flow = sold - bought. Near-zero with high (bought + sold)
+        // is the wash-trade fingerprint.
+        const net = agg.sold - agg.bought;
+        marketUpdates.push({
+          profile_id: profileId,
+          snapshot_date: today,
+          market_bought_wei: agg.bought.toString(),
+          market_sold_wei: agg.sold.toString(),
+          market_profit_delta_wei: net.toString(),
+          market_active_positions: agg.markets.size,
+          market_trades_count: agg.trades,
+        });
+      }
+      for (let i = 0; i < marketUpdates.length; i += 500) {
+        const chunk = marketUpdates.slice(i, i + 500);
+        const { error } = await supabase
+          .from("profile_daily")
+          .upsert(chunk, { onConflict: "profile_id,snapshot_date" });
+        if (error)
+          throw new Error(`profile_daily market_* upsert: ${error.message}`);
+      }
+    }
+
     const durationMs = Date.now() - startedAt;
     await supabase
       .from("monitoring_runs")

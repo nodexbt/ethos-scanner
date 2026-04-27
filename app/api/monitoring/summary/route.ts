@@ -13,9 +13,16 @@ export async function GET(req: NextRequest) {
   if (!Number.isFinite(rangeDays) || rangeDays <= 0) {
     return NextResponse.json({ error: "Invalid range" }, { status: 400 });
   }
+  // xpType filters the topXpGainers card to a specific XP event type.
+  // Only basic shape validation here; the SQL RPC reads the value as a
+  // JSONB key (->>$1) so injection isn't possible.
+  const xpType = req.nextUrl.searchParams.get("xpType");
+  if (xpType !== null && (xpType.length === 0 || xpType.length > 64)) {
+    return NextResponse.json({ error: "Invalid xpType" }, { status: 400 });
+  }
 
   try {
-    const summary = await getMonitoringSummary(rangeDays);
+    const summary = await getMonitoringSummary(rangeDays, xpType);
     return NextResponse.json(summary);
   } catch (err) {
     console.error("getMonitoringSummary failed:", err);

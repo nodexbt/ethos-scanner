@@ -148,11 +148,56 @@ function ScoreGainersCard({ rows, rangeLabel }: { rows: ScoreMover[]; rangeLabel
   );
 }
 
-function XpGainersCard({ rows, rangeLabel }: { rows: XpGainer[]; rangeLabel: string }) {
+// Curated list of XP types people will actually want to filter by. Add
+// "Total" as the default; everything else is an explicit pool name from
+// xp_points_history.type. Dropdown order roughly matches "most-likely
+// suspect" for wash-trade / farm-y patterns.
+const XP_TYPE_OPTIONS: { value: string | null; label: string }[] = [
+  { value: null, label: "Total" },
+  { value: "MARKET_TRADE_POOL_REWARD", label: "Market trade pool" },
+  { value: "MARKET_HOLD_POOL_REWARD", label: "Market hold pool" },
+  { value: "VOUCH_POOL_REWARD", label: "Vouch pool" },
+  { value: "DAILY_TASK_POOL_REWARD", label: "Daily task pool" },
+  { value: "EXTENSION_CHECK_IN", label: "Extension check-in" },
+  { value: "VOTE_POOL_REWARD", label: "Vote pool" },
+  { value: "DELEGATION_REWARD", label: "Delegation reward" },
+  { value: "WEEKLY_DELEGATOR_AWARD_DELEGATOR", label: "Weekly delegator" },
+  { value: "XP_TIP_RECEIVED", label: "Tips received" },
+  { value: "XP_SLASH_VOTER_REWARD", label: "Slash voter reward" },
+  { value: "COMMENT_POOL_REWARD", label: "Comment pool" },
+  { value: "HV_COMPLETION_BONUS", label: "Verification bonus" },
+  { value: "HV_VERIFIER_PAYOUT", label: "Verifier payout" },
+];
+
+function XpGainersCard({
+  rows,
+  rangeLabel,
+  xpType,
+  onChangeType,
+}: {
+  rows: XpGainer[];
+  rangeLabel: string;
+  xpType: string | null;
+  onChangeType: (value: string | null) => void;
+}) {
+  const isFiltered = xpType != null;
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Top XP gainers</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">Top XP gainers</CardTitle>
+          <select
+            value={xpType ?? ""}
+            onChange={(e) => onChangeType(e.target.value || null)}
+            className="text-xs bg-card/70 border border-border rounded-md px-2 py-1 cursor-pointer hover:border-foreground/30 transition-colors"
+          >
+            {XP_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value ?? ""} value={opt.value ?? ""}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <CardDescription className="text-xs">{rangeLabel}</CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
@@ -166,7 +211,7 @@ function XpGainersCard({ rows, rangeLabel }: { rows: XpGainer[]; rangeLabel: str
               right={
                 <span>
                   +{r.xpGained.toLocaleString()}
-                  {r.xpSpent > 0 && (
+                  {!isFiltered && r.xpSpent > 0 && (
                     <span className="text-muted-foreground"> · -{r.xpSpent.toLocaleString()}</span>
                   )}
                 </span>
@@ -366,6 +411,7 @@ export default function MonitoringPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState(1);
+  const [xpType, setXpType] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -383,8 +429,10 @@ export default function MonitoringPage() {
       try {
         // Fetch both in parallel. Summary failure is fatal; watchlist
         // failure just hides the card.
+        const params = new URLSearchParams({ range: String(range) });
+        if (xpType) params.set("xpType", xpType);
         const [sRes, wRes] = await Promise.all([
-          fetch(`/api/monitoring/summary?range=${range}`),
+          fetch(`/api/monitoring/summary?${params.toString()}`),
           fetch("/api/monitoring/watchlist"),
         ]);
         if (!sRes.ok) throw new Error(`Failed to load summary: ${sRes.status}`);
@@ -403,7 +451,7 @@ export default function MonitoringPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, range]);
+  }, [session, range, xpType]);
 
   if (status === "loading" || !session) {
     return (
@@ -467,7 +515,12 @@ export default function MonitoringPage() {
           {watchlist && <WatchlistCard rows={watchlist} />}
           <div className="grid gap-4 md:grid-cols-2">
             <ScoreGainersCard rows={data.topScoreGainers} rangeLabel={rangeLabel(range)} />
-            <XpGainersCard rows={data.topXpGainers} rangeLabel={rangeLabel(range)} />
+            <XpGainersCard
+              rows={data.topXpGainers}
+              rangeLabel={rangeLabel(range)}
+              xpType={xpType}
+              onChangeType={setXpType}
+            />
             <SpikeCard
               title="Most reviews authored"
               rows={data.topReviewers}

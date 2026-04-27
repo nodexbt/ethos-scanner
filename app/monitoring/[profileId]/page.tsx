@@ -305,6 +305,9 @@ export default function ProfileDetailPage({ params }: PageParams) {
           {/* XP tip counterparties */}
           <XpTipsCard counterparties={data.tipCounterparties} rangeLabel={rangeLabel(range)} />
 
+          {/* Market-trading activity */}
+          <MarketsCard days={days} rangeLabel={rangeLabel(range)} />
+
           {/* Activity totals */}
           <Card>
             <CardHeader className="pb-2">
@@ -403,11 +406,13 @@ export default function ProfileDetailPage({ params }: PageParams) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="font-semibold tabular-nums">{value.toLocaleString()}</div>
+      <div className="font-semibold tabular-nums">
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </div>
     </div>
   );
 }
@@ -490,6 +495,177 @@ function XpTipsCard({
             </div>
           ))}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatEth(weiStr: string | null | undefined, decimals = 4): string {
+  if (!weiStr || weiStr === "0") return "0";
+  // Use BigInt to avoid precision loss on large wei values, then format.
+  let neg = false;
+  let s = weiStr;
+  if (s.startsWith("-")) {
+    neg = true;
+    s = s.slice(1);
+  }
+  let big: bigint;
+  try {
+    big = BigInt(s);
+  } catch {
+    return weiStr;
+  }
+  const ETH = BigInt("1000000000000000000");
+  const whole = big / ETH;
+  const frac = big % ETH;
+  // Pad to 18, slice to `decimals`.
+  const fracStr = frac.toString().padStart(18, "0").slice(0, decimals);
+  const trimmed = fracStr.replace(/0+$/, "");
+  const result = trimmed ? `${whole.toString()}.${trimmed}` : whole.toString();
+  return neg ? `-${result}` : result;
+}
+
+function MarketsCard({
+  days,
+  rangeLabel,
+}: {
+  days: ProfileDailyRow[];
+  rangeLabel: string;
+}) {
+  const ZERO = BigInt(0);
+  const ETH = BigInt("1000000000000000000");
+  // Aggregate window totals using BigInt — wei values can exceed Number.
+  let totalBought = ZERO;
+  let totalSold = ZERO;
+  let totalProfit = ZERO;
+  let totalPositions = 0;
+  let totalTrades = 0;
+  let totalMarketXp = 0;
+  const activeDays: ProfileDailyRow[] = [];
+  // Helper: XP earned from market-related daily pools on a given day. Both
+  // MARKET_TRADE_POOL_REWARD and MARKET_HOLD_POOL_REWARD are paid out daily
+  // based on activity / position size, so a wash trader churning volume
+  // shows up here as a big positive number even when their net cash flow
+  // is ~0 — that's the smoking gun.
+  const marketXpForDay = (d: ProfileDailyRow): number =>
+    (d.xpByType["MARKET_TRADE_POOL_REWARD"] ?? 0) +
+    (d.xpByType["MARKET_HOLD_POOL_REWARD"] ?? 0);
+  for (const d of days) {
+    const b = BigInt(d.marketBoughtWei || "0");
+    const s = BigInt(d.marketSoldWei || "0");
+    const p = BigInt(d.marketProfitDeltaWei || "0");
+    const mxp = marketXpForDay(d);
+    if (
+      b !== ZERO ||
+      s !== ZERO ||
+      d.marketActivePositions > 0 ||
+      d.marketTradesCount > 0 ||
+      mxp > 0
+    ) {
+      activeDays.push(d);
+      totalBought += b;
+      totalSold += s;
+      totalProfit += p;
+      totalPositions += d.marketActivePositions;
+      totalTrades += d.marketTradesCount;
+      totalMarketXp += mxp;
+    }
+  }
+  // Wash-trade flag: high volume with absolute net P&L < 5% of avg leg.
+  // Skip when bought is small.
+  const minThreshold = BigInt("100000000000000000"); // 0.1 ETH
+  const meanLeg = (totalBought + totalSold) / BigInt(2);
+  const absProfit = totalProfit < ZERO ? -totalProfit : totalProfit;
+  const washSuspect =
+    meanLeg > minThreshold && absProfit * BigInt(20) < meanLeg; // |profit| < 5% of mean leg
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base inline-flex items-center gap-2">
+          Markets activity ({rangeLabel})
+          {washSuspect && (
+            <span className="text-[10px] uppercase tracking-wide bg-destructive/15 text-destructive px-1.5 py-0.5 rounded">
+              wash-trade pattern
+            </span>
+          )}
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Daily aggregates derived from market_holdings deltas. High bought + sold with
+          near-zero net P&L is a wash-trade fingerprint.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {activeDays.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4">
+            No market trading recorded in the selected window.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-2 text-sm pb-3 border-b border-border/60 mb-3">
+              <Stat label="Trades" value={totalTrades.toLocaleString()} />
+              <Stat label="Markets" value={totalPositions.toLocaleString()} />
+              <Stat label="Total bought" value={`${formatEth(totalBought.toString())} ETH`} />
+              <Stat label="Total sold" value={`${formatEth(totalSold.toString())} ETH`} />
+              <Stat
+                label="Net cash flow"
+                value={`${totalProfit >= ZERO ? "+" : ""}${formatEth(totalProfit.toString())} ETH`}
+              />
+              <Stat
+                label="XP from markets"
+                value={`+${totalMarketXp.toLocaleString()}`}
+              />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b border-border">
+                    <th className="text-left font-medium py-1.5 pr-4">Date</th>
+                    <th className="text-right font-medium py-1.5 pr-3">Trades</th>
+                    <th className="text-right font-medium py-1.5 pr-3">Markets</th>
+                    <th className="text-right font-medium py-1.5 pr-3">Bought</th>
+                    <th className="text-right font-medium py-1.5 pr-3">Sold</th>
+                    <th className="text-right font-medium py-1.5 pr-3">Net</th>
+                    <th className="text-right font-medium py-1.5">XP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...activeDays].reverse().map((d) => {
+                    const profit = BigInt(d.marketProfitDeltaWei || "0");
+                    const dayMxp = marketXpForDay(d);
+                    return (
+                      <tr key={d.snapshotDate} className="border-b border-border/50">
+                        <td className="font-mono py-1.5 pr-4">{fmtDate(d.snapshotDate)}</td>
+                        <td className="text-right tabular-nums py-1.5 pr-3">
+                          {d.marketTradesCount || "-"}
+                        </td>
+                        <td className="text-right tabular-nums py-1.5 pr-3">
+                          {d.marketActivePositions || "-"}
+                        </td>
+                        <td className="text-right tabular-nums py-1.5 pr-3">
+                          {formatEth(d.marketBoughtWei)}
+                        </td>
+                        <td className="text-right tabular-nums py-1.5 pr-3">
+                          {formatEth(d.marketSoldWei)}
+                        </td>
+                        <td
+                          className={`text-right tabular-nums py-1.5 pr-3 ${
+                            profit > ZERO ? "text-green-500" : profit < ZERO ? "text-destructive" : ""
+                          }`}
+                        >
+                          {profit >= ZERO ? "+" : ""}
+                          {formatEth(d.marketProfitDeltaWei)}
+                        </td>
+                        <td className="text-right tabular-nums py-1.5 text-blue-400">
+                          {dayMxp ? `+${dayMxp.toLocaleString()}` : "-"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
