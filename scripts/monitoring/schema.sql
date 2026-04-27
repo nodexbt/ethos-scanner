@@ -100,6 +100,24 @@ create index if not exists idx_profile_addresses_address
 
 alter table public.profile_addresses enable row level security;
 
+-- Service-keyed identities (Twitter, Discord, Farcaster, Telegram, GitHub).
+-- Mirrors profile_addresses for the non-wallet half of Ethos's userkey
+-- system. Used to resolve review/slash subjects whose target is a service
+-- account ID rather than a wallet, so received-side aggregations don't
+-- have to round-trip to Ethos's userkeys table during the cron.
+create table if not exists public.profile_service_keys (
+  profile_id integer not null,
+  service text not null,
+  account text not null,
+  created_at timestamptz default now(),
+  primary key (profile_id, service, account)
+);
+
+create index if not exists idx_profile_service_keys_lookup
+  on public.profile_service_keys (service, account);
+
+alter table public.profile_service_keys enable row level security;
+
 -- Per-user watchlist. user_profile_id is the Ethos profile ID of the signed-in
 -- user (from session.user.ethos.profileId); watched_profile_id is the
 -- Ethos profile being tracked.
@@ -116,7 +134,105 @@ create index if not exists idx_watchlist_user
 
 alter table public.watchlist enable row level security;
 
--- Nudge PostgREST to refresh its schema cache after adding tables.
--- Supabase-hosted instances occasionally miss the auto-reload; this makes
--- sure the REST layer sees any new tables as soon as this file is run.
+-- ── Aggregation RPCs for window-aware monitoring queries ──
+-- Top score movers: sums score_delta across the window, returns the most
+-- recent score_end so we can show a clean "start → end" range. Filters to
+-- positive movers only.
+create or replace function public.monitoring_top_score_movers(
+  start_date date,
+  lim int default 5
+)
+returns table (
+  profile_id integer,
+  score_delta_sum bigint,
+  score_end integer
+)
+language sql
+stable
+as $$
+  select
+    profile_id,
+    sum(score_delta)::bigint as score_delta_sum,
+    (
+      select pd2.score_end
+      from public.profile_daily pd2
+      where pd2.profile_id = pd.profile_id
+        and pd2.snapshot_date >= start_date
+        and pd2.score_end is not null
+      order by pd2.snapshot_date desc
+      limit 1
+    ) as score_end
+  from public.profile_daily pd
+  where snapshot_date >= start_date
+    and score_delta is not null
+  group by profile_id
+  having sum(score_delta) > 0
+  order by score_delta_sum desc
+  limit lim;
+$$;
+
+-- Top XP gainers: sums both gained and spent across the window.
+create or replace function public.monitoring_top_xp_gainers(
+  start_date date,
+  lim int default 5
+)
+returns table (
+  profile_id integer,
+  xp_gained_sum bigint,
+  xp_spent_sum bigint
+)
+language sql
+stable
+as $$
+  select
+    profile_id,
+    sum(xp_gained)::bigint as xp_gained_sum,
+    sum(xp_spent)::bigint as xp_spent_sum
+  from public.profile_daily
+  where snapshot_date >= start_date
+    and xp_gained > 0
+  group by profile_id
+  order by xp_gained_sum desc
+  limit lim;
+$$;
+
+-- Generic activity-spikes RPC. metric must be one of an explicit allowlist
+-- to keep the dynamic SQL safe.
+create or replace function public.monitoring_top_spikes(
+  metric text,
+  start_date date,
+  lim int default 5
+)
+returns table (
+  profile_id integer,
+  count_sum bigint
+)
+language plpgsql
+stable
+as $$
+declare
+  q text;
+begin
+  if metric not in (
+    'reviews_authored', 'vouches_given', 'invitations_accepted',
+    'invitations_sent', 'attestations_added', 'slashes_authored',
+    'vouches_received', 'reviews_received'
+  ) then
+    raise exception 'Invalid metric: %', metric;
+  end if;
+
+  q := format('
+    select profile_id, sum(%I)::bigint as count_sum
+    from public.profile_daily
+    where snapshot_date >= %L and %I > 0
+    group by profile_id
+    order by count_sum desc
+    limit %s
+  ', metric, start_date, metric, lim);
+
+  return query execute q;
+end;
+$$;
+
+-- Nudge PostgREST to refresh its schema cache after adding tables/functions.
 notify pgrst, 'reload schema';

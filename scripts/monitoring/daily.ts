@@ -648,7 +648,6 @@ async function main() {
     // onConflict ignoreDuplicates keeps prior rows alive across runs — we
     // accept a little drift (if a profile drops an address we still have
     // the stale mapping) in exchange for a simple, append-only upsert.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (let i = 0; i < addressRows.length; i += 500) {
       const chunk = addressRows.slice(i, i + 500);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -656,6 +655,139 @@ async function main() {
         .from("profile_addresses")
         .upsert(chunk, { onConflict: "profile_id,address", ignoreDuplicates: true });
       if (error) throw new Error(`profile_addresses upsert failed: ${error.message}`);
+    }
+
+    console.log("Fetching all profile→service-key mappings from Ethos…");
+    // Userkey format is `service:{service}:{account}` (e.g.
+    // service:x.com:1399208047101292544). Split into two columns so reviews
+    // can be resolved by (service, account) without storing the prefix.
+    const allServiceKeysQuery = await queryWithRetry<{
+      profile_id: number;
+      service: string;
+      account: string;
+    }>(
+      ethos,
+      `select u.profile_id,
+              (regexp_match(uk.userkey::text, '^service:([^:]+):(.+)$'))[1] as service,
+              (regexp_match(uk.userkey::text, '^service:([^:]+):(.+)$'))[2] as account
+       from users u
+       join profiles p on p.id = u.profile_id
+       join userkeys uk on uk.user_id = u.id
+       where u.profile_id is not null
+         and p.archived = false
+         and uk.key_type::text in ('TWITTER','DISCORD','FARCASTER','TELEGRAM','GITHUB')`,
+      "all_service_keys"
+    );
+    const serviceKeyRows = allServiceKeysQuery.rows
+      .filter((r) => r.service && r.account)
+      .map((r) => ({
+        profile_id: r.profile_id,
+        service: r.service,
+        account: r.account,
+      }));
+    console.log(`  ${serviceKeyRows.length} (profile, service, account) pairs`);
+    for (let i = 0; i < serviceKeyRows.length; i += 500) {
+      const chunk = serviceKeyRows.slice(i, i + 500);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("profile_service_keys")
+        .upsert(chunk, {
+          onConflict: "profile_id,service,account",
+          ignoreDuplicates: true,
+        });
+      if (error) throw new Error(`profile_service_keys upsert failed: ${error.message}`);
+    }
+
+    console.log("Computing reviews_received via local lookups…");
+    const recentReviewsQuery = await queryWithRetry<{
+      subject: string | null;
+      service: string | null;
+      account: string | null;
+    }>(
+      ethos,
+      `select subject, service, account
+       from reviews
+       where "createdAt" >= now() - interval '${WINDOW_HOURS} hours'
+         and archived = false`,
+      "recent_reviews"
+    );
+    // Resolve each review's subject locally.
+    const recentReviews = recentReviewsQuery.rows;
+    const distinctAddresses = new Set<string>();
+    const distinctServiceKeys = new Set<string>(); // "service|account"
+    for (const r of recentReviews) {
+      if (r.service && r.account) {
+        distinctServiceKeys.add(`${r.service}|${r.account}`);
+      } else if (r.subject) {
+        distinctAddresses.add(r.subject.toLowerCase());
+      }
+    }
+    const addressToProfile = new Map<string, number>();
+    if (distinctAddresses.size > 0) {
+      const { data: addrMatches } = await supabase
+        .from("profile_addresses")
+        .select("profile_id, address")
+        .in("address", [...distinctAddresses]);
+      for (const m of (addrMatches ?? []) as { profile_id: number; address: string }[]) {
+        if (!addressToProfile.has(m.address)) addressToProfile.set(m.address, m.profile_id);
+      }
+    }
+    const serviceKeyToProfile = new Map<string, number>();
+    if (distinctServiceKeys.size > 0) {
+      // Supabase lacks a clean way to do compound IN — fetch all matching
+      // services then filter client-side. Service set is small (~5 services).
+      const services = [...new Set([...distinctServiceKeys].map((k) => k.split("|")[0]))];
+      const accounts = [...new Set([...distinctServiceKeys].map((k) => k.split("|")[1]))];
+      const { data: skMatches } = await supabase
+        .from("profile_service_keys")
+        .select("profile_id, service, account")
+        .in("service", services)
+        .in("account", accounts);
+      for (const m of (skMatches ?? []) as {
+        profile_id: number;
+        service: string;
+        account: string;
+      }[]) {
+        const key = `${m.service}|${m.account}`;
+        if (distinctServiceKeys.has(key) && !serviceKeyToProfile.has(key)) {
+          serviceKeyToProfile.set(key, m.profile_id);
+        }
+      }
+    }
+    const reviewsReceivedByProfile = new Map<number, number>();
+    let resolvedCount = 0;
+    for (const r of recentReviews) {
+      let profileId: number | undefined;
+      if (r.service && r.account) {
+        profileId = serviceKeyToProfile.get(`${r.service}|${r.account}`);
+      } else if (r.subject) {
+        profileId = addressToProfile.get(r.subject.toLowerCase());
+      }
+      if (profileId != null) {
+        reviewsReceivedByProfile.set(profileId, (reviewsReceivedByProfile.get(profileId) ?? 0) + 1);
+        resolvedCount++;
+      }
+    }
+    console.log(
+      `  resolved ${resolvedCount}/${recentReviews.length} reviews to ${reviewsReceivedByProfile.size} profiles`
+    );
+    if (reviewsReceivedByProfile.size > 0) {
+      // Update existing profile_daily rows for today with the received counts.
+      // Some recipient profiles may not have a profile_daily row yet (e.g.
+      // they had no other activity); insert a minimal row for those so the
+      // count surfaces in queries.
+      const today = todayUtcDate();
+      const updates: { profile_id: number; snapshot_date: string; reviews_received: number }[] = [];
+      for (const [profileId, count] of reviewsReceivedByProfile) {
+        updates.push({ profile_id: profileId, snapshot_date: today, reviews_received: count });
+      }
+      for (let i = 0; i < updates.length; i += 500) {
+        const chunk = updates.slice(i, i + 500);
+        const { error } = await supabase
+          .from("profile_daily")
+          .upsert(chunk, { onConflict: "profile_id,snapshot_date" });
+        if (error) throw new Error(`profile_daily reviews_received upsert: ${error.message}`);
+      }
     }
 
     const durationMs = Date.now() - startedAt;

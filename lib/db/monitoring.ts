@@ -113,10 +113,13 @@ export interface WatchlistEntry extends ProfileSummary {
 export interface MonitoringSummary {
   lastRun: LastRun | null;
   today: string;
+  rangeDays: number;
   topScoreGainers: ScoreMover[];
   topXpGainers: XpGainer[];
   topReviewers: ActivitySpike[];
   topVouchers: ActivitySpike[];
+  topReviewsReceived: ActivitySpike[];
+  topVouchesReceived: ActivitySpike[];
   topAcceptedInviters: ActivitySpike[];
   topAttestationAdders: ActivitySpike[];
   newProfiles: NewProfile[];
@@ -139,18 +142,25 @@ interface LatestRow {
   score: number | null;
 }
 
-export async function getMonitoringSummary(): Promise<MonitoringSummary> {
+export async function getMonitoringSummary(rangeDays = 1): Promise<MonitoringSummary> {
   const supabase = getSupabase();
   const today = todayUtcDate();
+  const clampedRange = Math.max(1, Math.min(365, Math.round(rangeDays)));
+  const startDateObj = new Date();
+  startDateObj.setUTCDate(startDateObj.getUTCDate() - (clampedRange - 1));
+  const startDate = startDateObj.toISOString().slice(0, 10);
 
-  // Step 1: fetch the top-N rows for every metric. Each query is cheap
-  // because snapshot_date is the leading index column and LIMIT is tiny.
+  // Top-N aggregations across the window run server-side via RPCs (single
+  // SUM-and-LIMIT round-trip per metric). Profile names are looked up in a
+  // second batched call once we know the union of returned profile_ids.
   const [
     lastRunRes,
     scoreRes,
     xpRes,
     reviewersRes,
     vouchersRes,
+    reviewsReceivedRes,
+    vouchesReceivedRes,
     invitesRes,
     attestationsRes,
     newProfilesRes,
@@ -163,68 +173,51 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, score_end, score_delta")
-      .eq("snapshot_date", today)
-      .gt("score_delta", 0)
-      .order("score_delta", { ascending: false })
-      .limit(LIMIT),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, xp_gained, xp_spent")
-      .eq("snapshot_date", today)
-      .gt("xp_gained", 0)
-      .order("xp_gained", { ascending: false })
-      .limit(LIMIT),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, reviews_authored")
-      .eq("snapshot_date", today)
-      .gt("reviews_authored", 0)
-      .order("reviews_authored", { ascending: false })
-      .limit(LIMIT),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, vouches_given")
-      .eq("snapshot_date", today)
-      .gt("vouches_given", 0)
-      .order("vouches_given", { ascending: false })
-      .limit(LIMIT),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, invitations_accepted")
-      .eq("snapshot_date", today)
-      .gt("invitations_accepted", 0)
-      .order("invitations_accepted", { ascending: false })
-      .limit(LIMIT),
-    supabase
-      .from("profile_daily")
-      .select("profile_id, attestations_added")
-      .eq("snapshot_date", today)
-      .gt("attestations_added", 0)
-      .order("attestations_added", { ascending: false })
-      .limit(LIMIT),
-    // "New profiles" = profile_latest rows first inserted today. The
-    // cron's created_at is effectively "first time we saw this profile,"
-    // which lines up with Ethos-created-today as long as the cron has
-    // been running daily. Good enough until we add a dedicated
-    // first_seen_ethos column sourced from profiles.createdAt.
+    supabase.rpc("monitoring_top_score_movers", { start_date: startDate, lim: LIMIT }),
+    supabase.rpc("monitoring_top_xp_gainers", { start_date: startDate, lim: LIMIT }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "reviews_authored",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "vouches_given",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "reviews_received",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "vouches_received",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "invitations_accepted",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    supabase.rpc("monitoring_top_spikes", {
+      metric: "attestations_added",
+      start_date: startDate,
+      lim: LIMIT,
+    }),
+    // "New profiles" = profile_latest rows first inserted in window.
     supabase
       .from("profile_latest")
       .select(
         "profile_id, display_name, username, avatar_url, human_verified, score, created_at"
       )
-      .gte("created_at", `${today}T00:00:00Z`)
+      .gte("created_at", `${startDate}T00:00:00Z`)
       .order("created_at", { ascending: false })
       .limit(LIMIT),
     supabase
       .from("profile_latest")
       .select("profile_id", { count: "exact", head: true })
-      .gte("created_at", `${today}T00:00:00Z`),
-    // All investigated wallet addresses — small set (investigations grows
-    // slowly), so it's cheaper to pull them and filter profile_latest by
-    // primary_address in two steps than to attempt a cross-schema join.
+      .gte("created_at", `${startDate}T00:00:00Z`),
     supabase.from("investigations").select("id, target, updated_at"),
   ]);
 
@@ -289,36 +282,39 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
   const topScoreGainers: ScoreMover[] = ((scoreRes.data ?? []) as {
     profile_id: number;
     score_end: number | null;
-    score_delta: number | null;
-  }[]).map((r) => ({
-    profileId: r.profile_id,
-    scoreStart:
-      r.score_end != null && r.score_delta != null ? r.score_end - r.score_delta : null,
-    scoreEnd: r.score_end,
-    scoreDelta: r.score_delta,
-    ...summary(r.profile_id),
-  }));
+    score_delta_sum: number | string | null;
+  }[]).map((r) => {
+    const delta = r.score_delta_sum == null ? null : Number(r.score_delta_sum);
+    return {
+      profileId: r.profile_id,
+      scoreStart:
+        r.score_end != null && delta != null ? r.score_end - delta : null,
+      scoreEnd: r.score_end,
+      scoreDelta: delta,
+      ...summary(r.profile_id),
+    };
+  });
 
   const topXpGainers: XpGainer[] = ((xpRes.data ?? []) as {
     profile_id: number;
-    xp_gained: number | string;
-    xp_spent: number | string;
+    xp_gained_sum: number | string | null;
+    xp_spent_sum: number | string | null;
   }[]).map((r) => ({
     profileId: r.profile_id,
-    xpGained: Number(r.xp_gained ?? 0),
-    xpSpent: Number(r.xp_spent ?? 0),
+    xpGained: Number(r.xp_gained_sum ?? 0),
+    xpSpent: Number(r.xp_spent_sum ?? 0),
     ...summary(r.profile_id),
   }));
 
-  const spike = (
-    rows: { data: unknown[] | null },
-    field: string
-  ): ActivitySpike[] =>
-    ((rows.data ?? []) as Record<string, unknown>[]).map((r) => ({
-      profileId: r.profile_id as number,
-      count: Number((r[field] as number | string | null) ?? 0),
-      ...summary(r.profile_id as number),
-    }));
+  // Activity-spike RPCs all return the same shape: { profile_id, count_sum }.
+  const spike = (rows: { data: unknown[] | null }): ActivitySpike[] =>
+    ((rows.data ?? []) as { profile_id: number; count_sum: number | string | null }[]).map(
+      (r) => ({
+        profileId: r.profile_id,
+        count: Number(r.count_sum ?? 0),
+        ...summary(r.profile_id),
+      })
+    );
 
   const newProfiles: NewProfile[] = ((newProfilesRes.data ?? []) as {
     profile_id: number;
@@ -479,12 +475,15 @@ export async function getMonitoringSummary(): Promise<MonitoringSummary> {
   return {
     lastRun,
     today,
+    rangeDays: clampedRange,
     topScoreGainers,
     topXpGainers,
-    topReviewers: spike(reviewersRes, "reviews_authored"),
-    topVouchers: spike(vouchersRes, "vouches_given"),
-    topAcceptedInviters: spike(invitesRes, "invitations_accepted"),
-    topAttestationAdders: spike(attestationsRes, "attestations_added"),
+    topReviewers: spike(reviewersRes),
+    topVouchers: spike(vouchersRes),
+    topReviewsReceived: spike(reviewsReceivedRes),
+    topVouchesReceived: spike(vouchesReceivedRes),
+    topAcceptedInviters: spike(invitesRes),
+    topAttestationAdders: spike(attestationsRes),
     newProfiles,
     newProfileCount: newProfileCountRes.count ?? 0,
     investigatedMovers,

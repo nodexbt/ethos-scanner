@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { Shield, ShieldCheck, LineChart, LogOut } from "lucide-react";
+import { Shield, ShieldCheck, LineChart, LogOut, Search } from "lucide-react";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -14,6 +14,25 @@ interface AppHeaderProps {
    * state; other pages leave it undefined so the logo just links back to "/".
    */
   onLogoClick?: () => void;
+}
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** Treat as active when pathname starts with this prefix, falls back to href. */
+  matchPrefix?: string;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { href: "/", label: "Scanner", icon: Search, matchPrefix: "exact" },
+  { href: "/monitoring", label: "Monitoring", icon: LineChart, matchPrefix: "/monitoring" },
+];
+
+function isActive(pathname: string | null, item: NavItem): boolean {
+  if (!pathname) return false;
+  if (item.matchPrefix === "exact") return pathname === item.href;
+  return pathname.startsWith(item.matchPrefix ?? item.href);
 }
 
 export function AppHeader({ onLogoClick }: AppHeaderProps) {
@@ -42,14 +61,7 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
   );
 
   const logoClasses =
-    "group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0";
-
-  const iconClass = (active: boolean) =>
-    `h-7 w-7 flex items-center justify-center rounded transition-colors ${
-      active
-        ? "bg-muted text-foreground"
-        : "hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-    }`;
+    "group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0 shrink-0";
 
   return (
     <div className="flex items-center justify-between gap-3 pb-4">
@@ -62,6 +74,29 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
           {logoContent}
         </Link>
       )}
+
+      {/* Primary nav. Pill-styled to match the logo and session containers
+          so all three sit at the same visual weight in the header. */}
+      <nav className="hidden sm:flex h-10 items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1 shrink-0">
+        {NAV_ITEMS.map((item) => {
+          const active = isActive(pathname, item);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`h-8 inline-flex items-center gap-1.5 px-3 text-sm rounded-md transition-colors ${
+                active
+                  ? "bg-muted text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
 
       <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
         {session && (
@@ -88,10 +123,16 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
                 </span>
               )}
             </div>
+            {/* Mobile-only nav: under sm the main nav is hidden, so surface
+                Monitoring as an icon in the session pill there. */}
             <Link
               href="/monitoring"
               title="Monitoring dashboard"
-              className={iconClass(pathname?.startsWith("/monitoring") ?? false)}
+              className={`sm:hidden h-7 w-7 flex items-center justify-center rounded transition-colors ${
+                pathname?.startsWith("/monitoring")
+                  ? "bg-muted text-foreground"
+                  : "hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+              }`}
             >
               <LineChart className="h-3.5 w-3.5" />
             </Link>
@@ -99,7 +140,11 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
               <Link
                 href="/admin/users"
                 title="Admin: manage allowlist"
-                className={iconClass(pathname?.startsWith("/admin") ?? false)}
+                className={`h-7 w-7 flex items-center justify-center rounded transition-colors ${
+                  pathname?.startsWith("/admin")
+                    ? "bg-muted text-foreground"
+                    : "hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
               </Link>
