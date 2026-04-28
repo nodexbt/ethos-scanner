@@ -649,6 +649,86 @@ async function backfillMarkets(
   console.log(`  wrote ${updates.length} profile_daily market rows`);
 }
 
+/**
+ * Compute per-profile lifetime market totals + current open-position value
+ * by replaying every MARKET_VOTE activity per (subject_market, isPositive)
+ * to get the user's current votes held, then × current trust/distrust
+ * price from `markets`. Result lands in profile_latest.market_*. The UI
+ * derives unrealized_pnl = open_value - (bought - sold) and total_pnl =
+ * open_value + sold - bought.
+ */
+async function updateMarketPositions(
+  ethos: Client,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<void> {
+  console.log("Recomputing per-profile market positions + open-value…");
+  const rows = await queryWithRetry<{
+    profile_id: number;
+    lifetime_bought: string;
+    lifetime_sold: string;
+    open_value: string;
+  }>(
+    ethos,
+    `with canon as (
+       select distinct user_id as canonical, merged_from_user_id as alias
+       from userkeys where merged_from_user_id is not null
+     ),
+     trades as (
+       select
+         u.profile_id,
+         su.profile_id as market_profile_id,
+         (a.metadata->>'isPositive')::boolean as is_positive,
+         a.metadata->>'type' as side,
+         (a.metadata->>'votes')::numeric as votes,
+         (a.metadata->>'funds')::numeric as funds
+       from activities a
+       left join canon c on c.alias = a."authorId"
+       left join users u on u.id = coalesce(c.canonical, a."authorId")
+       left join users su on su.id = a."subjectId"
+       where a."activityType"::text = 'MARKET_VOTE'
+         and u.profile_id is not null
+         and su.profile_id is not null
+     ),
+     per_position as (
+       select
+         profile_id, market_profile_id, is_positive,
+         sum(case when side='BUY' then votes else -votes end) as balance_votes,
+         sum(case when side='BUY' then funds else 0 end) as bought_funds,
+         sum(case when side='SELL' then funds else 0 end) as sold_funds
+       from trades group by 1, 2, 3
+     )
+     select
+       pp.profile_id,
+       sum(pp.bought_funds)::text as lifetime_bought,
+       sum(pp.sold_funds)::text as lifetime_sold,
+       sum(case when pp.balance_votes > 0 then
+         pp.balance_votes * (case when pp.is_positive
+           then m."positivePrice"::numeric
+           else m."negativePrice"::numeric end)
+         else 0 end)::text as open_value
+     from per_position pp
+     left join markets m on m."profileId" = pp.market_profile_id
+     group by pp.profile_id`,
+    "market_positions"
+  );
+  console.log(`  ${rows.rows.length} profiles with lifetime market activity`);
+
+  const updates = rows.rows.map((r) => ({
+    profile_id: r.profile_id,
+    market_lifetime_bought_wei: r.lifetime_bought ?? "0",
+    market_lifetime_sold_wei: r.lifetime_sold ?? "0",
+    market_open_value_wei: r.open_value ?? "0",
+  }));
+  for (let i = 0; i < updates.length; i += 500) {
+    const chunk = updates.slice(i, i + 500);
+    const { error } = await supabase
+      .from("profile_latest")
+      .upsert(chunk, { onConflict: "profile_id" });
+    if (error) throw new Error(`profile_latest market_* upsert: ${error.message}`);
+  }
+}
+
 async function main() {
   const ethosUrl = process.env.ETHOS_DB_URL;
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -933,6 +1013,8 @@ async function main() {
       if (error) console.error(`market reset failed: ${error.message}`);
     }
     await backfillMarkets(ethos, supabase, 2);
+
+    await updateMarketPositions(ethos, supabase);
 
     const durationMs = Date.now() - startedAt;
     await supabase

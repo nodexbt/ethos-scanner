@@ -63,6 +63,10 @@ export interface ProfileDetail {
     xpTotal: number | null;
     primaryAddress: string | null;
     lastSeen: string | null;
+    /** Lifetime totals + current open-position value (wei strings). */
+    marketLifetimeBoughtWei: string;
+    marketLifetimeSoldWei: string;
+    marketOpenValueWei: string;
   } | null;
   days: ProfileDailyRow[];
   /** Aggregated over the last 30 days, sorted by |sent-received| desc. */
@@ -159,7 +163,22 @@ export async function getMonitoringSummary(
   const supabase = getSupabase();
   const today = todayUtcDate();
   const clampedRange = Math.max(1, Math.min(365, Math.round(rangeDays)));
-  const startDateObj = new Date();
+  // For 1d we want "the most recent day with data," not "today's UTC date" —
+  // otherwise the dashboard goes blank between midnight UTC and the next
+  // cron run. Find the max snapshot_date in profile_daily and anchor the
+  // window there. For multi-day windows we still anchor at today and look
+  // back, since some of the days will have data even if today doesn't.
+  const { data: latestDayRow } = await supabase
+    .from("profile_daily")
+    .select("snapshot_date")
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const latestDataDate =
+    (latestDayRow as { snapshot_date?: string } | null)?.snapshot_date ?? today;
+  const anchorDateObj =
+    clampedRange === 1 ? new Date(`${latestDataDate}T00:00:00Z`) : new Date();
+  const startDateObj = new Date(anchorDateObj);
   startDateObj.setUTCDate(startDateObj.getUTCDate() - (clampedRange - 1));
   const startDate = startDateObj.toISOString().slice(0, 10);
 
@@ -681,7 +700,7 @@ export async function getProfileDetail(
     supabase
       .from("profile_latest")
       .select(
-        "profile_id, display_name, username, avatar_url, human_verified, score, xp_total, primary_address, last_seen"
+        "profile_id, display_name, username, avatar_url, human_verified, score, xp_total, primary_address, last_seen, market_lifetime_bought_wei, market_lifetime_sold_wei, market_open_value_wei"
       )
       .eq("profile_id", profileId)
       .maybeSingle(),
@@ -706,6 +725,9 @@ export async function getProfileDetail(
         xp_total: number | null;
         primary_address: string | null;
         last_seen: string | null;
+        market_lifetime_bought_wei: string | number | null;
+        market_lifetime_sold_wei: string | number | null;
+        market_open_value_wei: string | number | null;
       }
     | null;
 
@@ -720,6 +742,9 @@ export async function getProfileDetail(
         xpTotal: latestRow.xp_total,
         primaryAddress: latestRow.primary_address,
         lastSeen: latestRow.last_seen,
+        marketLifetimeBoughtWei: String(latestRow.market_lifetime_bought_wei ?? "0"),
+        marketLifetimeSoldWei: String(latestRow.market_lifetime_sold_wei ?? "0"),
+        marketOpenValueWei: String(latestRow.market_open_value_wei ?? "0"),
       }
     : null;
 

@@ -24,11 +24,18 @@ create table if not exists public.profile_latest (
 -- primary_address is the first 0x wallet keyed to the profile's userkeys
 -- row; used to launch a sybil cluster scan from the monitoring dashboard
 -- without a live Ethos-DB round-trip on the web side.
+-- market_* columns are lifetime market trade totals + current open-position
+-- value, recomputed from activities each cron run. unrealized_pnl is
+-- derived in the UI as open_value - (bought - sold); total_pnl as
+-- open_value + sold - bought.
 alter table public.profile_latest
   add column if not exists display_name text,
   add column if not exists username text,
   add column if not exists avatar_url text,
-  add column if not exists primary_address text;
+  add column if not exists primary_address text,
+  add column if not exists market_lifetime_bought_wei numeric default 0,
+  add column if not exists market_lifetime_sold_wei numeric default 0,
+  add column if not exists market_open_value_wei numeric default 0;
 
 create table if not exists public.profile_daily (
   profile_id integer not null,

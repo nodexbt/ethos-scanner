@@ -306,7 +306,19 @@ export default function ProfileDetailPage({ params }: PageParams) {
           <XpTipsCard counterparties={data.tipCounterparties} rangeLabel={rangeLabel(range)} />
 
           {/* Market-trading activity */}
-          <MarketsCard days={days} rangeLabel={rangeLabel(range)} />
+          <MarketsCard
+            days={days}
+            rangeLabel={rangeLabel(range)}
+            lifetime={
+              profile
+                ? {
+                    bought: profile.marketLifetimeBoughtWei,
+                    sold: profile.marketLifetimeSoldWei,
+                    openValue: profile.marketOpenValueWei,
+                  }
+                : null
+            }
+          />
 
           {/* Activity totals */}
           <Card>
@@ -406,7 +418,13 @@ export default function ProfileDetailPage({ params }: PageParams) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
+function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | string | React.ReactNode;
+}) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
@@ -528,9 +546,16 @@ function formatEth(weiStr: string | null | undefined, decimals = 4): string {
 function MarketsCard({
   days,
   rangeLabel,
+  lifetime,
 }: {
   days: ProfileDailyRow[];
   rangeLabel: string;
+  /** Lifetime totals from profile_latest. All wei strings. */
+  lifetime: {
+    bought: string;
+    sold: string;
+    openValue: string;
+  } | null;
 }) {
   const ZERO = BigInt(0);
   const ETH = BigInt("1000000000000000000");
@@ -571,23 +596,78 @@ function MarketsCard({
       totalMarketXp += mxp;
     }
   }
+  // Lifetime PNL math. Total PNL = open_value + (sold - bought).
+  // Unrealized PNL = open_value - (bought - sold). When the user holds
+  // nothing open, total === realized cash flow.
+  const lifetimeBought = BigInt(lifetime?.bought ?? "0");
+  const lifetimeSold = BigInt(lifetime?.sold ?? "0");
+  const lifetimeOpen = BigInt(lifetime?.openValue ?? "0");
+  const lifetimeCashFlow = lifetimeSold - lifetimeBought;
+  const lifetimeUnrealized = lifetimeOpen - (lifetimeBought - lifetimeSold);
+  const lifetimeTotal = lifetimeOpen + lifetimeCashFlow;
+  const hasLifetime = lifetimeBought > ZERO || lifetimeSold > ZERO || lifetimeOpen > ZERO;
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Markets activity ({rangeLabel})</CardTitle>
+        <CardTitle className="text-base">Markets activity</CardTitle>
         <CardDescription className="text-xs">
-          Daily aggregates from <code>MARKET_VOTE</code> activities. <strong>Net cash flow</strong> is
-          sold − bought; it does <em>not</em> include unrealized PNL on positions still open. High
-          churn with high market-pool XP is the wash-trade pattern.
+          Lifetime totals + per-day breakdown derived from <code>MARKET_VOTE</code> activities.
+          Unrealized PNL uses each market&apos;s current trust/distrust price; total PNL =
+          realized cash flow + open positions value.
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
+        {hasLifetime && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-2 text-sm pb-3 border-b border-border/60 mb-3">
+            <Stat label="Lifetime bought" value={`${formatEth(lifetimeBought.toString())} ETH`} />
+            <Stat label="Lifetime sold" value={`${formatEth(lifetimeSold.toString())} ETH`} />
+            <Stat label="Open positions" value={`${formatEth(lifetimeOpen.toString())} ETH`} />
+            <Stat
+              label="Unrealized PNL"
+              value={
+                <span
+                  className={
+                    lifetimeUnrealized > ZERO
+                      ? "text-green-500"
+                      : lifetimeUnrealized < ZERO
+                      ? "text-destructive"
+                      : ""
+                  }
+                >
+                  {lifetimeUnrealized >= ZERO ? "+" : ""}
+                  {formatEth(lifetimeUnrealized.toString())} ETH
+                </span>
+              }
+            />
+            <Stat
+              label="Total PNL"
+              value={
+                <span
+                  className={
+                    lifetimeTotal > ZERO
+                      ? "text-green-500"
+                      : lifetimeTotal < ZERO
+                      ? "text-destructive"
+                      : ""
+                  }
+                >
+                  {lifetimeTotal >= ZERO ? "+" : ""}
+                  {formatEth(lifetimeTotal.toString())} ETH
+                </span>
+              }
+            />
+          </div>
+        )}
         {activeDays.length === 0 ? (
           <div className="text-xs text-muted-foreground py-4">
             No market trading recorded in the selected window.
           </div>
         ) : (
           <>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Per-day in window ({rangeLabel})
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-2 text-sm pb-3 border-b border-border/60 mb-3">
               <Stat label="Trades" value={totalTrades.toLocaleString()} />
               <Stat label="Markets" value={totalPositions.toLocaleString()} />
