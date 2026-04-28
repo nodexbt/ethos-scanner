@@ -421,7 +421,7 @@ export default function MonitoringPage() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState(1);
+  const [range, setRange] = useState(7);
   const [xpType, setXpType] = useState<string | null>(null);
 
   useEffect(() => {

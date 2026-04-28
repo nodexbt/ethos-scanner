@@ -2,6 +2,7 @@ name: Ethos monitoring (daily)
 
 on:
   schedule:
+    # 03:00 UTC daily. GitHub Actions cron is always UTC.
     - cron: "0 3 * * *"
   workflow_dispatch:
 

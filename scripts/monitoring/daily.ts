@@ -749,6 +749,13 @@ async function main() {
     const startedAt = Date.now();
     try {
       await ethos.connect();
+      // Pin the session to UTC so now() and any timezone-sensitive
+      // comparisons against `timestamp without time zone` columns (e.g.
+      // activities."createdAt") use the same calendar boundary the rest
+      // of the pipeline does. Belt-and-suspenders: managed Postgres
+      // sessions are usually UTC by default, but we don't want to
+      // depend on that.
+      await ethos.query("SET TIMEZONE TO 'UTC'");
       await backfillMarkets(ethos, supabase, days);
       console.log(`Backfill done in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
     } finally {
@@ -775,6 +782,11 @@ async function main() {
 
   try {
     await ethos.connect();
+    // Pin the session to UTC so now() and any timezone-sensitive
+    // comparisons against `timestamp without time zone` columns (e.g.
+    // activities."createdAt") use the same calendar boundary the rest
+    // of the pipeline does. See comment on the backfill path above.
+    await ethos.query("SET TIMEZONE TO 'UTC'");
 
     console.log("Fetching current state from Ethos…");
     const current = await fetchEthosCurrent(ethos);
