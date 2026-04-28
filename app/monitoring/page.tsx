@@ -25,6 +25,7 @@ import type {
   WatchlistEntry,
 } from "@/lib/db/monitoring";
 import { Star } from "lucide-react";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 function formatRelative(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
@@ -41,10 +42,13 @@ function formatRelative(ts: string): string {
 function ProfileName({ p }: { p: ProfileSummary & { profileId: number } }) {
   const label = p.displayName?.trim() || (p.username ? `@${p.username}` : `#${p.profileId}`);
   const sub = p.username && p.displayName ? `@${p.username}` : null;
+  // `flex` (not inline-flex) so the link fills its block container and the
+  // inner `min-w-0 truncate` chain actually clips overlong names instead of
+  // growing the parent card past the grid track.
   return (
     <Link
       href={`/monitoring/${p.profileId}`}
-      className="inline-flex items-center gap-2 hover:underline min-w-0 group"
+      className="flex items-center gap-2 hover:underline min-w-0 group"
     >
       {p.avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -56,20 +60,26 @@ function ProfileName({ p }: { p: ProfileSummary & { profileId: number } }) {
       ) : (
         <div className="h-6 w-6 rounded-full shrink-0 bg-muted" />
       )}
-      <span className="inline-flex items-center gap-1.5 min-w-0">
+      <span className="flex items-center gap-1.5 min-w-0 flex-1">
         <span className="font-medium truncate">{label}</span>
         {p.humanVerified && <HumanVerifiedBadge size={12} />}
-        {sub && <span className="text-xs text-muted-foreground truncate">{sub}</span>}
+        {sub && <span className="text-xs text-muted-foreground truncate hidden sm:inline">{sub}</span>}
       </span>
     </Link>
   );
 }
 
 function Row({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
+  // Stacks vertically on mobile so the left-side profile (avatar + long
+  // display name + handle) doesn't compete with the right-side metric for
+  // horizontal space. pl-8 keeps the right line aligned past the avatar
+  // column on phones.
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 text-sm">
-      <div className="min-w-0 flex-1">{left}</div>
-      <div className="shrink-0 text-xs text-muted-foreground font-mono">{right}</div>
+    <div className="flex flex-col gap-1 py-1.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+      <div className="min-w-0 sm:flex-1">{left}</div>
+      <div className="pl-8 text-xs text-muted-foreground font-mono sm:pl-0 sm:shrink-0 sm:text-right">
+        {right}
+      </div>
     </div>
   );
 }
@@ -135,8 +145,9 @@ function ScoreGainersCard({ rows, rangeLabel }: { rows: ScoreMover[]; rangeLabel
               key={r.profileId}
               left={<ProfileName p={r} />}
               right={
-                <span>
+                <span className="inline-flex items-center gap-0.5">
                   {r.scoreStart ?? "?"} → {r.scoreEnd ?? "?"}
+                  <EthosScoreIcon size={9} className="ml-0.5" />
                   {r.scoreDelta != null && <span className="text-green-500"> (+{r.scoreDelta})</span>}
                 </span>
               }
@@ -184,12 +195,12 @@ function XpGainersCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <CardTitle className="text-base">Top XP gainers</CardTitle>
           <select
             value={xpType ?? ""}
             onChange={(e) => onChangeType(e.target.value || null)}
-            className="text-xs bg-card/70 border border-border rounded-md px-2 py-1 cursor-pointer hover:border-foreground/30 transition-colors"
+            className="text-xs bg-card/70 border border-border rounded-md px-2 py-1 cursor-pointer hover:border-foreground/30 transition-colors max-w-full truncate"
           >
             {XP_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value ?? ""} value={opt.value ?? ""}>
@@ -462,7 +473,7 @@ export default function MonitoringPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <AppHeader />
 
       <Card className="mb-4">

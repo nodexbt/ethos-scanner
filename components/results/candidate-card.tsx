@@ -3,6 +3,7 @@
 import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, buildConnectionSummary } from "@/lib/scan-utils";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 interface CandidateCardProps {
   candidate: ClusterCandidate;
@@ -47,10 +48,17 @@ export function CandidateCard({ candidate, result, onClick }: CandidateCardProps
             </div>
           </div>
           {candidate.ethosProfile && (
-            <div className="text-xs text-muted-foreground">
-              {candidate.ethosProfile.username && `@${candidate.ethosProfile.username} · `}
-              Ethos score: {candidate.ethosProfile.score}
-              {candidate.wallets && candidate.wallets.length > 1 && ` · ${candidate.wallets.length} wallets`}
+            <div className="text-xs text-muted-foreground inline-flex items-center gap-0.5 flex-wrap">
+              {candidate.ethosProfile.username && (
+                <span>{`@${candidate.ethosProfile.username} · `}</span>
+              )}
+              <span className="inline-flex items-center gap-0.5">
+                Ethos score: {candidate.ethosProfile.score}
+                <EthosScoreIcon size={9} className="ml-0.5" />
+              </span>
+              {candidate.wallets && candidate.wallets.length > 1 && (
+                <span>{` · ${candidate.wallets.length} wallets`}</span>
+              )}
             </div>
           )}
         </div>

@@ -15,6 +15,7 @@ import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network, Star } from "
 import { AppHeader } from "@/components/app-header";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { Sparkline } from "@/components/ui/sparkline";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import type { ProfileDetail, ProfileDailyRow, XpTipCounterparty } from "@/lib/db/monitoring";
 
 function fmtDate(isoDate: string): string {
@@ -150,7 +151,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
   };
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <AppHeader />
 
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -195,7 +196,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
         <div className="space-y-4">
           {/* Profile header */}
           <Card>
-            <div className="p-4 flex items-center gap-4">
+            <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               {profile?.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -217,13 +218,21 @@ export default function ProfileDetailPage({ params }: PageParams) {
                     <span className="text-sm text-muted-foreground">@{profile.username}</span>
                   )}
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  Profile #{profileId}
-                  {profile?.score != null && ` · Score ${profile.score}`}
-                  {profile?.xpTotal != null && ` · XP ${profile.xpTotal.toLocaleString()}`}
+                <div className="text-xs text-muted-foreground mt-0.5 inline-flex items-center gap-0.5 flex-wrap">
+                  <span>Profile #{profileId}</span>
+                  {profile?.score != null && (
+                    <span className="inline-flex items-center gap-0.5">
+                      {" · Score "}
+                      {profile.score}
+                      <EthosScoreIcon size={9} className="ml-0.5" />
+                    </span>
+                  )}
+                  {profile?.xpTotal != null && (
+                    <span>{` · XP ${profile.xpTotal.toLocaleString()}`}</span>
+                  )}
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
                 <button
                   onClick={toggleWatching}
                   disabled={watching === null || watchBusy}

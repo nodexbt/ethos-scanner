@@ -6,6 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { Shield, ShieldCheck, LineChart, LogOut, Search } from "lucide-react";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 interface AppHeaderProps {
   /**
@@ -117,9 +118,10 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
               </span>
               {/* @ts-expect-error - ethos field added in session callback */}
               {session.user?.ethos?.score !== undefined && (
-                <span className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
                   {/* @ts-expect-error - ethos field added in session callback */}
                   {session.user.ethos.score}
+                  <EthosScoreIcon size={9} />
                 </span>
               )}
             </div>

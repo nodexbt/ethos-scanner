@@ -23,7 +23,7 @@ export function Sparkline({
     return (
       <div
         className={`flex items-center justify-center text-[10px] text-muted-foreground ${className ?? ""}`}
-        style={{ width, height }}
+        style={{ width: "100%", height }}
       >
         Not enough data
       </div>
@@ -50,12 +50,18 @@ export function Sparkline({
   });
   if (current.length > 1) segments.push(current.join(" "));
 
+  // width="100%" + viewBox + preserveAspectRatio="none" makes the SVG fill
+  // whatever container it's in, while the path math still uses the nominal
+  // `width` for coordinates. preserveAspectRatio="none" lets x and y scale
+  // independently so the line stretches to use the full card width without
+  // distorting the visible stroke (currentColor, fixed strokeWidth).
   return (
     <svg
-      width={width}
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className={className}
+      preserveAspectRatio="none"
+      className={`block ${className ?? ""}`}
       aria-hidden
     >
       {segments.map((d, i) => (

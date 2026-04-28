@@ -12,6 +12,7 @@ import {
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 interface CandidateModalProps {
   candidate: ClusterCandidate;
@@ -278,7 +279,10 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Credibility Score</span>
-                  <span className="font-medium">{candidate.ethosProfile.score}</span>
+                  <span className="font-medium inline-flex items-center gap-0.5">
+                    {candidate.ethosProfile.score}
+                    <EthosScoreIcon size={9} className="ml-0.5" />
+                  </span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Profile ID</span>

@@ -8,6 +8,7 @@ import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
 interface OverviewCardProps {
@@ -117,7 +118,10 @@ export function OverviewCard({
             <span className="hidden group-data-[copied=true]:inline text-[10px] font-medium text-green-500">Copied!</span>
           </button>
           {result.targetEthos && (
-            <span>&middot; Ethos: {result.targetEthos.displayName} (score: {result.targetEthos.score})</span>
+            <span className="inline-flex items-center gap-0.5">
+              &middot; Ethos: {result.targetEthos.displayName} (score: {result.targetEthos.score}
+              <EthosScoreIcon size={9} className="ml-0.5" />)
+            </span>
           )}
         </CardDescription>
       </CardHeader>
@@ -169,9 +173,14 @@ export function OverviewCard({
                   {result.targetEthos.humanVerified && <HumanVerifiedBadge />}
                   <ExternalLink className="h-3 w-3 opacity-50" />
                 </a>
-                <div className="text-xs text-muted-foreground">
-                  {result.targetEthos.username && `@${result.targetEthos.username} · `}
-                  Score: {result.targetEthos.score}
+                <div className="text-xs text-muted-foreground inline-flex items-center gap-0.5 flex-wrap">
+                  {result.targetEthos.username && (
+                    <span>{`@${result.targetEthos.username} · `}</span>
+                  )}
+                  <span className="inline-flex items-center gap-0.5">
+                    Score: {result.targetEthos.score}
+                    <EthosScoreIcon size={9} className="ml-0.5" />
+                  </span>
                 </div>
               </div>
             </div>
