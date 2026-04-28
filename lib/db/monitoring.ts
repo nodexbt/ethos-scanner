@@ -269,6 +269,8 @@ export async function getMonitoringSummary(
   collect(xpRes);
   collect(reviewersRes);
   collect(vouchersRes);
+  collect(reviewsReceivedRes);
+  collect(vouchesReceivedRes);
   collect(invitesRes);
   collect(attestationsRes);
 
