@@ -259,9 +259,19 @@ function scoreCandidate(
   }
 
   if (directInfo) {
-    addSignal("direct_transfer", W_DIRECT, `count=${directInfo.count}`);
-    if (directInfo.repeatTransfer) addSignal("repeat_transfer", W_REPEAT, "count>1");
-    if (directInfo.bidirectional) addSignal("bidirectional", W_BIDIRECTIONAL, "in>0 and out>0");
+    // Direct transfers between wallets are noisy — friends, payment splits,
+    // tipping, repaying debts all cause them. We still surface the
+    // information in the connection summary but it does NOT contribute to
+    // the cluster score or the signal-type count. Only funding-relationship
+    // signals (first-funder, CEX-deposit, funded-by-target/cluster) drive
+    // confidence. W_DIRECT etc. are kept solely as the discovery filter
+    // (pre-score) below — they decide which wallets are worth evaluating
+    // further; the final score doesn't use them.
+    signals.push({ type: "direct_transfer", score: 0, details: `count=${directInfo.count}` });
+    if (directInfo.repeatTransfer)
+      signals.push({ type: "repeat_transfer", score: 0, details: "count>1" });
+    if (directInfo.bidirectional)
+      signals.push({ type: "bidirectional", score: 0, details: "in>0 and out>0" });
   }
 
   if (fundedByTarget) {
@@ -882,10 +892,12 @@ export async function runClusterScan(
         if (!pid) continue;
 
         if (invitedByTargetIds.has(pid)) {
+          // Social signals are recorded for context in the connection
+          // summary but do not contribute to the cluster score or signal-
+          // type count. Invite trees include real legit relationships;
+          // adding points here drove false positives.
           candidate.invitedByTarget = true;
-          candidate.score += 2;
-          candidate.signals.push({ type: "invited_by_target", score: 2, details: "target invited this profile on Ethos" });
-          candidate.signalTypes.add("invited_by_target");
+          candidate.signals.push({ type: "invited_by_target", score: 0, details: "target invited this profile on Ethos" });
           log("warn", `${candidate.ethosProfile?.displayName} was invited by ${targetDisplayName} on Ethos`);
         }
       }
@@ -899,9 +911,7 @@ export async function runClusterScan(
             const invitations = await fetchInvitationTree(pid);
             if (invitations.some((inv) => inv.acceptedProfileId === targetProfileId)) {
               candidate.invitedTarget = true;
-              candidate.score += 2;
-              candidate.signals.push({ type: "invited_target", score: 2, details: "this profile invited the target on Ethos" });
-              candidate.signalTypes.add("invited_target");
+              candidate.signals.push({ type: "invited_target", score: 0, details: "this profile invited the target on Ethos" });
               log("warn", `${candidate.ethosProfile?.displayName} invited ${targetDisplayName} on Ethos`);
             }
           } catch {}
@@ -927,9 +937,7 @@ export async function runClusterScan(
 
         if (targetReviewedCandidate && candidateReviewedTarget) {
           candidate.mutualReviews = true;
-          candidate.score += 2;
-          candidate.signals.push({ type: "mutual_reviews", score: 2, details: "reviewed each other on Ethos" });
-          candidate.signalTypes.add("mutual_reviews");
+          candidate.signals.push({ type: "mutual_reviews", score: 0, details: "reviewed each other on Ethos" });
           log("warn", `Mutual reviews between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
         }
       }
@@ -952,9 +960,7 @@ export async function runClusterScan(
 
         if (targetVouchedCandidate && candidateVouchedTarget) {
           candidate.mutualVouches = true;
-          candidate.score += 2;
-          candidate.signals.push({ type: "mutual_vouches", score: 2, details: "vouched for each other on Ethos" });
-          candidate.signalTypes.add("mutual_vouches");
+          candidate.signals.push({ type: "mutual_vouches", score: 0, details: "vouched for each other on Ethos" });
           log("warn", `Mutual vouches between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
         }
       }
