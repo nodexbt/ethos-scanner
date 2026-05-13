@@ -57,9 +57,12 @@ export interface TwitterTweet {
 
 export interface TwitterSearchResult {
   tweets: TwitterTweet[];
-  /** How many tweets came back before the Ethos-profile filter, so the UI
-   * can communicate "X non-Ethos tweets hidden" if useful. */
+  /** Tweets returned by upstream before any filtering. */
   rawCount: number;
+  /** Tweets whose author was an Ethos profile (subset of rawCount). */
+  ethosCount: number;
+  /** Tweets dropped because the author owns the searched wallet. */
+  selfMentionCount: number;
 }
 
 // GET /api/twitter/search?q=<address-or-keyword>
@@ -85,33 +88,31 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("query", `"${q}"`);
   url.searchParams.set("queryType", "Latest");
 
-  // One-shot retry — when scanning many candidates back-to-back the
-  // upstream occasionally rejects rapid sequential requests (rate
-  // limiting + the connection pool sometimes returns a 5xx). A single
-  // backoff retry handles both cases without complicating callers.
+  // Retry with exponential backoff on 429 (rate limit), 5xx, or network
+  // error. twitterapi.io's free tier has a sliding-window rate limit
+  // that's tighter than their docs suggest in practice, so we need a
+  // few attempts to get through during a bulk Scan-All.
   async function callUpstream(): Promise<Response> {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const MAX_ATTEMPTS = 4;
+    let lastResp: Response | null = null;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
         const resp = await fetch(url.toString(), {
           headers: { "x-api-key": key! },
           cache: "no-store",
         });
         if (resp.ok) return resp;
-        if (resp.status < 500 && resp.status !== 429) return resp;
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 600));
-          continue;
-        }
-        return resp;
+        const retriable = resp.status === 429 || resp.status >= 500;
+        lastResp = resp;
+        if (!retriable || attempt === MAX_ATTEMPTS - 1) return resp;
       } catch (err) {
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 600));
-          continue;
-        }
-        throw err;
+        if (attempt === MAX_ATTEMPTS - 1) throw err;
       }
+      // Exponential backoff: 600ms, 1.5s, 3s
+      const delay = 600 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
     }
-    throw new Error("unreachable");
+    return lastResp!;
   }
 
   try {
@@ -185,12 +186,18 @@ export async function GET(req: NextRequest) {
     }
 
     const tweets: TwitterTweet[] = [];
+    let ethosCount = 0;
+    let selfMentionCount = 0;
     for (const t of rawTweets) {
       const handle = (t.author?.userName ?? "").toLowerCase();
       const ethos = ethosByHandle.get(handle);
       if (!ethos) continue;
+      ethosCount += 1;
       // Drop self-mentions — the author owns the address they tweeted.
-      if (ownerProfileIds.has(ethos.profileId)) continue;
+      if (ownerProfileIds.has(ethos.profileId)) {
+        selfMentionCount += 1;
+        continue;
+      }
       tweets.push({
         id: t.id ?? "",
         url: t.url ?? "",
@@ -215,6 +222,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       tweets,
       rawCount: rawTweets.length,
+      ethosCount,
+      selfMentionCount,
     } satisfies TwitterSearchResult);
   } catch (err) {
     console.error("twitterapi.io fetch failed:", err);

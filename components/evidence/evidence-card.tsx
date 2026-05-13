@@ -89,23 +89,39 @@ function AuthorPill({
   );
 }
 
-function TweetList({ tweets, rawCount }: { tweets: Tweet[]; rawCount: number }) {
-  const hiddenCount = Math.max(0, rawCount - tweets.length);
+function TweetList({
+  tweets,
+  rawCount,
+  ethosCount,
+  selfMentionCount,
+}: {
+  tweets: Tweet[];
+  rawCount: number;
+  ethosCount: number;
+  selfMentionCount: number;
+}) {
+  const nonEthosHidden = Math.max(0, rawCount - ethosCount);
   if (tweets.length === 0) {
-    return (
-      <div className="text-[11px] text-muted-foreground italic py-2">
-        {rawCount === 0
-          ? "No tweets found mentioning this address."
-          : `${rawCount} tweet${rawCount === 1 ? "" : "s"} found, but none from Ethos profiles.`}
-      </div>
-    );
+    let msg: string;
+    if (rawCount === 0) {
+      msg = "No tweets found mentioning this address.";
+    } else if (ethosCount === 0) {
+      msg = `${rawCount} tweet${rawCount === 1 ? "" : "s"} found, but none from Ethos profiles.`;
+    } else {
+      // All matched Ethos profiles owned the address (self-mentions only).
+      msg = `${ethosCount} Ethos tweet${ethosCount === 1 ? "" : "s"} found, but all were the owner mentioning their own wallet.`;
+    }
+    return <div className="text-[11px] text-muted-foreground italic py-2">{msg}</div>;
   }
   return (
     <div className="space-y-2 max-h-80 overflow-y-auto">
-      {hiddenCount > 0 && (
+      {(nonEthosHidden > 0 || selfMentionCount > 0) && (
         <div className="text-[10px] text-muted-foreground italic">
-          Showing {tweets.length} from Ethos profiles · {hiddenCount} non-Ethos tweet
-          {hiddenCount === 1 ? "" : "s"} hidden
+          Showing {tweets.length} from Ethos profiles
+          {nonEthosHidden > 0 &&
+            ` · ${nonEthosHidden} non-Ethos tweet${nonEthosHidden === 1 ? "" : "s"} hidden`}
+          {selfMentionCount > 0 &&
+            ` · ${selfMentionCount} self-mention${selfMentionCount === 1 ? "" : "s"} hidden`}
         </div>
       )}
       {tweets.map((t) => (
@@ -193,7 +209,9 @@ export function EvidenceCard({
   onPaste,
 }: EvidenceCardProps) {
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-  const [tweetResults, setTweetResults] = useState<Map<string, { tweets: Tweet[]; rawCount: number }>>(new Map());
+  const [tweetResults, setTweetResults] = useState<
+    Map<string, { tweets: Tweet[]; rawCount: number; ethosCount: number; selfMentionCount: number }>
+  >(new Map());
   const [searching, setSearching] = useState<Set<string>>(new Set());
   const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
   const [scanningAll, setScanningAll] = useState(false);
@@ -259,10 +277,11 @@ export function EvidenceCard({
     let first = true;
     for (const entry of entries) {
       if (tweetResults.has(entry.address)) continue;
-      // Pacing: twitterapi.io occasionally rejects rapid back-to-back
-      // requests with rate-limit responses. A short delay between
-      // sequential calls keeps the loop unsupervised.
-      if (!first) await new Promise((r) => setTimeout(r, 750));
+      // Pacing: twitterapi.io's sliding-window rate limit means rapid
+      // back-to-back requests get rejected even with server-side
+      // retries. 1500ms between calls keeps an unsupervised scan-all
+      // reliable on a typical 10-15-candidate cluster.
+      if (!first) await new Promise((r) => setTimeout(r, 1500));
       first = false;
       await runAutoSearch(entry.address);
     }
@@ -284,7 +303,12 @@ export function EvidenceCard({
       }
       const data = (await res.json()) as TwitterSearchResult;
       setTweetResults((m) =>
-        new Map(m).set(address, { tweets: data.tweets, rawCount: data.rawCount })
+        new Map(m).set(address, {
+          tweets: data.tweets,
+          rawCount: data.rawCount,
+          ethosCount: data.ethosCount,
+          selfMentionCount: data.selfMentionCount,
+        })
       );
     } catch (err) {
       setSearchErrors((m) =>
@@ -459,7 +483,14 @@ export function EvidenceCard({
               {error && (
                 <div className="text-[11px] text-destructive">{error}</div>
               )}
-              {result && <TweetList tweets={result.tweets} rawCount={result.rawCount} />}
+              {result && (
+                <TweetList
+                  tweets={result.tweets}
+                  rawCount={result.rawCount}
+                  ethosCount={result.ethosCount}
+                  selfMentionCount={result.selfMentionCount}
+                />
+              )}
               {screenshots.has(entry.address) && (
                 <div className="relative">
                   <img
