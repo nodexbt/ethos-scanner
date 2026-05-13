@@ -82,19 +82,46 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing or invalid q" }, { status: 400 });
   }
 
-  // Number of pages to fetch from upstream. Each page is 20 tweets, so 5
-  // pages = ~100 tweets per search. We need enough coverage that the
-  // Ethos-author filter still surfaces relevant tweets when a wallet is
-  // mentioned by many anon accounts, but capped to keep cost predictable
-  // ($0.15/1000 tweets × ~100 tweets × ~15 candidates ≈ $0.22 per
-  // Scan-All).
-  const MAX_PAGES = 5;
+  // 3 pages × 20 tweets = ~60 tweets per search. We exclude the owner's
+  // handle(s) from the query directly via `-from:`, which means we don't
+  // need to paginate deep just to skip past the owner's repeated self-
+  // mentions of their own wallet.
+  const MAX_PAGES = 3;
+
+  // Look up the wallet's owner profile(s) before searching, so we can both
+  // exclude them from the query (no wasted pagination on their self-
+  // mentions) and use them as the canonical self-mention filter below.
+  const supabase = getSupabase();
+  const ownerProfileIds = new Set<number>();
+  const ownerHandles: string[] = [];
+  if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
+    const { data: ownerRows } = await supabase
+      .from("profile_addresses")
+      .select("profile_id")
+      .eq("address", q.toLowerCase());
+    for (const row of (ownerRows ?? []) as { profile_id: number }[]) {
+      ownerProfileIds.add(row.profile_id);
+    }
+    if (ownerProfileIds.size > 0) {
+      const { data: handleRows } = await supabase
+        .from("profile_latest")
+        .select("username")
+        .in("profile_id", [...ownerProfileIds]);
+      for (const row of (handleRows ?? []) as { username: string | null }[]) {
+        if (row.username) ownerHandles.push(row.username);
+      }
+    }
+  }
 
   // twitterapi.io's advanced_search accepts the same operators as Twitter's
-  // search UI; quoting wallet addresses prevents accidental tokenization.
+  // search UI; quoting wallet addresses prevents accidental tokenization,
+  // and `-from:` excludes the owner's own tweets so we get cross-mentions
+  // from other Ethos profiles instead of pages of self-mentions.
+  const queryTerms = [`"${q}"`, ...ownerHandles.map((h) => `-from:${h}`)];
+  const fullQuery = queryTerms.join(" ");
   function buildUrl(cursor: string | null): string {
     const url = new URL(`${TWITTERAPI_IO_BASE}/twitter/tweet/advanced_search`);
-    url.searchParams.set("query", `"${q}"`);
+    url.searchParams.set("query", fullQuery);
     url.searchParams.set("queryType", "Latest");
     if (cursor) url.searchParams.set("cursor", cursor);
     return url.toString();
@@ -166,8 +193,6 @@ export async function GET(req: NextRequest) {
       ),
     ];
 
-    const supabase = getSupabase();
-
     const ethosByHandle = new Map<
       string,
       TwitterTweet["ethos"]
@@ -193,20 +218,6 @@ export async function GET(req: NextRequest) {
           score: row.score,
           humanVerified: Boolean(row.human_verified),
         });
-      }
-    }
-
-    // If the searched address is attested to one or more Ethos profiles
-    // (i.e. a known wallet of that profile), we drop tweets from those
-    // profiles — a user tweeting their own wallet isn't a sybil signal.
-    const ownerProfileIds = new Set<number>();
-    if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
-      const { data: ownersData } = await supabase
-        .from("profile_addresses")
-        .select("profile_id")
-        .eq("address", q.toLowerCase());
-      for (const row of (ownersData ?? []) as { profile_id: number }[]) {
-        ownerProfileIds.add(row.profile_id);
       }
     }
 
