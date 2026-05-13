@@ -256,8 +256,14 @@ export function EvidenceCard({
   const scanAll = async () => {
     if (scanningAll) return;
     setScanningAll(true);
+    let first = true;
     for (const entry of entries) {
       if (tweetResults.has(entry.address)) continue;
+      // Pacing: twitterapi.io occasionally rejects rapid back-to-back
+      // requests with rate-limit responses. A short delay between
+      // sequential calls keeps the loop unsupervised.
+      if (!first) await new Promise((r) => setTimeout(r, 750));
+      first = false;
       await runAutoSearch(entry.address);
     }
     setScanningAll(false);

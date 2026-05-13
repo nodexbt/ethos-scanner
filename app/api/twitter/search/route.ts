@@ -85,13 +85,37 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("query", `"${q}"`);
   url.searchParams.set("queryType", "Latest");
 
+  // One-shot retry — when scanning many candidates back-to-back the
+  // upstream occasionally rejects rapid sequential requests (rate
+  // limiting + the connection pool sometimes returns a 5xx). A single
+  // backoff retry handles both cases without complicating callers.
+  async function callUpstream(): Promise<Response> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const resp = await fetch(url.toString(), {
+          headers: { "x-api-key": key! },
+          cache: "no-store",
+        });
+        if (resp.ok) return resp;
+        if (resp.status < 500 && resp.status !== 429) return resp;
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        return resp;
+      } catch (err) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error("unreachable");
+  }
+
   try {
-    const upstream = await fetch(url.toString(), {
-      headers: { "x-api-key": key },
-      // Don't cache between users — query is unique per address, and
-      // tweet results are time-sensitive.
-      cache: "no-store",
-    });
+    const upstream = await callUpstream();
 
     if (!upstream.ok) {
       const body = await upstream.text();
@@ -116,12 +140,13 @@ export async function GET(req: NextRequest) {
       ),
     ];
 
+    const supabase = getSupabase();
+
     const ethosByHandle = new Map<
       string,
       TwitterTweet["ethos"]
     >();
     if (handles.length > 0) {
-      const supabase = getSupabase();
       const { data } = await supabase
         .from("profile_latest")
         .select("profile_id, username, display_name, avatar_url, score, human_verified")
@@ -145,11 +170,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // If the searched address is attested to one or more Ethos profiles
+    // (i.e. a known wallet of that profile), we drop tweets from those
+    // profiles — a user tweeting their own wallet isn't a sybil signal.
+    const ownerProfileIds = new Set<number>();
+    if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
+      const { data: ownersData } = await supabase
+        .from("profile_addresses")
+        .select("profile_id")
+        .eq("address", q.toLowerCase());
+      for (const row of (ownersData ?? []) as { profile_id: number }[]) {
+        ownerProfileIds.add(row.profile_id);
+      }
+    }
+
     const tweets: TwitterTweet[] = [];
     for (const t of rawTweets) {
       const handle = (t.author?.userName ?? "").toLowerCase();
       const ethos = ethosByHandle.get(handle);
       if (!ethos) continue;
+      // Drop self-mentions — the author owns the address they tweeted.
+      if (ownerProfileIds.has(ethos.profileId)) continue;
       tweets.push({
         id: t.id ?? "",
         url: t.url ?? "",
