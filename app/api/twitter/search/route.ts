@@ -61,8 +61,6 @@ export interface TwitterSearchResult {
   rawCount: number;
   /** Tweets whose author was an Ethos profile (subset of rawCount). */
   ethosCount: number;
-  /** Tweets dropped because the author owns the searched wallet. */
-  selfMentionCount: number;
 }
 
 // GET /api/twitter/search?q=<address-or-keyword>
@@ -171,33 +169,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // If the searched address is attested to one or more Ethos profiles
-    // (i.e. a known wallet of that profile), we drop tweets from those
-    // profiles — a user tweeting their own wallet isn't a sybil signal.
-    const ownerProfileIds = new Set<number>();
-    if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
-      const { data: ownersData } = await supabase
-        .from("profile_addresses")
-        .select("profile_id")
-        .eq("address", q.toLowerCase());
-      for (const row of (ownersData ?? []) as { profile_id: number }[]) {
-        ownerProfileIds.add(row.profile_id);
-      }
-    }
-
     const tweets: TwitterTweet[] = [];
     let ethosCount = 0;
-    let selfMentionCount = 0;
     for (const t of rawTweets) {
       const handle = (t.author?.userName ?? "").toLowerCase();
       const ethos = ethosByHandle.get(handle);
       if (!ethos) continue;
       ethosCount += 1;
-      // Drop self-mentions — the author owns the address they tweeted.
-      if (ownerProfileIds.has(ethos.profileId)) {
-        selfMentionCount += 1;
-        continue;
-      }
       tweets.push({
         id: t.id ?? "",
         url: t.url ?? "",
@@ -223,7 +201,6 @@ export async function GET(req: NextRequest) {
       tweets,
       rawCount: rawTweets.length,
       ethosCount,
-      selfMentionCount,
     } satisfies TwitterSearchResult);
   } catch (err) {
     console.error("twitterapi.io fetch failed:", err);

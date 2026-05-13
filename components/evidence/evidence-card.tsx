@@ -27,7 +27,6 @@ type TweetResultEntry = {
   tweets: Tweet[];
   rawCount: number;
   ethosCount: number;
-  selfMentionCount: number;
 };
 
 interface EvidenceCardProps {
@@ -104,35 +103,25 @@ function TweetList({
   tweets,
   rawCount,
   ethosCount,
-  selfMentionCount,
 }: {
   tweets: Tweet[];
   rawCount: number;
   ethosCount: number;
-  selfMentionCount: number;
 }) {
   const nonEthosHidden = Math.max(0, rawCount - ethosCount);
   if (tweets.length === 0) {
-    let msg: string;
-    if (rawCount === 0) {
-      msg = "No tweets found mentioning this address.";
-    } else if (ethosCount === 0) {
-      msg = `${rawCount} tweet${rawCount === 1 ? "" : "s"} found, but none from Ethos profiles.`;
-    } else {
-      // All matched Ethos profiles owned the address (self-mentions only).
-      msg = `${ethosCount} Ethos tweet${ethosCount === 1 ? "" : "s"} found, but all were the owner mentioning their own wallet.`;
-    }
+    const msg =
+      rawCount === 0
+        ? "No tweets found mentioning this address."
+        : `${rawCount} tweet${rawCount === 1 ? "" : "s"} found, but none from Ethos profiles.`;
     return <div className="text-[11px] text-muted-foreground italic py-2">{msg}</div>;
   }
   return (
     <div className="space-y-2 max-h-80 overflow-y-auto">
-      {(nonEthosHidden > 0 || selfMentionCount > 0) && (
+      {nonEthosHidden > 0 && (
         <div className="text-[10px] text-muted-foreground italic">
           Showing {tweets.length} from Ethos profiles
-          {nonEthosHidden > 0 &&
-            ` · ${nonEthosHidden} non-Ethos tweet${nonEthosHidden === 1 ? "" : "s"} hidden`}
-          {selfMentionCount > 0 &&
-            ` · ${selfMentionCount} self-mention${selfMentionCount === 1 ? "" : "s"} hidden`}
+          {` · ${nonEthosHidden} non-Ethos tweet${nonEthosHidden === 1 ? "" : "s"} hidden`}
         </div>
       )}
       {tweets.map((t) => (
@@ -233,7 +222,6 @@ export function EvidenceCard({
           tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
           rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
           ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
-          selfMentionCount: typeof r.selfMentionCount === "number" ? r.selfMentionCount : 0,
         });
       }
     }
@@ -341,7 +329,6 @@ export function EvidenceCard({
           tweets: data.tweets,
           rawCount: data.rawCount,
           ethosCount: data.ethosCount,
-          selfMentionCount: data.selfMentionCount,
         })
       );
     } catch (err) {
@@ -522,7 +509,6 @@ export function EvidenceCard({
                   tweets={result.tweets}
                   rawCount={result.rawCount}
                   ethosCount={result.ethosCount}
-                  selfMentionCount={result.selfMentionCount}
                 />
               )}
               {screenshots.has(entry.address) && (
