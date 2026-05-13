@@ -24,6 +24,7 @@ export interface InvestigationRow {
   aiAnalysis: string | null;
   shareId: string | null;
   isPublic: boolean;
+  twitterEvidence: Record<string, unknown> | null;
 }
 
 export async function listInvestigations(): Promise<InvestigationSummary[]> {
@@ -89,6 +90,10 @@ export async function getInvestigation(id: string): Promise<InvestigationRow | n
     aiAnalysis: data.ai_analysis,
     shareId: data.share_id,
     isPublic: data.is_public ?? false,
+    twitterEvidence:
+      typeof data.twitter_evidence === "string"
+        ? JSON.parse(data.twitter_evidence)
+        : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
   };
 }
 
@@ -113,6 +118,10 @@ export async function getInvestigationByShareId(shareId: string): Promise<Invest
     aiAnalysis: data.ai_analysis,
     shareId: data.share_id,
     isPublic: data.is_public ?? false,
+    twitterEvidence:
+      typeof data.twitter_evidence === "string"
+        ? JSON.parse(data.twitter_evidence)
+        : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
   };
 }
 
@@ -124,6 +133,8 @@ export async function saveInvestigation(data: {
   aiAnalysis: string | null;
   ownerProfileId: number;
   scanDurationMs?: number | null;
+  /** Map of address → search result + tweets. Persisted as JSONB. */
+  twitterEvidence?: Record<string, unknown> | null;
 }): Promise<void> {
   const supabase = getSupabase();
   const result = data.clusterResult as { targetEthos?: { avatarUrl?: string } };
@@ -156,6 +167,10 @@ export async function saveInvestigation(data: {
       // Only write when we have a value; leave column untouched if not
       // (preserves the previous duration on legacy upserts).
       ...(data.scanDurationMs != null && { scan_duration_ms: data.scanDurationMs }),
+      // twitterEvidence is the cross-cluster tweet search payload. Only
+      // overwrite when explicitly provided so a save that doesn't include
+      // it doesn't wipe existing data.
+      ...(data.twitterEvidence !== undefined && { twitter_evidence: data.twitterEvidence }),
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 

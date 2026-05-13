@@ -81,6 +81,10 @@ export default function Home() {
 
   // Screenshot state: address -> data URL
   const [screenshots, setScreenshots] = useState<Map<string, string>>(new Map());
+  // Twitter evidence from auto-search: address -> { tweets, rawCount, ... }.
+  // Persisted with the investigation so saved scans retain their tweet evidence.
+  // Shape mirrors TwitterSearchResult from /api/twitter/search.
+  const [twitterEvidence, setTwitterEvidence] = useState<Record<string, unknown>>({});
   const [savedInvestigations, setSavedInvestigations] = useState<InvestigationSummary[]>([]);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
@@ -143,6 +147,7 @@ export default function Home() {
         setClusterResult(data.clusterResult);
         setCurrentInvestigationId(cachedId);
         setScreenshots(new Map());
+        setTwitterEvidence({});
         setClusterLogs([]);
         setError(null);
         setLoadingCached(false);
@@ -161,6 +166,7 @@ export default function Home() {
     setScanProgress(null);
     setError(null);
     setScreenshots(new Map());
+    setTwitterEvidence({});
     setCurrentInvestigationId(null);
     setLogExpanded(true);
 
@@ -324,6 +330,7 @@ export default function Home() {
         targetName: clusterResult.targetEthos?.displayName ?? null,
         clusterResult,
         screenshots: Object.fromEntries(screenshots),
+        twitterEvidence,
         aiAnalysis: null,
       }),
     });
@@ -337,6 +344,9 @@ export default function Home() {
     const data = await resp.json();
     setClusterResult(data.clusterResult);
     setScreenshots(new Map(Object.entries(data.screenshots || {})));
+    setTwitterEvidence(
+      (data.twitterEvidence as Record<string, unknown> | null) ?? {}
+    );
     setCurrentInvestigationId(inv.id);
     setClusterLogs([]);
     setScanProgress(null);
@@ -774,6 +784,7 @@ export default function Home() {
           setError(null);
           setCurrentInvestigationId(null);
           setScreenshots(new Map());
+        setTwitterEvidence({});
           window.history.pushState({}, "", "/");
         }}
       />
@@ -1044,6 +1055,8 @@ export default function Home() {
                   onScreenshotUpload={handleScreenshotUpload}
                   onScreenshotRemove={removeScreenshot}
                   onPaste={handlePaste}
+                  initialTwitterEvidence={twitterEvidence}
+                  onTwitterEvidenceChange={setTwitterEvidence}
                 />
               )}
             </motion.div>

@@ -178,6 +178,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid aiAnalysis" }, { status: 400 });
   }
 
+  // twitterEvidence is the cross-cluster tweet search payload. Optional;
+  // when present must be a plain object map (address → result). Cap the
+  // serialized size at 4 MB to prevent runaway saves on big clusters.
+  let twitterEvidence: Record<string, unknown> | undefined;
+  if (data.twitterEvidence !== undefined && data.twitterEvidence !== null) {
+    if (typeof data.twitterEvidence !== "object" || Array.isArray(data.twitterEvidence)) {
+      return NextResponse.json({ error: "Invalid twitterEvidence" }, { status: 400 });
+    }
+    const serialized = JSON.stringify(data.twitterEvidence);
+    if (serialized.length > 4 * 1024 * 1024) {
+      return NextResponse.json({ error: "twitterEvidence too large" }, { status: 413 });
+    }
+    twitterEvidence = data.twitterEvidence as Record<string, unknown>;
+  }
+
   // scan_duration_ms is optional and only set when the client is
   // saving fresh scan results (not when manually editing). Sanity-cap
   // to 10 minutes so a wildly wrong value can't poison the rolling
@@ -201,6 +216,7 @@ export async function POST(req: NextRequest) {
       aiAnalysis: (data.aiAnalysis as string | null) ?? null,
       ownerProfileId: auth.profileId,
       scanDurationMs,
+      twitterEvidence,
     });
   } catch (err) {
     if (err instanceof Error && err.message.includes("Not authorized")) {

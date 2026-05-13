@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Search,
@@ -23,12 +23,23 @@ import type { TwitterTweet, TwitterSearchResult } from "@/app/api/twitter/search
 
 type Tweet = TwitterTweet;
 
+type TweetResultEntry = {
+  tweets: Tweet[];
+  rawCount: number;
+  ethosCount: number;
+  selfMentionCount: number;
+};
+
 interface EvidenceCardProps {
   result: ClusterScanResult;
   screenshots: Map<string, string>;
   onScreenshotUpload: (address: string, file: File) => void;
   onScreenshotRemove: (address: string) => void;
   onPaste: (address: string) => void;
+  /** Address → tweet search result map persisted with the investigation.
+   * Loaded on mount; mutated through onTwitterEvidenceChange. */
+  initialTwitterEvidence?: Record<string, unknown>;
+  onTwitterEvidenceChange?: (next: Record<string, TweetResultEntry>) => void;
 }
 
 function formatRelative(createdAt: string): string {
@@ -207,11 +218,34 @@ export function EvidenceCard({
   onScreenshotUpload,
   onScreenshotRemove,
   onPaste,
+  initialTwitterEvidence,
+  onTwitterEvidenceChange,
 }: EvidenceCardProps) {
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-  const [tweetResults, setTweetResults] = useState<
-    Map<string, { tweets: Tweet[]; rawCount: number; ethosCount: number; selfMentionCount: number }>
-  >(new Map());
+  const [tweetResults, setTweetResults] = useState<Map<string, TweetResultEntry>>(() => {
+    // Hydrate from the saved investigation if present.
+    const m = new Map<string, TweetResultEntry>();
+    if (initialTwitterEvidence) {
+      for (const [addr, raw] of Object.entries(initialTwitterEvidence)) {
+        const r = raw as Partial<TweetResultEntry> | undefined;
+        if (!r) continue;
+        m.set(addr, {
+          tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
+          rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
+          ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
+          selfMentionCount: typeof r.selfMentionCount === "number" ? r.selfMentionCount : 0,
+        });
+      }
+    }
+    return m;
+  });
+
+  // Surface changes back to the parent so they can be saved alongside the
+  // investigation. Sent as a plain object for JSON serialisation.
+  useEffect(() => {
+    if (!onTwitterEvidenceChange) return;
+    onTwitterEvidenceChange(Object.fromEntries(tweetResults));
+  }, [tweetResults, onTwitterEvidenceChange]);
   const [searching, setSearching] = useState<Set<string>>(new Set());
   const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
   const [scanningAll, setScanningAll] = useState(false);
