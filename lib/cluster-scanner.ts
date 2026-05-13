@@ -3,6 +3,7 @@ import {
   type Chain,
   type AssetTransfer,
   getAllTransactions,
+  batchGetCode,
   parallel,
   getFirstFunder,
   getOutgoingTransfers,
@@ -475,13 +476,46 @@ async function scanNetwork(
 
   // Step 8: Shared funding sources
   log("info", `[${network}] Checking shared funding sources...`);
-  const sharedFunding = findSharedFundingSources(
+  const sharedFundingRaw = findSharedFundingSources(
     target,
     txs,
     allCandidateAddrs,
     candidateTxsMap,
     contractCache
   );
+
+  // Lazy contract check: instead of running eth_getCode across every
+  // counterparty (that's what batchGetCode used to do), we only check
+  // the addresses that actually surface as a shared funder for some
+  // Ethos-profile candidate. Typically 0-20 addresses per chain — a
+  // few hundred CU instead of tens of thousands.
+  const sharedFunderUnion = new Set<string>();
+  for (const sources of sharedFundingRaw.values()) {
+    for (const src of sources) sharedFunderUnion.add(src);
+  }
+  // Skip addresses already labeled in known-addresses (CEX hot wallets,
+  // labeled services) — those are intentional shared-funder candidates
+  // and already get the correct shared_exchange_funder downgrade.
+  const unknownFunders = [...sharedFunderUnion].filter((addr) => !getAddressLabel(addr));
+  if (unknownFunders.length > 0) {
+    log(
+      "info",
+      `[${network}] Checking contract status of ${unknownFunders.length} shared funder(s)…`
+    );
+    const codeResult = await batchGetCode(unknownFunders, chain);
+    for (const [addr, isContract] of codeResult) {
+      contractCache.set(addr, isContract);
+    }
+  }
+  // Drop contract-as-funder entries from the shared list. Without this
+  // every Ethos profile that ever used Uniswap would share a "funder"
+  // (the router) with every other Uniswap user → massive false
+  // positives.
+  const sharedFunding = new Map<string, string[]>();
+  for (const [wallet, sources] of sharedFundingRaw) {
+    const cleaned = sources.filter((s) => !contractCache.get(s));
+    if (cleaned.length > 0) sharedFunding.set(wallet, cleaned);
+  }
   log("info", `[${network}] ${sharedFunding.size} wallets share funding sources`);
 
   // Step 9: First funder analysis (only for promising candidates)
