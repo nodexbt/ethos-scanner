@@ -82,22 +82,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing or invalid q" }, { status: 400 });
   }
 
+  // Number of pages to fetch from upstream. Each page is 20 tweets, so 5
+  // pages = ~100 tweets per search. We need enough coverage that the
+  // Ethos-author filter still surfaces relevant tweets when a wallet is
+  // mentioned by many anon accounts, but capped to keep cost predictable
+  // ($0.15/1000 tweets × ~100 tweets × ~15 candidates ≈ $0.22 per
+  // Scan-All).
+  const MAX_PAGES = 5;
+
   // twitterapi.io's advanced_search accepts the same operators as Twitter's
   // search UI; quoting wallet addresses prevents accidental tokenization.
-  const url = new URL(`${TWITTERAPI_IO_BASE}/twitter/tweet/advanced_search`);
-  url.searchParams.set("query", `"${q}"`);
-  url.searchParams.set("queryType", "Latest");
+  function buildUrl(cursor: string | null): string {
+    const url = new URL(`${TWITTERAPI_IO_BASE}/twitter/tweet/advanced_search`);
+    url.searchParams.set("query", `"${q}"`);
+    url.searchParams.set("queryType", "Latest");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    return url.toString();
+  }
 
   // Retry with exponential backoff on 429 (rate limit), 5xx, or network
   // error. twitterapi.io's free tier has a sliding-window rate limit
   // that's tighter than their docs suggest in practice, so we need a
   // few attempts to get through during a bulk Scan-All.
-  async function callUpstream(): Promise<Response> {
+  async function callUpstream(href: string): Promise<Response> {
     const MAX_ATTEMPTS = 4;
     let lastResp: Response | null = null;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
-        const resp = await fetch(url.toString(), {
+        const resp = await fetch(href, {
           headers: { "x-api-key": key! },
           cache: "no-store",
         });
@@ -116,19 +128,32 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const upstream = await callUpstream();
-
-    if (!upstream.ok) {
-      const body = await upstream.text();
-      console.error(`twitterapi.io returned ${upstream.status}: ${body.slice(0, 500)}`);
-      return NextResponse.json(
-        { error: `Twitter search failed (${upstream.status})` },
-        { status: 502 }
-      );
+    const rawTweets: RawTweet[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const upstream = await callUpstream(buildUrl(cursor));
+      if (!upstream.ok) {
+        // Fail the whole request if the FIRST page errored; otherwise
+        // keep what we have so far rather than dropping everything.
+        if (page === 0) {
+          const body = await upstream.text();
+          console.error(`twitterapi.io returned ${upstream.status}: ${body.slice(0, 500)}`);
+          return NextResponse.json(
+            { error: `Twitter search failed (${upstream.status})` },
+            { status: 502 }
+          );
+        }
+        break;
+      }
+      const pageJson = (await upstream.json()) as {
+        tweets?: RawTweet[];
+        has_next_page?: boolean;
+        next_cursor?: string;
+      };
+      if (pageJson.tweets?.length) rawTweets.push(...pageJson.tweets);
+      if (!pageJson.has_next_page || !pageJson.next_cursor) break;
+      cursor = pageJson.next_cursor;
     }
-
-    const raw = (await upstream.json()) as { tweets?: RawTweet[] };
-    const rawTweets = raw.tweets ?? [];
 
     // Resolve each tweet author to an Ethos profile (if any). profile_latest
     // stores the username case as Ethos has it; we lowercase both sides to
