@@ -149,6 +149,26 @@ export async function saveInvestigation(data: {
     throw new Error("Not authorized to modify this investigation");
   }
 
+  // Merge incoming twitter_evidence with what's already in the DB so a save
+  // with a partial map (or accidentally with {}) can't wipe previously
+  // fetched tweets. Per-address entries from the incoming payload override
+  // existing entries; addresses not in the incoming payload are preserved.
+  // Skipped entirely when the caller doesn't provide twitterEvidence.
+  let twitterEvidenceToWrite: Record<string, unknown> | undefined;
+  if (data.twitterEvidence !== undefined) {
+    if (data.twitterEvidence === null) {
+      twitterEvidenceToWrite = null as unknown as Record<string, unknown>;
+    } else {
+      const { data: existingRow } = await supabase
+        .from("investigations")
+        .select("twitter_evidence")
+        .eq("id", data.id)
+        .single();
+      const existing = (existingRow?.twitter_evidence ?? {}) as Record<string, unknown>;
+      twitterEvidenceToWrite = { ...existing, ...data.twitterEvidence };
+    }
+  }
+
   const { error } = await supabase
     .from("investigations")
     .upsert({
@@ -167,10 +187,7 @@ export async function saveInvestigation(data: {
       // Only write when we have a value; leave column untouched if not
       // (preserves the previous duration on legacy upserts).
       ...(data.scanDurationMs != null && { scan_duration_ms: data.scanDurationMs }),
-      // twitterEvidence is the cross-cluster tweet search payload. Only
-      // overwrite when explicitly provided so a save that doesn't include
-      // it doesn't wipe existing data.
-      ...(data.twitterEvidence !== undefined && { twitter_evidence: data.twitterEvidence }),
+      ...(twitterEvidenceToWrite !== undefined && { twitter_evidence: twitterEvidenceToWrite }),
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 

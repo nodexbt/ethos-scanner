@@ -130,6 +130,32 @@ export default function Home() {
   const [logExpanded, setLogExpanded] = useState(true);
   const [loadingCached, setLoadingCached] = useState(false);
 
+  // Auto-persist Twitter evidence after Scan-all (or per-row ⚡) so users
+  // don't lose paid tweet data by forgetting to hit Save. Debounced 2s so
+  // a flurry of per-address updates during Scan-all collapses to a single
+  // write. Skipped while a scan is running or before an investigation has
+  // been created. Empty maps are sent through; the DB-layer merge protects
+  // against wiping existing data.
+  useEffect(() => {
+    if (!currentInvestigationId || !clusterResult || scanning) return;
+    if (Object.keys(twitterEvidence).length === 0) return;
+    const t = setTimeout(() => {
+      fetch("/api/investigations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: currentInvestigationId,
+          target: clusterResult.target,
+          targetName: clusterResult.targetEthos?.displayName ?? null,
+          clusterResult,
+          twitterEvidence,
+          aiAnalysis: null,
+        }),
+      }).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [twitterEvidence, currentInvestigationId, clusterResult, scanning]);
+
   const pushScanUrl = (addr: string) => {
     const url = `/scan/${addr.toLowerCase()}`;
     if (window.location.pathname !== url) {
@@ -146,8 +172,10 @@ export default function Home() {
         const data = await resp.json();
         setClusterResult(data.clusterResult);
         setCurrentInvestigationId(cachedId);
-        setScreenshots(new Map());
-        setTwitterEvidence({});
+        setScreenshots(new Map(Object.entries(data.screenshots || {})));
+        setTwitterEvidence(
+          (data.twitterEvidence as Record<string, unknown> | null) ?? {}
+        );
         setClusterLogs([]);
         setError(null);
         setLoadingCached(false);
@@ -166,9 +194,26 @@ export default function Home() {
     setScanProgress(null);
     setError(null);
     setScreenshots(new Map());
-    setTwitterEvidence({});
     setCurrentInvestigationId(null);
     setLogExpanded(true);
+
+    // Preserve any existing Twitter evidence for this target across rescans
+    // so we don't burn API credits re-fetching tweets we already have. Falls
+    // back to empty when this is a brand-new target.
+    try {
+      const cachedId = `scan-${addr.toLowerCase()}`;
+      const resp = await fetch(`/api/investigations/${cachedId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setTwitterEvidence(
+          (data.twitterEvidence as Record<string, unknown> | null) ?? {}
+        );
+      } else {
+        setTwitterEvidence({});
+      }
+    } catch {
+      setTwitterEvidence({});
+    }
 
     let scanResult: ClusterScanResult | null = null;
     let scanDurationMs: number | null = null;
