@@ -73,7 +73,7 @@ function AuthorPill({
   handle,
   fallbackName,
 }: {
-  profile: Tweet["ethos"];
+  profile: NonNullable<Tweet["ethos"]>;
   handle: string;
   fallbackName: string;
 }) {
@@ -108,32 +108,35 @@ function TweetList({
   rawCount: number;
   ethosCount: number;
 }) {
-  const nonEthosHidden = Math.max(0, rawCount - ethosCount);
   if (tweets.length === 0) {
-    const msg =
-      rawCount === 0
-        ? "No tweets found mentioning this address."
-        : `${rawCount} tweet${rawCount === 1 ? "" : "s"} found, but none from Ethos profiles.`;
-    return <div className="text-[11px] text-muted-foreground italic py-2">{msg}</div>;
+    return (
+      <div className="text-[11px] text-muted-foreground italic py-2">
+        No tweets found mentioning this address.
+      </div>
+    );
   }
+  const nonEthosCount = Math.max(0, tweets.length - ethosCount);
   return (
     <div className="space-y-2 max-h-80 overflow-y-auto">
-      {nonEthosHidden > 0 && (
-        <div className="text-[10px] text-muted-foreground italic">
-          Showing {tweets.length} from Ethos profiles
-          {` · ${nonEthosHidden} non-Ethos tweet${nonEthosHidden === 1 ? "" : "s"} hidden`}
-        </div>
-      )}
-      {tweets.map((t) => (
+      <div className="text-[10px] text-muted-foreground italic">
+        {tweets.length} tweet{tweets.length === 1 ? "" : "s"}
+        {ethosCount > 0 && ` · ${ethosCount} from Ethos profile${ethosCount === 1 ? "" : "s"}`}
+        {nonEthosCount > 0 && ` · ${nonEthosCount} non-Ethos`}
+      </div>
+      {tweets.map((t) => {
+        const avatarSrc = t.ethos?.avatarUrl ?? t.author.profilePicture ?? null;
+        const displayName =
+          t.ethos?.displayName || t.author.name || t.author.userName;
+        return (
         <div
           key={t.id}
           className="rounded border border-border/50 bg-muted/20 p-2 hover:bg-muted/40 transition-colors"
         >
           <div className="flex items-start gap-2">
-            {t.ethos.avatarUrl || t.author.profilePicture ? (
+            {avatarSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={t.ethos.avatarUrl ?? t.author.profilePicture ?? ""}
+                src={avatarSrc}
                 alt=""
                 className="h-6 w-6 rounded-full shrink-0"
               />
@@ -142,12 +145,16 @@ function TweetList({
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1 text-[11px] flex-wrap">
-                <Link
-                  href={`/monitoring/${t.ethos.profileId}`}
-                  className="font-medium truncate hover:underline"
-                >
-                  {t.ethos.displayName || t.author.name || t.author.userName}
-                </Link>
+                {t.ethos ? (
+                  <Link
+                    href={`/monitoring/${t.ethos.profileId}`}
+                    className="font-medium truncate hover:underline"
+                  >
+                    {displayName}
+                  </Link>
+                ) : (
+                  <span className="font-medium truncate">{displayName}</span>
+                )}
                 <a
                   href={`https://x.com/${t.author.userName}`}
                   target="_blank"
@@ -156,11 +163,19 @@ function TweetList({
                 >
                   @{t.author.userName}
                 </a>
-                {t.ethos.humanVerified && <HumanVerifiedBadge size={10} />}
-                {t.ethos.score != null && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-muted px-1 rounded tabular-nums">
-                    {t.ethos.score}
-                    <EthosScoreIcon size={8} />
+                {t.ethos ? (
+                  <>
+                    {t.ethos.humanVerified && <HumanVerifiedBadge size={10} />}
+                    {t.ethos.score != null && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-muted px-1 rounded tabular-nums">
+                        {t.ethos.score}
+                        <EthosScoreIcon size={8} />
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[9px] text-muted-foreground bg-muted/60 px-1 rounded">
+                    non-Ethos
                   </span>
                 )}
                 <span className="text-muted-foreground">·</span>
@@ -196,7 +211,8 @@ function TweetList({
             </div>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -264,10 +280,12 @@ export function EvidenceCard({
 
   // Aggregate Ethos-author tweets across all rows by author profile so
   // we can render a single flat "who tweeted which cluster wallets" list.
+  // Non-Ethos tweets are intentionally excluded — without a profile we
+  // can't anchor the cross-cluster signal.
   const byAuthor = new Map<
     number,
     {
-      profile: Tweet["ethos"];
+      profile: NonNullable<Tweet["ethos"]>;
       authorName: string;
       authorHandle: string;
       walletAddresses: Set<string>;
@@ -276,6 +294,7 @@ export function EvidenceCard({
   >();
   for (const [address, { tweets }] of tweetResults) {
     for (const t of tweets) {
+      if (!t.ethos) continue;
       const pid = t.ethos.profileId;
       let bucket = byAuthor.get(pid);
       if (!bucket) {

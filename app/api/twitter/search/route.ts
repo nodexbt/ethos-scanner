@@ -44,15 +44,15 @@ export interface TwitterTweet {
     isBlueVerified: boolean;
     followers: number;
   };
-  /** Matched Ethos profile for the tweet's author. Always non-null in
-   * responses because we filter out tweets from non-Ethos accounts. */
+  /** Matched Ethos profile for the tweet's author, or null when the
+   * author has no Ethos profile. */
   ethos: {
     profileId: number;
     displayName: string | null;
     avatarUrl: string | null;
     score: number | null;
     humanVerified: boolean;
-  };
+  } | null;
 }
 
 export interface TwitterSearchResult {
@@ -128,14 +128,17 @@ export async function GET(req: NextRequest) {
     const raw = (await upstream.json()) as { tweets?: RawTweet[] };
     const rawTweets = raw.tweets ?? [];
 
-    // Resolve each tweet author to an Ethos profile (if any). profile_latest
-    // stores the username case as Ethos has it; we lowercase both sides to
-    // match X's case-insensitive handle semantics.
+    // Resolve each tweet author to an Ethos profile (if any). X handles are
+    // case-insensitive but profile_latest stores them with their original
+    // case, so the comparison has to be case-insensitive. We build an OR of
+    // ILIKE conditions — handle bodies are restricted to [A-Za-z0-9_] so
+    // there's no escaping risk. Authors with no Ethos profile pass through
+    // with ethos: null.
     const handles = [
       ...new Set(
         rawTweets
           .map((t) => (t.author?.userName ?? "").toLowerCase())
-          .filter((h) => h.length > 0)
+          .filter((h) => h.length > 0 && /^[a-z0-9_]+$/.test(h))
       ),
     ];
 
@@ -143,13 +146,14 @@ export async function GET(req: NextRequest) {
 
     const ethosByHandle = new Map<
       string,
-      TwitterTweet["ethos"]
+      NonNullable<TwitterTweet["ethos"]>
     >();
     if (handles.length > 0) {
+      const orFilter = handles.map((h) => `username.ilike.${h}`).join(",");
       const { data } = await supabase
         .from("profile_latest")
         .select("profile_id, username, display_name, avatar_url, score, human_verified")
-        .in("username", handles);
+        .or(orFilter);
       for (const row of (data ?? []) as {
         profile_id: number;
         username: string | null;
@@ -173,9 +177,8 @@ export async function GET(req: NextRequest) {
     let ethosCount = 0;
     for (const t of rawTweets) {
       const handle = (t.author?.userName ?? "").toLowerCase();
-      const ethos = ethosByHandle.get(handle);
-      if (!ethos) continue;
-      ethosCount += 1;
+      const ethos = ethosByHandle.get(handle) ?? null;
+      if (ethos) ethosCount += 1;
       tweets.push({
         id: t.id ?? "",
         url: t.url ?? "",
