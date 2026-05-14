@@ -90,7 +90,9 @@ export default function Home() {
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
-  const [activeTab, setActiveTab] = useState<"scanner" | "yours" | "all">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "yours" | "all" | "verified">("scanner");
+  const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
+  const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
@@ -362,6 +364,19 @@ export default function Home() {
       .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
       .catch(() => {});
   };
+
+  // Fetch the human-verified list lazily when the tab is first activated and
+  // again whenever the user re-opens it — the backfill can run in the
+  // background and we want fresh strong/possible counts each visit.
+  useEffect(() => {
+    if (activeTab !== "verified") return;
+    setVerifiedLoading(true);
+    fetch("/api/investigations/verified")
+      .then((r) => r.json())
+      .then((data) => setVerifiedInvestigations(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setVerifiedLoading(false));
+  }, [activeTab]);
 
   const handleSaveInvestigation = async () => {
     if (!clusterResult) return;
@@ -876,6 +891,20 @@ export default function Home() {
               <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
             )}
           </button>
+          <button
+            onClick={() => setActiveTab("verified")}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === "verified"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            Human Verified
+            {verifiedInvestigations.length > 0 && (
+              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{verifiedInvestigations.length}</span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1246,6 +1275,43 @@ export default function Home() {
           }}
           onDelete={handleDeleteInvestigation}
         />
+      )}
+
+      {/* Human Verified Tab — scans whose target is the primary wallet of an
+          Ethos human-verified profile. Sorted by strong-cluster count desc on
+          the server so the most-flagged accounts surface first. */}
+      {activeTab === "verified" && (
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <div className="text-foreground/90">
+              <span className="font-medium">Heads up:</span> cluster signals can produce false
+              positives. A wallet appearing here doesn&apos;t prove sybil behaviour — it just means
+              the scanner found at least one shared funder, CEX deposit, or first-funder pattern.
+              Open a row and review the evidence before drawing conclusions.
+            </div>
+          </div>
+          {verifiedLoading && verifiedInvestigations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <p>Loading…</p>
+            </div>
+          ) : (
+            <ScansList
+              investigations={verifiedInvestigations}
+              emptyLabel="No human-verified profiles scanned yet."
+              search={investigationSearch}
+              onSearchChange={setInvestigationSearch}
+              currentInvestigationId={currentInvestigationId}
+              canDelete={canDelete}
+              onLoad={(inv) => {
+                handleLoadInvestigation(inv);
+                setActiveTab("scanner");
+              }}
+              onDelete={handleDeleteInvestigation}
+            />
+          )}
+        </div>
       )}
 
       {/* Candidate Detail Modal */}

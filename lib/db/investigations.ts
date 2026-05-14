@@ -70,6 +70,112 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
   });
 }
 
+/**
+ * List investigations whose target is the primary wallet of a human-verified
+ * Ethos profile. Sorted by strong-cluster count desc, then possible-cluster
+ * count desc, so the most-flagged profiles surface first. Returns every match
+ * (no 100-row cap) since the universe is bounded at ~1.1k.
+ */
+export async function listVerifiedInvestigations(): Promise<InvestigationSummary[]> {
+  const supabase = getSupabase();
+
+  // Step 1: collect all human-verified primary addresses (paginated, no cap).
+  const addresses: string[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("profile_latest")
+      .select("primary_address")
+      .eq("human_verified", true)
+      .not("primary_address", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("listVerifiedInvestigations profile fetch error:", error);
+      return [];
+    }
+    if (!data || data.length === 0) break;
+    for (const row of data as { primary_address: string | null }[]) {
+      if (row.primary_address) addresses.push(row.primary_address.toLowerCase());
+    }
+    if (data.length < PAGE) break;
+  }
+  if (addresses.length === 0) return [];
+
+  // Step 2: fetch investigations matching those targets, chunked at 100 ids/call
+  // to keep the IN list under PostgREST's URL limits.
+  const ids = addresses.map((a) => `scan-${a}`);
+  type InvestigationListRow = {
+    id: string;
+    target: string;
+    target_name: string | null;
+    target_avatar: string | null;
+    cluster_result: unknown;
+    ai_analysis: string | null;
+    share_id: string | null;
+    is_public: boolean | null;
+    owner_profile_id: number | null;
+    last_scanned_by_profile_id: number | null;
+    updated_at: string;
+  };
+  const collected: InvestigationListRow[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from("investigations")
+      .select(
+        "id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at"
+      )
+      .in("id", chunk);
+    if (error) {
+      console.error("listVerifiedInvestigations chunk error:", error);
+      continue;
+    }
+    if (data) collected.push(...(data as InvestigationListRow[]));
+  }
+
+  const summaries: InvestigationSummary[] = collected.map((row) => {
+    let strongCount = 0;
+    let possibleCount = 0;
+    let targetAvatar: string | null = null;
+    try {
+      const result =
+        typeof row.cluster_result === "string"
+          ? JSON.parse(row.cluster_result)
+          : row.cluster_result;
+      strongCount = (result as { strongCluster?: unknown[] })?.strongCluster?.length ?? 0;
+      possibleCount = (result as { possibleCluster?: unknown[] })?.possibleCluster?.length ?? 0;
+      targetAvatar =
+        (result as { targetEthos?: { avatarUrl?: string } })?.targetEthos?.avatarUrl ??
+        row.target_avatar ??
+        null;
+    } catch {}
+
+    return {
+      id: row.id,
+      target: row.target,
+      targetName: row.target_name,
+      targetAvatar,
+      savedAt: new Date(row.updated_at).getTime(),
+      strongCount,
+      possibleCount,
+      hasAnalysis: !!row.ai_analysis,
+      shareId: row.share_id,
+      isPublic: row.is_public ?? false,
+      ownerProfileId: row.owner_profile_id ?? null,
+      lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
+    };
+  });
+
+  // Most-flagged first; tiebreak by possible-count, then recency.
+  summaries.sort((a, b) => {
+    if (b.strongCount !== a.strongCount) return b.strongCount - a.strongCount;
+    if (b.possibleCount !== a.possibleCount) return b.possibleCount - a.possibleCount;
+    return b.savedAt - a.savedAt;
+  });
+
+  return summaries;
+}
+
 export async function getInvestigation(id: string): Promise<InvestigationRow | null> {
   const supabase = getSupabase();
   const { data, error } = await supabase
