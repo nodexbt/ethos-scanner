@@ -29,9 +29,16 @@ export interface InvestigationRow {
 
 export async function listInvestigations(): Promise<InvestigationSummary[]> {
   const supabase = getSupabase();
+  // strong_count + possible_count are STORED generated columns (see
+  // scripts/migrations/2026-05-14-investigation-counts.sql), so we no
+  // longer need to fetch the entire cluster_result JSONB just to count
+  // signals. The cluster_result column averages ~15 KB per row — pulling
+  // it for 100 rows on every list call adds noticeable latency.
   const { data, error } = await supabase
     .from("investigations")
-    .select("id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at")
+    .select(
+      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+    )
     .order("updated_at", { ascending: false })
     .limit(100);
 
@@ -40,43 +47,37 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
     return [];
   }
 
-  return (data || []).map((row) => {
-    let strongCount = 0;
-    let possibleCount = 0;
-    let targetAvatar: string | null = null;
-    try {
-      const result = typeof row.cluster_result === "string"
-        ? JSON.parse(row.cluster_result)
-        : row.cluster_result;
-      strongCount = result?.strongCluster?.length ?? 0;
-      possibleCount = result?.possibleCluster?.length ?? 0;
-      targetAvatar = result?.targetEthos?.avatarUrl ?? row.target_avatar ?? null;
-    } catch {}
+  return (data || []).map((row) => ({
+    id: row.id,
+    target: row.target,
+    targetName: row.target_name,
+    targetAvatar: row.target_avatar ?? null,
+    savedAt: new Date(row.updated_at).getTime(),
+    strongCount: row.strong_count ?? 0,
+    possibleCount: row.possible_count ?? 0,
+    hasAnalysis: !!row.ai_analysis,
+    shareId: row.share_id,
+    isPublic: row.is_public ?? false,
+    ownerProfileId: row.owner_profile_id ?? null,
+    lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
+  }));
+}
 
-    return {
-      id: row.id,
-      target: row.target,
-      targetName: row.target_name,
-      targetAvatar,
-      savedAt: new Date(row.updated_at).getTime(),
-      strongCount,
-      possibleCount,
-      hasAnalysis: !!row.ai_analysis,
-      shareId: row.share_id,
-      isPublic: row.is_public ?? false,
-      ownerProfileId: row.owner_profile_id ?? null,
-      lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
-    };
-  });
+export interface VerifiedListPage {
+  rows: InvestigationSummary[];
+  total: number;
 }
 
 /**
- * List investigations whose target is the primary wallet of a human-verified
- * Ethos profile. Sorted by strong-cluster count desc, then possible-cluster
- * count desc, so the most-flagged profiles surface first. Returns every match
- * (no 100-row cap) since the universe is bounded at ~1.1k.
+ * Page through investigations whose target is the primary wallet of a
+ * human-verified Ethos profile, sorted by strong-cluster count desc so the
+ * most-flagged profiles surface first. Backed by the generated count
+ * columns + composite index so this returns in tens of ms regardless of
+ * how big the universe gets.
  */
-export async function listVerifiedInvestigations(): Promise<InvestigationSummary[]> {
+export async function listVerifiedInvestigations(
+  { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {}
+): Promise<VerifiedListPage> {
   const supabase = getSupabase();
 
   // Step 1: collect all human-verified primary addresses (paginated, no cap).
@@ -91,7 +92,7 @@ export async function listVerifiedInvestigations(): Promise<InvestigationSummary
       .range(from, from + PAGE - 1);
     if (error) {
       console.error("listVerifiedInvestigations profile fetch error:", error);
-      return [];
+      return { rows: [], total: 0 };
     }
     if (!data || data.length === 0) break;
     for (const row of data as { primary_address: string | null }[]) {
@@ -99,81 +100,68 @@ export async function listVerifiedInvestigations(): Promise<InvestigationSummary
     }
     if (data.length < PAGE) break;
   }
-  if (addresses.length === 0) return [];
+  if (addresses.length === 0) return { rows: [], total: 0 };
 
-  // Step 2: fetch investigations matching those targets, chunked at 100 ids/call
-  // to keep the IN list under PostgREST's URL limits.
-  const ids = addresses.map((a) => `scan-${a}`);
-  type InvestigationListRow = {
+  const verifiedSet = new Set(addresses);
+
+  // Step 2: pull the full investigations list (sorted by strong-count at the
+  // DB level using the composite index), then filter to verified targets in
+  // JS. We can't ship a 1.1k-element .in() filter — PostgREST URL-encodes the
+  // values inline and the result exceeds the proxy's URL limit. A single
+  // unfiltered fetch with the new generated count columns is ~300 ms for the
+  // current 1.1k-row table; the bound is set high enough to absorb organic
+  // growth without paging.
+  const HARD_CAP = 5000;
+  const { data, error } = await supabase
+    .from("investigations")
+    .select(
+      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+    )
+    .order("strong_count", { ascending: false, nullsFirst: false })
+    .order("possible_count", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false })
+    .limit(HARD_CAP);
+
+  if (error) {
+    console.error("listVerifiedInvestigations select error:", error);
+    return { rows: [], total: 0 };
+  }
+
+  type Row = {
     id: string;
     target: string;
     target_name: string | null;
     target_avatar: string | null;
-    cluster_result: unknown;
     ai_analysis: string | null;
     share_id: string | null;
     is_public: boolean | null;
     owner_profile_id: number | null;
     last_scanned_by_profile_id: number | null;
     updated_at: string;
+    strong_count: number | null;
+    possible_count: number | null;
   };
-  const collected: InvestigationListRow[] = [];
-  for (let i = 0; i < ids.length; i += 100) {
-    const chunk = ids.slice(i, i + 100);
-    const { data, error } = await supabase
-      .from("investigations")
-      .select(
-        "id, target, target_name, target_avatar, cluster_result, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at"
-      )
-      .in("id", chunk);
-    if (error) {
-      console.error("listVerifiedInvestigations chunk error:", error);
-      continue;
-    }
-    if (data) collected.push(...(data as InvestigationListRow[]));
-  }
 
-  const summaries: InvestigationSummary[] = collected.map((row) => {
-    let strongCount = 0;
-    let possibleCount = 0;
-    let targetAvatar: string | null = null;
-    try {
-      const result =
-        typeof row.cluster_result === "string"
-          ? JSON.parse(row.cluster_result)
-          : row.cluster_result;
-      strongCount = (result as { strongCluster?: unknown[] })?.strongCluster?.length ?? 0;
-      possibleCount = (result as { possibleCluster?: unknown[] })?.possibleCluster?.length ?? 0;
-      targetAvatar =
-        (result as { targetEthos?: { avatarUrl?: string } })?.targetEthos?.avatarUrl ??
-        row.target_avatar ??
-        null;
-    } catch {}
+  const verifiedRows = (data ?? []).filter((row) =>
+    verifiedSet.has(((row as Row).target ?? "").toLowerCase())
+  ) as Row[];
 
-    return {
-      id: row.id,
-      target: row.target,
-      targetName: row.target_name,
-      targetAvatar,
-      savedAt: new Date(row.updated_at).getTime(),
-      strongCount,
-      possibleCount,
-      hasAnalysis: !!row.ai_analysis,
-      shareId: row.share_id,
-      isPublic: row.is_public ?? false,
-      ownerProfileId: row.owner_profile_id ?? null,
-      lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
-    };
-  });
+  const page = verifiedRows.slice(offset, offset + limit).map<InvestigationSummary>((row) => ({
+    id: row.id,
+    target: row.target,
+    targetName: row.target_name,
+    targetAvatar: row.target_avatar ?? null,
+    savedAt: new Date(row.updated_at).getTime(),
+    strongCount: row.strong_count ?? 0,
+    possibleCount: row.possible_count ?? 0,
+    hasAnalysis: !!row.ai_analysis,
+    shareId: row.share_id,
+    isPublic: row.is_public ?? false,
+    ownerProfileId: row.owner_profile_id ?? null,
+    lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
+  }));
 
-  // Most-flagged first; tiebreak by possible-count, then recency.
-  summaries.sort((a, b) => {
-    if (b.strongCount !== a.strongCount) return b.strongCount - a.strongCount;
-    if (b.possibleCount !== a.possibleCount) return b.possibleCount - a.possibleCount;
-    return b.savedAt - a.savedAt;
-  });
-
-  return summaries;
+  return { rows: page, total: verifiedRows.length };
 }
 
 export async function getInvestigation(id: string): Promise<InvestigationRow | null> {

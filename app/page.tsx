@@ -92,7 +92,9 @@ export default function Home() {
   const [showPossible, setShowPossible] = useState(false);
   const [activeTab, setActiveTab] = useState<"scanner" | "yours" | "all" | "verified">("scanner");
   const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
+  const [verifiedTotal, setVerifiedTotal] = useState<number>(0);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
+  const [verifiedLoadingMore, setVerifiedLoadingMore] = useState(false);
   const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
@@ -365,22 +367,40 @@ export default function Home() {
       .catch(() => {});
   };
 
-  // Fetch the human-verified list once on first activation and cache it.
-  // The endpoint is expensive (pulls every cluster_result JSONB to count
-  // signals) and the data only changes when a new backfill runs — so the
-  // user can hit Refresh below to repull fresh counts.
-  const refreshVerified = () => {
-    setVerifiedLoading(true);
-    fetch("/api/investigations/verified")
-      .then((r) => r.json())
-      .then((data) => setVerifiedInvestigations(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setVerifiedLoading(false));
+  // Server-paginated fetch for the verified-scans tab. Initial load grabs
+  // the first 50; Load-more appends batches of 50 from the API. Cached
+  // across tab switches so re-opening the tab is instant.
+  const VERIFIED_PAGE_SIZE = 50;
+  const loadVerifiedPage = async (offset: number) => {
+    const url = `/api/investigations/verified?limit=${VERIFIED_PAGE_SIZE}&offset=${offset}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.rows)) return null;
+    return { rows: data.rows as InvestigationSummary[], total: Number(data.total) || 0 };
+  };
+  const loadMoreVerified = async () => {
+    if (verifiedLoadingMore) return;
+    setVerifiedLoadingMore(true);
+    const page = await loadVerifiedPage(verifiedInvestigations.length);
+    if (page) {
+      setVerifiedInvestigations((prev) => [...prev, ...page.rows]);
+      setVerifiedTotal(page.total);
+    }
+    setVerifiedLoadingMore(false);
   };
   useEffect(() => {
     if (activeTab !== "verified") return;
     if (verifiedInvestigations.length > 0) return;
-    refreshVerified();
+    setVerifiedLoading(true);
+    loadVerifiedPage(0)
+      .then((page) => {
+        if (page) {
+          setVerifiedInvestigations(page.rows);
+          setVerifiedTotal(page.total);
+        }
+      })
+      .finally(() => setVerifiedLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -1315,6 +1335,9 @@ export default function Home() {
                 setActiveTab("scanner");
               }}
               onDelete={handleDeleteInvestigation}
+              totalCount={verifiedTotal}
+              onLoadMore={loadMoreVerified}
+              loadingMore={verifiedLoadingMore}
             />
           )}
         </div>
@@ -1347,6 +1370,12 @@ interface ScansListProps {
   canDelete: (inv: InvestigationSummary) => boolean;
   onLoad: (inv: InvestigationSummary) => void;
   onDelete: (id: string) => void;
+  /** Optional server-side pagination knobs — when provided, the list
+   * renders a Load-more button that calls onLoadMore until investigations
+   * reaches totalCount. */
+  totalCount?: number;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 function ScansList({
@@ -1358,6 +1387,9 @@ function ScansList({
   canDelete,
   onLoad,
   onDelete,
+  totalCount,
+  onLoadMore,
+  loadingMore,
 }: ScansListProps) {
   const filtered = investigations.filter((inv) => {
     if (!search.trim()) return true;
@@ -1368,16 +1400,16 @@ function ScansList({
     );
   });
 
-  // Client-side pagination — rendering 1k+ rows at once was making the
-  // verified tab feel laggy on slower machines. Reset to the first page
-  // whenever the underlying list or the search query changes.
-  const PAGE_SIZE = 50;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [investigations, search]);
-  const visible = filtered.slice(0, visibleCount);
-  const hasMore = filtered.length > visibleCount;
+  // If the caller passes a totalCount + onLoadMore, this list is being driven
+  // by a server-paginated source — show a Load-more button under the rows
+  // when more results are available remotely. Without those props the list
+  // just renders everything it was given (used by yours/all tabs).
+  const displayedTotal = totalCount ?? investigations.length;
+  const hasRemoteMore =
+    onLoadMore != null &&
+    totalCount != null &&
+    investigations.length < totalCount &&
+    !search.trim();
 
   return (
     <div className="space-y-4">
@@ -1394,8 +1426,8 @@ function ScansList({
         </div>
         <span className="text-sm text-muted-foreground">
           {search.trim() && filtered.length !== investigations.length
-            ? `${filtered.length} of ${investigations.length}`
-            : `${investigations.length} scan${investigations.length === 1 ? "" : "s"}`}
+            ? `${filtered.length} of ${displayedTotal}`
+            : `${displayedTotal} scan${displayedTotal === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -1406,7 +1438,7 @@ function ScansList({
         </div>
       ) : (
         <div className="grid gap-2 min-w-0">
-          {visible.map((inv) => (
+          {filtered.map((inv) => (
             <div
               key={inv.id}
               className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
@@ -1489,12 +1521,14 @@ function ScansList({
               )}
             </div>
           ))}
-          {hasMore && (
+          {hasRemoteMore && (
             <button
-              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="mt-1 mx-auto text-xs text-muted-foreground hover:text-foreground bg-card border border-border rounded-md px-3 py-2 cursor-pointer"
+              onClick={() => onLoadMore?.()}
+              disabled={loadingMore}
+              className="mt-1 mx-auto text-xs text-muted-foreground hover:text-foreground bg-card border border-border rounded-md px-3 py-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-2"
             >
-              Show {Math.min(PAGE_SIZE, filtered.length - visibleCount)} more · {filtered.length - visibleCount} remaining
+              {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
+              Load {Math.min(50, (totalCount ?? 0) - investigations.length)} more · {(totalCount ?? 0) - investigations.length} remaining
             </button>
           )}
         </div>
