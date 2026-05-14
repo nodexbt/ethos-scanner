@@ -368,9 +368,9 @@ export default function Home() {
   };
 
   // Server-paginated fetch for the verified-scans tab. Initial load grabs
-  // the first 50; Load-more appends batches of 50 from the API. Cached
+  // the first batch; Load-more appends another batch from the API. Cached
   // across tab switches so re-opening the tab is instant.
-  const VERIFIED_PAGE_SIZE = 50;
+  const VERIFIED_PAGE_SIZE = 25;
   const loadVerifiedPage = async (offset: number) => {
     const url = `/api/investigations/verified?limit=${VERIFIED_PAGE_SIZE}&offset=${offset}`;
     const resp = await fetch(url);
@@ -1338,6 +1338,7 @@ export default function Home() {
               totalCount={verifiedTotal}
               onLoadMore={loadMoreVerified}
               loadingMore={verifiedLoadingMore}
+              loadMoreBatchSize={VERIFIED_PAGE_SIZE}
             />
           )}
         </div>
@@ -1376,6 +1377,7 @@ interface ScansListProps {
   totalCount?: number;
   onLoadMore?: () => void;
   loadingMore?: boolean;
+  loadMoreBatchSize?: number;
 }
 
 function ScansList({
@@ -1390,6 +1392,7 @@ function ScansList({
   totalCount,
   onLoadMore,
   loadingMore,
+  loadMoreBatchSize = 50,
 }: ScansListProps) {
   const filtered = investigations.filter((inv) => {
     if (!search.trim()) return true;
@@ -1528,7 +1531,7 @@ function ScansList({
               className="mt-1 mx-auto text-xs text-muted-foreground hover:text-foreground bg-card border border-border rounded-md px-3 py-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-2"
             >
               {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
-              Load {Math.min(50, (totalCount ?? 0) - investigations.length)} more · {(totalCount ?? 0) - investigations.length} remaining
+              Load {Math.min(loadMoreBatchSize, (totalCount ?? 0) - investigations.length)} more · {(totalCount ?? 0) - investigations.length} remaining
             </button>
           )}
         </div>
