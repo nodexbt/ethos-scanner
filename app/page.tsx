@@ -106,6 +106,20 @@ export default function Home() {
       .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
       .catch(() => {});
 
+    // Prefetch the human-verified list eagerly — matches the All/Your Scans
+    // behaviour and means the tab is already populated by the time the user
+    // clicks. Cheap (~300 ms server-side) thanks to the indexed count
+    // columns, and the result is cached for the session.
+    fetch(`/api/investigations/verified?limit=25&offset=0`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && Array.isArray(data.rows)) {
+          setVerifiedInvestigations(data.rows);
+          setVerifiedTotal(Number(data.total) || 0);
+        }
+      })
+      .catch(() => {});
+
     // Check if URL has a wallet address to load
     const path = window.location.pathname;
     const match = path.match(/^\/scan\/(0x[a-fA-F0-9]{40})$/i);
@@ -927,8 +941,8 @@ export default function Home() {
           >
             <ShieldCheck className="h-4 w-4" />
             Human Verified
-            {verifiedInvestigations.length > 0 && (
-              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{verifiedInvestigations.length}</span>
+            {verifiedTotal > 0 && (
+              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{verifiedTotal}</span>
             )}
           </button>
         </div>
