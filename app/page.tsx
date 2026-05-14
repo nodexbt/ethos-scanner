@@ -1282,7 +1282,7 @@ export default function Home() {
           the server so the most-flagged accounts surface first. */}
       {activeTab === "verified" && (
         <div className="space-y-4">
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-card p-3 text-xs">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
             <div className="text-foreground/90">
               <span className="font-medium">Heads up:</span> cluster signals can produce false
