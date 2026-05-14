@@ -365,17 +365,23 @@ export default function Home() {
       .catch(() => {});
   };
 
-  // Fetch the human-verified list lazily when the tab is first activated and
-  // again whenever the user re-opens it — the backfill can run in the
-  // background and we want fresh strong/possible counts each visit.
-  useEffect(() => {
-    if (activeTab !== "verified") return;
+  // Fetch the human-verified list once on first activation and cache it.
+  // The endpoint is expensive (pulls every cluster_result JSONB to count
+  // signals) and the data only changes when a new backfill runs — so the
+  // user can hit Refresh below to repull fresh counts.
+  const refreshVerified = () => {
     setVerifiedLoading(true);
     fetch("/api/investigations/verified")
       .then((r) => r.json())
       .then((data) => setVerifiedInvestigations(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setVerifiedLoading(false));
+  };
+  useEffect(() => {
+    if (activeTab !== "verified") return;
+    if (verifiedInvestigations.length > 0) return;
+    refreshVerified();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const handleSaveInvestigation = async () => {
@@ -1362,6 +1368,17 @@ function ScansList({
     );
   });
 
+  // Client-side pagination — rendering 1k+ rows at once was making the
+  // verified tab feel laggy on slower machines. Reset to the first page
+  // whenever the underlying list or the search query changes.
+  const PAGE_SIZE = 50;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [investigations, search]);
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > visibleCount;
+
   return (
     <div className="space-y-4">
       {/* Search */}
@@ -1376,7 +1393,9 @@ function ScansList({
           />
         </div>
         <span className="text-sm text-muted-foreground">
-          {investigations.length} scan{investigations.length !== 1 && "s"}
+          {search.trim() && filtered.length !== investigations.length
+            ? `${filtered.length} of ${investigations.length}`
+            : `${investigations.length} scan${investigations.length === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -1387,7 +1406,7 @@ function ScansList({
         </div>
       ) : (
         <div className="grid gap-2 min-w-0">
-          {filtered.map((inv) => (
+          {visible.map((inv) => (
             <div
               key={inv.id}
               className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
@@ -1470,6 +1489,14 @@ function ScansList({
               )}
             </div>
           ))}
+          {hasMore && (
+            <button
+              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              className="mt-1 mx-auto text-xs text-muted-foreground hover:text-foreground bg-card border border-border rounded-md px-3 py-2 cursor-pointer"
+            >
+              Show {Math.min(PAGE_SIZE, filtered.length - visibleCount)} more · {filtered.length - visibleCount} remaining
+            </button>
+          )}
         </div>
       )}
     </div>
