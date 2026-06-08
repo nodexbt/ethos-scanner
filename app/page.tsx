@@ -69,6 +69,14 @@ interface InvestigationSummary {
   lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
 }
 
+type ActiveTab = "scanner" | "yours" | "all" | "verified";
+
+/** Derive the active tab from a URL search string (?tab=...). Defaults to scanner. */
+function tabFromSearch(search: string): ActiveTab {
+  const t = new URLSearchParams(search).get("tab");
+  return t === "yours" || t === "all" || t === "verified" ? t : "scanner";
+}
+
 export default function Home() {
   const { data: session, status: sessionStatus } = useSession();
   const [walletInput, setWalletInput] = useState("");
@@ -90,7 +98,7 @@ export default function Home() {
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
-  const [activeTab, setActiveTab] = useState<"scanner" | "yours" | "all" | "verified">("scanner");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
   const [verifiedTotal, setVerifiedTotal] = useState<number>(0);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
@@ -128,6 +136,9 @@ export default function Home() {
       setWalletInput(addr);
       loadCachedScan(addr);
     }
+
+    // Restore the active tab from the URL (?tab=yours|all|verified).
+    setActiveTab(tabFromSearch(window.location.search));
 
     // Check for auth error in query string
     const params = new URLSearchParams(window.location.search);
@@ -180,6 +191,27 @@ export default function Home() {
       window.history.pushState({}, "", url);
     }
   };
+
+  // Switch tabs and reflect it in the URL so browser back/forward moves
+  // between tabs. The scanner tab keeps any active /scan/:addr path; the
+  // others live at /?tab=... on the root.
+  const selectTab = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    const scannerUrl = window.location.pathname.startsWith("/scan/")
+      ? window.location.pathname
+      : "/";
+    const url = tab === "scanner" ? scannerUrl : `/?tab=${tab}`;
+    if (window.location.pathname + window.location.search !== url) {
+      window.history.pushState({}, "", url);
+    }
+  };
+
+  // Keep the active tab in sync when the user navigates history (back/forward).
+  useEffect(() => {
+    const onPop = () => setActiveTab(tabFromSearch(window.location.search));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const loadCachedScan = async (addr: string) => {
     const cachedId = `scan-${addr.toLowerCase()}`;
@@ -893,7 +925,7 @@ export default function Home() {
       <div className="mb-4 -mx-1 px-1 overflow-x-auto scrollbar-hide">
         <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
           <button
-            onClick={() => setActiveTab("scanner")}
+            onClick={() => selectTab("scanner")}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "scanner"
                 ? "bg-muted text-foreground"
@@ -904,7 +936,7 @@ export default function Home() {
             Scanner
           </button>
           <button
-            onClick={() => setActiveTab("yours")}
+            onClick={() => selectTab("yours")}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "yours"
                 ? "bg-muted text-foreground"
@@ -918,7 +950,7 @@ export default function Home() {
             )}
           </button>
           <button
-            onClick={() => setActiveTab("all")}
+            onClick={() => selectTab("all")}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "all"
                 ? "bg-muted text-foreground"
@@ -932,7 +964,7 @@ export default function Home() {
             )}
           </button>
           <button
-            onClick={() => setActiveTab("verified")}
+            onClick={() => selectTab("verified")}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "verified"
                 ? "bg-muted text-foreground"
@@ -1226,7 +1258,7 @@ export default function Home() {
                       Recent Scans
                     </CardTitle>
                     <button
-                      onClick={() => setActiveTab("all")}
+                      onClick={() => selectTab("all")}
                       className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       View all
