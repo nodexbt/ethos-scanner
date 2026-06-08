@@ -300,6 +300,153 @@ async function main() {
       ` · elapsed=${elapsedSec}s`
   );
   log({ event: "summary", ok, failed, tweetsFetched, elapsedSec });
+
+  await runVerifiedInVerifiedReport(stamp, log);
+}
+
+/**
+ * Walk every stored investigation whose target is a currently-verified
+ * profile and report the ones whose strong/possible cluster contains
+ * another verified profile. Source of truth for verification is the
+ * fresh profile_latest snapshot, not the (possibly stale) humanVerified
+ * flags baked into cluster_result at scan time.
+ */
+async function runVerifiedInVerifiedReport(
+  stamp: string,
+  log: (event: Record<string, unknown>) => void
+) {
+  const supabase = getSupabase();
+  console.log(`\n[report] verified-in-verified pass…`);
+
+  // 1) Load verified profile_id set + address→profile_id map.
+  const verifiedProfileIds = new Set<number>();
+  const verifiedAddresses = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("profile_latest")
+      .select("profile_id, primary_address")
+      .eq("human_verified", true)
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`profile_latest verified fetch: ${error.message}`);
+    if (!data || data.length === 0) break;
+    for (const row of data as { profile_id: number; primary_address: string | null }[]) {
+      verifiedProfileIds.add(row.profile_id);
+      if (row.primary_address) verifiedAddresses.add(row.primary_address.toLowerCase());
+    }
+    if (data.length < PAGE) break;
+  }
+  console.log(`[report] ${verifiedProfileIds.size} verified profiles · ${verifiedAddresses.size} with primary address`);
+
+  // 2) Page investigations and filter on the fly. cluster_result is large
+  //    (~15 KB/row) so pull only what we need and stream.
+  type CandidateLite = {
+    address: string;
+    ethosProfile?: { profileId?: number; humanVerified?: boolean; displayName?: string; username?: string | null; score?: number };
+    signalTypes?: string[];
+  };
+  type ClusterResultLite = {
+    targetEthos?: { profileId?: number; humanVerified?: boolean; displayName?: string; username?: string | null };
+    strongCluster?: CandidateLite[];
+    possibleCluster?: CandidateLite[];
+  };
+
+  interface Match {
+    id: string;
+    target: string;
+    targetProfileId: number;
+    targetDisplay: string;
+    targetUsername: string | null;
+    strongVerified: { profileId: number; displayName: string; username: string | null; score: number; signalTypes: string[] }[];
+    possibleVerified: { profileId: number; displayName: string; username: string | null; score: number; signalTypes: string[] }[];
+  }
+  const matches: Match[] = [];
+
+  const ROW_PAGE = 200;
+  let scanned = 0;
+  for (let from = 0; ; from += ROW_PAGE) {
+    const { data, error } = await supabase
+      .from("investigations")
+      .select("id, target, cluster_result")
+      .range(from, from + ROW_PAGE - 1);
+    if (error) throw new Error(`investigations fetch: ${error.message}`);
+    if (!data || data.length === 0) break;
+    for (const row of data as { id: string; target: string; cluster_result: unknown }[]) {
+      scanned += 1;
+      const targetAddr = (row.target ?? "").toLowerCase();
+      if (!verifiedAddresses.has(targetAddr)) continue;
+
+      const cr = (typeof row.cluster_result === "string"
+        ? JSON.parse(row.cluster_result)
+        : row.cluster_result) as ClusterResultLite | null;
+      if (!cr) continue;
+
+      const targetPid = cr.targetEthos?.profileId;
+      if (!targetPid || !verifiedProfileIds.has(targetPid)) continue;
+
+      const collect = (list: CandidateLite[] | undefined) =>
+        (list ?? [])
+          .filter((c) => {
+            const pid = c.ethosProfile?.profileId;
+            return pid !== undefined && pid !== targetPid && verifiedProfileIds.has(pid);
+          })
+          .map((c) => ({
+            profileId: c.ethosProfile!.profileId!,
+            displayName: c.ethosProfile?.displayName ?? "",
+            username: c.ethosProfile?.username ?? null,
+            score: c.ethosProfile?.score ?? 0,
+            signalTypes: c.signalTypes ?? [],
+          }));
+
+      const strongVerified = collect(cr.strongCluster);
+      const possibleVerified = collect(cr.possibleCluster);
+      if (strongVerified.length === 0 && possibleVerified.length === 0) continue;
+
+      matches.push({
+        id: row.id,
+        target: row.target,
+        targetProfileId: targetPid,
+        targetDisplay: cr.targetEthos?.displayName ?? "",
+        targetUsername: cr.targetEthos?.username ?? null,
+        strongVerified,
+        possibleVerified,
+      });
+    }
+    if (data.length < ROW_PAGE) break;
+  }
+
+  // 3) Rank: strong matches first, then possible. Within each, by count desc.
+  matches.sort((a, b) => {
+    const sd = b.strongVerified.length - a.strongVerified.length;
+    if (sd !== 0) return sd;
+    return b.possibleVerified.length - a.possibleVerified.length;
+  });
+
+  const reportDir = resolve(process.cwd(), "scripts/backfill/logs");
+  const reportPath = resolve(reportDir, `verified-in-verified-${stamp}.jsonl`);
+  writeFileSync(reportPath, "", { flag: "w" });
+  for (const m of matches) appendFileSync(reportPath, JSON.stringify(m) + "\n");
+
+  const strongHits = matches.filter((m) => m.strongVerified.length > 0).length;
+  console.log(
+    `[report] scanned=${scanned} · matches=${matches.length} (strong=${strongHits}) → ${reportPath}`
+  );
+  log({ event: "verified-in-verified", scanned, matches: matches.length, strong: strongHits, path: reportPath });
+
+  // Console preview: top 20 strong-cluster matches.
+  const preview = matches.filter((m) => m.strongVerified.length > 0).slice(0, 20);
+  if (preview.length > 0) {
+    console.log(`\n[report] top ${preview.length} strong-cluster matches:`);
+    for (const m of preview) {
+      const label = m.targetUsername ?? m.targetDisplay ?? m.target.slice(0, 10);
+      const members = m.strongVerified
+        .slice(0, 5)
+        .map((v) => v.username ?? v.displayName ?? String(v.profileId))
+        .join(", ");
+      const more = m.strongVerified.length > 5 ? ` +${m.strongVerified.length - 5}` : "";
+      console.log(`  ${m.strongVerified.length}× ${label} ← ${members}${more}  [${m.id}]`);
+    }
+  }
 }
 
 main().catch((err) => {
