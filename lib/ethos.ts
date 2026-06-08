@@ -60,7 +60,8 @@ export interface Invitation {
 }
 
 export interface ReviewActivity {
-  type: "review";
+  // "review" / "vouch" for active records; archived vouches come back as "unvouch".
+  type: "review" | "vouch" | "unvouch";
   data: {
     id: number;
     authorProfileId: number;
@@ -71,6 +72,10 @@ export interface ReviewActivity {
     createdAt: number;
     archived: boolean;
   };
+  // Canonical app.ethos.network URL for this activity.
+  link?: string;
+  // Unix seconds of the most recent event on this activity (creation, or archival for unvouches).
+  timestamp?: number;
   author: {
     profileId: number;
     name: string;

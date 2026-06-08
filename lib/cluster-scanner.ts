@@ -71,10 +71,31 @@ export interface LogEntry {
   message: string;
 }
 
+/** A single review/vouch in one direction, for mutual-activity signals. */
+export interface MutualActivityRef {
+  url: string; // canonical app.ethos.network link to the review/vouch
+  archived: boolean; // true if the review was archived or the vouch was withdrawn
+  date: number; // unix seconds of the activity's most recent event
+}
+
+/** Build a MutualActivityRef from a raw review/vouch activity. */
+function toMutualRef(a: ReviewActivity): MutualActivityRef {
+  return {
+    url: a.link ?? "",
+    archived: a.data.archived,
+    date: a.timestamp ?? a.data.createdAt,
+  };
+}
+
 export interface Signal {
   type: string;
   score: number;
   details: string;
+  // Present on mutual_reviews / mutual_vouches signals: both directions of the activity.
+  mutual?: {
+    fromTarget: MutualActivityRef; // target's review/vouch of the candidate
+    fromCandidate: MutualActivityRef; // candidate's review/vouch of the target
+  };
 }
 
 export interface FirstFunderInfo {
@@ -1009,19 +1030,27 @@ export async function runClusterScan(
         fetchActivities(targetProfileId, "received", ["review"], 200),
       ]);
 
-      const targetReviewedIds = new Set(targetReviewsGiven.map((r) => r.subject.profileId));
-      const reviewedTargetIds = new Set(targetReviewsReceived.map((r) => r.author.profileId));
+      const targetReviewedBy = new Map(targetReviewsGiven.map((r) => [r.subject.profileId, r]));
+      const reviewedTargetBy = new Map(targetReviewsReceived.map((r) => [r.author.profileId, r]));
 
       for (const candidate of allWithEthos) {
         const pid = candidate.ethosProfile?.profileId;
         if (!pid) continue;
 
-        const targetReviewedCandidate = targetReviewedIds.has(pid);
-        const candidateReviewedTarget = reviewedTargetIds.has(pid);
+        const targetReviewedCandidate = targetReviewedBy.get(pid);
+        const candidateReviewedTarget = reviewedTargetBy.get(pid);
 
         if (targetReviewedCandidate && candidateReviewedTarget) {
           candidate.mutualReviews = true;
-          candidate.signals.push({ type: "mutual_reviews", score: 0, details: "reviewed each other on Ethos" });
+          candidate.signals.push({
+            type: "mutual_reviews",
+            score: 0,
+            details: "reviewed each other on Ethos",
+            mutual: {
+              fromTarget: toMutualRef(targetReviewedCandidate),
+              fromCandidate: toMutualRef(candidateReviewedTarget),
+            },
+          });
           log("warn", `Mutual reviews between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
         }
       }
@@ -1032,19 +1061,27 @@ export async function runClusterScan(
         fetchActivities(targetProfileId, "received", ["vouch"], 200),
       ]);
 
-      const targetVouchedIds = new Set(targetVouchesGiven.map((r) => r.subject.profileId));
-      const vouchedTargetIds = new Set(targetVouchesReceived.map((r) => r.author.profileId));
+      const targetVouchedBy = new Map(targetVouchesGiven.map((r) => [r.subject.profileId, r]));
+      const vouchedTargetBy = new Map(targetVouchesReceived.map((r) => [r.author.profileId, r]));
 
       for (const candidate of allWithEthos) {
         const pid = candidate.ethosProfile?.profileId;
         if (!pid) continue;
 
-        const targetVouchedCandidate = targetVouchedIds.has(pid);
-        const candidateVouchedTarget = vouchedTargetIds.has(pid);
+        const targetVouchedCandidate = targetVouchedBy.get(pid);
+        const candidateVouchedTarget = vouchedTargetBy.get(pid);
 
         if (targetVouchedCandidate && candidateVouchedTarget) {
           candidate.mutualVouches = true;
-          candidate.signals.push({ type: "mutual_vouches", score: 0, details: "vouched for each other on Ethos" });
+          candidate.signals.push({
+            type: "mutual_vouches",
+            score: 0,
+            details: "vouched for each other on Ethos",
+            mutual: {
+              fromTarget: toMutualRef(targetVouchedCandidate),
+              fromCandidate: toMutualRef(candidateVouchedTarget),
+            },
+          });
           log("warn", `Mutual vouches between ${candidate.ethosProfile?.displayName} and ${targetDisplayName}`);
         }
       }

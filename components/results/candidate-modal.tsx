@@ -2,7 +2,7 @@
 
 import { X, ExternalLink } from "lucide-react";
 import { motion } from "framer-motion";
-import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-scanner";
+import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
 import {
   getScoreBorderColor,
   getExplorerAddressUrl,
@@ -203,10 +203,26 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
                       <div>Invited {result.targetEthos?.displayName || "the target"} on Ethos.</div>
                     )}
                     {candidate.mutualReviews && (
-                      <div>Mutual reviews: both reviewed each other on Ethos.</div>
+                      <div className="space-y-0.5">
+                        <div>Mutual reviews: both reviewed each other on Ethos.</div>
+                        <MutualActivityLinks
+                          signal={candidate.signals.find((s) => s.type === "mutual_reviews")}
+                          verb="review"
+                          targetName={result.targetEthos?.displayName || "the target"}
+                          candidateName={candidate.ethosProfile?.displayName || "this wallet"}
+                        />
+                      </div>
                     )}
                     {candidate.mutualVouches && (
-                      <div>Mutual vouches: both vouched for each other on Ethos.</div>
+                      <div className="space-y-0.5">
+                        <div>Mutual vouches: both vouched for each other on Ethos.</div>
+                        <MutualActivityLinks
+                          signal={candidate.signals.find((s) => s.type === "mutual_vouches")}
+                          verb="vouch"
+                          targetName={result.targetEthos?.displayName || "the target"}
+                          candidateName={candidate.ethosProfile?.displayName || "this wallet"}
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -300,5 +316,62 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+function formatActivityDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Renders both directions of a mutual review/vouch, with archived state, date, and links. */
+function MutualActivityLinks({
+  signal,
+  verb,
+  targetName,
+  candidateName,
+}: {
+  signal?: Signal;
+  verb: "review" | "vouch";
+  targetName: string;
+  candidateName: string;
+}) {
+  if (!signal?.mutual) return null;
+  const { fromTarget, fromCandidate } = signal.mutual;
+  const rows = [
+    { label: `${targetName}'s ${verb} of ${candidateName}`, ref: fromTarget },
+    { label: `${candidateName}'s ${verb} of ${targetName}`, ref: fromCandidate },
+  ];
+  return (
+    <div className="space-y-0.5 pl-3">
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-center gap-1.5 flex-wrap">
+          {row.ref.url ? (
+            <a
+              href={safeExternalUrl(row.ref.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground hover:underline inline-flex items-center gap-1"
+            >
+              {row.label}
+              <ExternalLink className="h-3 w-3 opacity-50" />
+            </a>
+          ) : (
+            <span>{row.label}</span>
+          )}
+          {row.ref.date > 0 && (
+            <span className="text-muted-foreground">· {formatActivityDate(row.ref.date)}</span>
+          )}
+          {row.ref.archived && (
+            <span className="text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+              {verb === "vouch" ? "withdrawn" : "archived"}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
