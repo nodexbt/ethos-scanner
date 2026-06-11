@@ -33,8 +33,9 @@ export async function DELETE(
 
   const { id } = await params;
   const owner = await getInvestigationOwner(id);
-  // Allow delete if owner matches, or if the row has no owner (legacy)
-  if (!auth.isAdmin && owner !== null && owner !== auth.profileId) {
+  // Legacy ownerless rows were backfilled, so a null owner means the row
+  // doesn't exist or is unclaimed — either way, only admins may act on it.
+  if (!auth.isAdmin && owner !== auth.profileId) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
   await deleteInvestigation(id);
@@ -51,7 +52,7 @@ export async function PATCH(
 
   const { id } = await params;
   const owner = await getInvestigationOwner(id);
-  if (!auth.isAdmin && owner !== null && owner !== auth.profileId) {
+  if (!auth.isAdmin && owner !== auth.profileId) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 

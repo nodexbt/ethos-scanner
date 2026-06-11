@@ -8,6 +8,22 @@ import { isAllowed, seedFromEnvIfMissing } from "@/lib/db/allowed-users";
 // transition from ETHOS_PROFILE_ALLOWLIST to the DB-backed allowlist
 // invisible to existing users — anyone who could log in before the
 // migration can still log in after.
+// Resolve the Ethos profile for a Twitter login and verify it is attested
+// to the caller's immutable Twitter user ID — not just the handle. Handles
+// are recyclable: if an allowlisted user renames or abandons theirs, whoever
+// registers the freed handle must not inherit their Ethos identity.
+async function fetchAttestedProfile(username: string, twitterId: string) {
+  const ethos = await fetchProfile(username);
+  if (!ethos) return null;
+  if (!ethos.userkeys?.includes(`service:x.com:${twitterId}`)) {
+    console.error(
+      `Ethos profile for @${username} is not attested to Twitter ID ${twitterId}`
+    );
+    return null;
+  }
+  return ethos;
+}
+
 let seededThisProcess = false;
 async function ensureSeeded() {
   if (seededThisProcess) return;
@@ -71,8 +87,9 @@ export const authOptions: NextAuthOptions = {
       const data = profile?.data || profile;
       const username = data?.username;
       if (!username) return "/?error=NoUsername";
+      if (!data?.id) return "/?error=NoTwitterId";
 
-      const ethos = await fetchProfile(username);
+      const ethos = await fetchAttestedProfile(username, data.id);
       if (!ethos) return "/?error=NoEthosProfile";
 
       await ensureSeeded();
@@ -89,8 +106,8 @@ export const authOptions: NextAuthOptions = {
         token.twitterId = data.id;
         token.twitterUsername = data.username;
 
-        // Fetch and attach Ethos profile
-        const ethos = await fetchProfile(data.username);
+        // Fetch and attach Ethos profile (attested to the immutable Twitter ID)
+        const ethos = await fetchAttestedProfile(data.username, data.id);
         if (ethos) {
           token.ethosProfileId = ethos.profileId;
           token.ethosDisplayName = ethos.displayName;
