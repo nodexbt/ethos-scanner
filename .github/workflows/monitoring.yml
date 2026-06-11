@@ -9,7 +9,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -27,3 +27,16 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: npx tsx scripts/monitoring/daily.ts
+
+      # Scan newly-verified (and any never-scanned) profiles so the Verified
+      # Scans tab keeps up. Runs after monitoring so profile_latest already
+      # reflects today's verification flags. --skip-days is set absurdly high
+      # so an existing scan is always "fresh" — i.e. we only scan profiles
+      # with no scan yet (new + missing), never re-scanning existing clusters.
+      # --limit caps the per-run queue so a backlog can't blow the timeout.
+      - name: Scan newly-verified & missing profiles
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+        run: npx tsx scripts/backfill/scan-verified.ts --owner=2 --skip-days=3650 --limit=300

@@ -461,7 +461,8 @@ async function postDiscord(
   names: Map<number, { display_name: string | null; username: string | null }>,
   newProfiles24h: number,
   durationMs: number,
-  today: string
+  today: string,
+  newlyVerified: EthosCurrent[]
 ): Promise<void> {
   const topScore = [...rows]
     .filter((r) => r.score_delta != null && r.score_delta > 0)
@@ -500,6 +501,16 @@ async function postDiscord(
     `**Ethos monitoring — ${today}**`,
     `${rows.length} profiles with activity or score changes · ${newProfiles24h} new profiles · ${Math.round(durationMs / 1000)}s`,
   ];
+  if (newlyVerified.length) {
+    lines.push("");
+    lines.push(`**🟢 Newly human-verified (24h):** ${newlyVerified.length}`);
+    for (const c of newlyVerified.slice(0, 25)) {
+      lines.push(`- ${profileLink(c.profile_id, c.display_name, c.username)}`);
+    }
+    if (newlyVerified.length > 25) {
+      lines.push(`- …and ${newlyVerified.length - 25} more`);
+    }
+  }
   if (topScore.length) {
     lines.push("");
     lines.push("**Top score gainers (24h):**");
@@ -799,21 +810,45 @@ async function main() {
     );
 
     console.log("Loading prior state from profile_latest…");
-    const prior = new Map<number, { last_score: number | null; last_xp_total: number | null }>();
+    const prior = new Map<
+      number,
+      { last_score: number | null; last_xp_total: number | null; last_human_verified: boolean }
+    >();
     const PAGE = 1000;
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from("profile_latest")
-        .select("profile_id, score, xp_total")
+        .select("profile_id, score, xp_total, human_verified")
         .range(from, from + PAGE - 1);
       if (error) throw new Error(`profile_latest select failed: ${error.message}`);
       if (!data || data.length === 0) break;
-      for (const row of data as { profile_id: number; score: number | null; xp_total: number | null }[]) {
-        prior.set(row.profile_id, { last_score: row.score, last_xp_total: row.xp_total });
+      for (const row of data as {
+        profile_id: number;
+        score: number | null;
+        xp_total: number | null;
+        human_verified: boolean | null;
+      }[]) {
+        prior.set(row.profile_id, {
+          last_score: row.score,
+          last_xp_total: row.xp_total,
+          last_human_verified: row.human_verified === true,
+        });
       }
       if (data.length < PAGE) break;
     }
     console.log(`  ${prior.size} prior rows`);
+
+    // Newly human-verified since the last run: verified now, but either
+    // unseen before or not verified in the prior snapshot. `prior` is read
+    // above before the profile_latest upsert below, so it still reflects
+    // yesterday's state. A brand-new profile that is already verified (no
+    // prior row) counts as newly verified.
+    const newlyVerified = current.filter((c) => {
+      if (!c.human_verified) return false;
+      const p = prior.get(c.profile_id);
+      return !p || !p.last_human_verified;
+    });
+    console.log(`  ${newlyVerified.length} newly human-verified since last run`);
 
     const today = todayUtcDate();
     const rows = buildRows(current, prior, activity, today);
@@ -1043,7 +1078,7 @@ async function main() {
       const names = new Map(
         current.map((c) => [c.profile_id, { display_name: c.display_name, username: c.username }])
       );
-      await postDiscord(webhook, rows, names, activity.new_profiles_24h, durationMs, today);
+      await postDiscord(webhook, rows, names, activity.new_profiles_24h, durationMs, today, newlyVerified);
     }
 
     console.log(`Done in ${Math.round(durationMs / 1000)}s.`);
