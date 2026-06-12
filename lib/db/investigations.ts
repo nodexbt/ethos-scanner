@@ -80,10 +80,29 @@ export async function listInvestigations(
  * empty-state stat cards. Pages the two thin generated-count columns
  * (PostgREST caps a single response at 1000 rows) and sums in JS.
  */
+// 60s process-local caches for the two whole-table reads below. Both
+// re-derive their result from a full table walk on every call, but the
+// underlying data only changes when an investigation is written, so writes
+// invalidate explicitly (saveInvestigation / deleteInvestigation /
+// shareInvestigation). Per-instance on serverless, which is fine — worst
+// case a cold instance recomputes once and the TTL bounds staleness for
+// writes that happen on other instances (e.g. the nightly backfill).
+const LIST_CACHE_TTL_MS = 60_000;
+let verifiedListCache: { rows: InvestigationSummary[]; expires: number } | null = null;
+let statsCache: { value: { strongSum: number; possibleSum: number }; expires: number } | null =
+  null;
+
+export function invalidateInvestigationCaches(): void {
+  verifiedListCache = null;
+  statsCache = null;
+}
+
 export async function getInvestigationStats(): Promise<{
   strongSum: number;
   possibleSum: number;
 }> {
+  if (statsCache && statsCache.expires > Date.now()) return statsCache.value;
+
   const supabase = getSupabase();
   let strongSum = 0;
   let possibleSum = 0;
@@ -94,8 +113,9 @@ export async function getInvestigationStats(): Promise<{
       .select("strong_count, possible_count")
       .range(from, from + PAGE - 1);
     if (error) {
+      // Partial sums are worse than a recompute next call — don't cache.
       console.error("getInvestigationStats error:", error);
-      break;
+      return { strongSum, possibleSum };
     }
     if (!data || data.length === 0) break;
     for (const row of data as { strong_count: number | null; possible_count: number | null }[]) {
@@ -104,6 +124,7 @@ export async function getInvestigationStats(): Promise<{
     }
     if (data.length < PAGE) break;
   }
+  statsCache = { value: { strongSum, possibleSum }, expires: Date.now() + LIST_CACHE_TTL_MS };
   return { strongSum, possibleSum };
 }
 
@@ -122,6 +143,19 @@ export interface VerifiedListPage {
 export async function listVerifiedInvestigations(
   { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {}
 ): Promise<VerifiedListPage> {
+  if (!verifiedListCache || verifiedListCache.expires <= Date.now()) {
+    const rows = await fetchVerifiedInvestigationRows();
+    if (rows === null) return { rows: [], total: 0 }; // error path — don't cache
+    verifiedListCache = { rows, expires: Date.now() + LIST_CACHE_TTL_MS };
+  }
+  const all = verifiedListCache.rows;
+  return { rows: all.slice(offset, offset + limit), total: all.length };
+}
+
+/** The uncached full fetch backing listVerifiedInvestigations: collect all
+ * verified primary addresses, walk the investigations table, intersect, and
+ * return the complete sorted list (null on any query error). */
+async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] | null> {
   const supabase = getSupabase();
 
   // Step 1: collect all human-verified primary addresses (paginated, no cap).
@@ -136,7 +170,7 @@ export async function listVerifiedInvestigations(
       .range(from, from + PAGE - 1);
     if (error) {
       console.error("listVerifiedInvestigations profile fetch error:", error);
-      return { rows: [], total: 0 };
+      return null;
     }
     if (!data || data.length === 0) break;
     for (const row of data as { primary_address: string | null }[]) {
@@ -144,7 +178,7 @@ export async function listVerifiedInvestigations(
     }
     if (data.length < PAGE) break;
   }
-  if (addresses.length === 0) return { rows: [], total: 0 };
+  if (addresses.length === 0) return [];
 
   const verifiedSet = new Set(addresses);
 
@@ -184,7 +218,7 @@ export async function listVerifiedInvestigations(
 
     if (error) {
       console.error("listVerifiedInvestigations select error:", error);
-      return { rows: [], total: 0 };
+      return null;
     }
     if (!data || data.length === 0) break;
     fetched.push(...(data as Row[]));
@@ -195,7 +229,7 @@ export async function listVerifiedInvestigations(
     verifiedSet.has((row.target ?? "").toLowerCase())
   );
 
-  const page = verifiedRows.slice(offset, offset + limit).map<InvestigationSummary>((row) => ({
+  return verifiedRows.map<InvestigationSummary>((row) => ({
     id: row.id,
     target: row.target,
     targetName: row.target_name,
@@ -209,8 +243,6 @@ export async function listVerifiedInvestigations(
     ownerProfileId: row.owner_profile_id ?? null,
     lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
   }));
-
-  return { rows: page, total: verifiedRows.length };
 }
 
 export async function getInvestigation(id: string): Promise<InvestigationRow | null> {
@@ -346,6 +378,7 @@ export async function saveInvestigation(data: {
     console.error("saveInvestigation error:", error);
     throw new Error(error.message);
   }
+  invalidateInvestigationCaches();
 }
 
 /**
@@ -374,6 +407,7 @@ export async function deleteInvestigation(id: string): Promise<void> {
   if (error) {
     console.error("deleteInvestigation error:", error);
   }
+  invalidateInvestigationCaches();
 }
 
 export async function shareInvestigation(id: string): Promise<string | null> {
@@ -392,6 +426,7 @@ export async function shareInvestigation(id: string): Promise<string | null> {
       .from("investigations")
       .update({ is_public: true })
       .eq("id", id);
+    invalidateInvestigationCaches();
     return existing.share_id;
   }
 
@@ -407,6 +442,7 @@ export async function shareInvestigation(id: string): Promise<string | null> {
     return null;
   }
 
+  invalidateInvestigationCaches();
   return shareId;
 }
 
