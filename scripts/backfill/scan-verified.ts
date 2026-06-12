@@ -267,6 +267,8 @@ async function main() {
         clusterResult: serialized,
         aiAnalysis: null,
         ownerProfileId: flags.owner!,
+        // Automated scan — show no personal "Scanned by" attribution.
+        scannedByProfileId: null,
         scanDurationMs,
         twitterEvidence,
       });

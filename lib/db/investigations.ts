@@ -231,6 +231,12 @@ export async function saveInvestigation(data: {
   clusterResult: unknown;
   aiAnalysis: string | null;
   ownerProfileId: number;
+  /**
+   * Who to display as the scanner. Defaults to ownerProfileId. Pass null
+   * explicitly for automated (cron/backfill) scans so the UI shows no
+   * personal "Scanned by" attribution.
+   */
+  scannedByProfileId?: number | null;
   scanDurationMs?: number | null;
   /** Map of address → search result + tweets. Persisted as JSONB. */
   twitterEvidence?: Record<string, unknown> | null;
@@ -278,9 +284,11 @@ export async function saveInvestigation(data: {
       cluster_result: data.clusterResult,
       ai_analysis: data.aiAnalysis,
       owner_profile_id: ownerToWrite,
-      // last_scanned_by is always overwritten with the current user, unlike
-      // owner_profile_id which is sticky to the original creator.
-      last_scanned_by_profile_id: data.ownerProfileId,
+      // last_scanned_by is always overwritten with the current scanner (null
+      // for automated scans), unlike owner_profile_id which is sticky to the
+      // original creator.
+      last_scanned_by_profile_id:
+        data.scannedByProfileId !== undefined ? data.scannedByProfileId : data.ownerProfileId,
       // scan_duration_ms is also always overwritten — the most recent
       // scan's timing is the most relevant for the rolling baseline.
       // Only write when we have a value; leave column untouched if not
