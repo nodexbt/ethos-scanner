@@ -107,26 +107,10 @@ export async function listVerifiedInvestigations(
   // Step 2: pull the full investigations list (sorted by strong-count at the
   // DB level using the composite index), then filter to verified targets in
   // JS. We can't ship a 1.1k-element .in() filter — PostgREST URL-encodes the
-  // values inline and the result exceeds the proxy's URL limit. A single
-  // unfiltered fetch with the new generated count columns is ~300 ms for the
-  // current 1.1k-row table; the bound is set high enough to absorb organic
-  // growth without paging.
+  // values inline and the result exceeds the proxy's URL limit. PostgREST
+  // also caps any single response at 1000 rows regardless of .limit(), so
+  // page with .range() until exhausted; HARD_CAP bounds the worst case.
   const HARD_CAP = 5000;
-  const { data, error } = await supabase
-    .from("investigations")
-    .select(
-      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
-    )
-    .order("strong_count", { ascending: false, nullsFirst: false })
-    .order("possible_count", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false })
-    .limit(HARD_CAP);
-
-  if (error) {
-    console.error("listVerifiedInvestigations select error:", error);
-    return { rows: [], total: 0 };
-  }
-
   type Row = {
     id: string;
     target: string;
@@ -142,9 +126,30 @@ export async function listVerifiedInvestigations(
     possible_count: number | null;
   };
 
-  const verifiedRows = (data ?? []).filter((row) =>
-    verifiedSet.has(((row as Row).target ?? "").toLowerCase())
-  ) as Row[];
+  const fetched: Row[] = [];
+  for (let from = 0; from < HARD_CAP; from += PAGE) {
+    const { data, error } = await supabase
+      .from("investigations")
+      .select(
+        "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+      )
+      .order("strong_count", { ascending: false, nullsFirst: false })
+      .order("possible_count", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+      .range(from, Math.min(from + PAGE, HARD_CAP) - 1);
+
+    if (error) {
+      console.error("listVerifiedInvestigations select error:", error);
+      return { rows: [], total: 0 };
+    }
+    if (!data || data.length === 0) break;
+    fetched.push(...(data as Row[]));
+    if (data.length < PAGE) break;
+  }
+
+  const verifiedRows = fetched.filter((row) =>
+    verifiedSet.has((row.target ?? "").toLowerCase())
+  );
 
   const page = verifiedRows.slice(offset, offset + limit).map<InvestigationSummary>((row) => ({
     id: row.id,
