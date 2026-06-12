@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,21 +138,9 @@ export default function Home() {
       }),
     ]).finally(() => setScansLoading(false));
 
-    // Prefetch the human-verified list eagerly — matches the All/Your Scans
-    // behaviour and means the tab is already populated by the time the user
-    // clicks. Cheap (~300 ms server-side) thanks to the indexed count
-    // columns, and the result is cached for the session.
-    setVerifiedLoading(true);
-    fetch(`/api/investigations/verified?limit=25&offset=0`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data && Array.isArray(data.rows)) {
-          setVerifiedInvestigations(data.rows);
-          setVerifiedTotal(Number(data.total) || 0);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setVerifiedLoading(false));
+    // The verified tab is NOT prefetched here — its tab-open effect loads it
+    // on first visit (showing the skeleton), which skips a wasted round trip
+    // on every mount for sessions that never open that tab.
 
     // Check if URL has a wallet address to load
     const path = window.location.pathname;
@@ -1236,7 +1224,7 @@ export default function Home() {
                         key={candidate.address}
                         candidate={candidate}
                         result={clusterResult}
-                        onClick={() => setSelectedCandidate(candidate)}
+                        onSelect={setSelectedCandidate}
                       />
                     ))}
                   </CardContent>
@@ -1265,7 +1253,7 @@ export default function Home() {
                         key={candidate.address}
                         candidate={candidate}
                         result={clusterResult}
-                        onClick={() => setSelectedCandidate(candidate)}
+                        onSelect={setSelectedCandidate}
                       />
                     ))}
                   </CardContent>
@@ -1355,7 +1343,7 @@ export default function Home() {
                         className="w-full group flex items-center gap-3 rounded-lg border border-border bg-card/40 hover:bg-card/80 px-3 py-2.5 transition-colors text-left cursor-pointer"
                       >
                         {inv.targetAvatar ? (
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={inv.targetAvatar}
                             alt=""
                             className="h-8 w-8 rounded-full shrink-0"
@@ -1390,7 +1378,7 @@ export default function Home() {
                             <Shield className="h-3 w-3 text-green-500" />
                           )}
                           {inv.lastScannedBy && (
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={inv.lastScannedBy.avatarUrl}
                               alt=""
                               title={`Scanned by ${inv.lastScannedBy.displayName}`}
@@ -1557,14 +1545,15 @@ function ScansList({
   loadingMore,
   loadMoreBatchSize = 50,
 }: ScansListProps) {
-  const filtered = investigations.filter((inv) => {
-    if (!search.trim()) return true;
+  const filtered = useMemo(() => {
+    if (!search.trim()) return investigations;
     const q = search.toLowerCase();
-    return (
-      inv.target.toLowerCase().includes(q) ||
-      (inv.targetName && inv.targetName.toLowerCase().includes(q))
+    return investigations.filter(
+      (inv) =>
+        inv.target.toLowerCase().includes(q) ||
+        (inv.targetName && inv.targetName.toLowerCase().includes(q))
     );
-  });
+  }, [investigations, search]);
 
   // If the caller passes a totalCount + onLoadMore, this list is being driven
   // by a server-paginated source — show a Load-more button under the rows
@@ -1612,7 +1601,7 @@ function ScansList({
               }`}
             >
               {inv.targetAvatar ? (
-                <img
+                <img loading="lazy" decoding="async"
                   src={inv.targetAvatar}
                   alt={inv.targetName || ""}
                   className="h-10 w-10 rounded-full shrink-0"
@@ -1664,7 +1653,7 @@ function ScansList({
                     title={`Scanned by ${inv.lastScannedBy.displayName}`}
                   >
                     <span className="hidden lg:inline">scanned by</span>
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={inv.lastScannedBy.avatarUrl}
                       alt=""
                       className="h-4 w-4 rounded-full"

@@ -155,7 +155,7 @@ export function OverviewCard({
             <div className="flex items-center gap-3">
               {result.targetEthos.avatarUrl && (
                 <a href={safeExternalUrl(result.targetEthos.profileUrl)} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                  <img
+                  <img loading="lazy" decoding="async"
                     src={result.targetEthos.avatarUrl}
                     alt={result.targetEthos.displayName}
                     className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(result.targetEthos.score)}`}

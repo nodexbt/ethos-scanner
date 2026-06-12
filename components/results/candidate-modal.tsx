@@ -41,7 +41,7 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
         {/* Header */}
         <div className="flex items-start gap-3 p-5 border-b sticky top-0 bg-background rounded-t-xl z-10">
           {candidate.ethosProfile?.avatarUrl && (
-            <img
+            <img loading="lazy" decoding="async"
               src={candidate.ethosProfile.avatarUrl}
               alt={candidate.ethosProfile.displayName}
               className={`h-12 w-12 rounded-full ring-2 ${getScoreBorderColor(candidate.ethosProfile.score)}`}

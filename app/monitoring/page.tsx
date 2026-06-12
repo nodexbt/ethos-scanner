@@ -53,7 +53,7 @@ function ProfileName({ p }: { p: ProfileSummary & { profileId: number } }) {
     >
       {p.avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <img loading="lazy" decoding="async"
           src={p.avatarUrl}
           alt=""
           className="h-6 w-6 rounded-full shrink-0 ring-1 ring-border"

@@ -84,7 +84,7 @@ function AuthorPill({
     >
       {profile.avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={profile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
+        <img loading="lazy" decoding="async" src={profile.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
       ) : null}
       <span className="font-medium text-[11px]">{profile.displayName || fallbackName}</span>
       <span className="text-muted-foreground text-[10px]">@{handle}</span>
@@ -135,7 +135,7 @@ function TweetList({
           <div className="flex items-start gap-2">
             {avatarSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <img loading="lazy" decoding="async"
                 src={avatarSrc}
                 alt=""
                 className="h-6 w-6 rounded-full shrink-0"
@@ -532,7 +532,7 @@ export function EvidenceCard({
               )}
               {screenshots.has(entry.address) && (
                 <div className="relative">
-                  <img
+                  <img loading="lazy" decoding="async"
                     src={screenshots.get(entry.address)}
                     alt={`X search results for ${entry.address}`}
                     className="rounded border border-border w-full max-h-48 object-cover object-top"

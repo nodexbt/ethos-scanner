@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, buildConnectionSummary } from "@/lib/scan-utils";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
@@ -10,14 +11,20 @@ interface CandidateCardProps {
   result: ClusterScanResult;
   // Optional — when omitted (e.g. on the public share page) the card renders
   // as a static read-only block instead of a clickable modal trigger.
-  onClick?: () => void;
+  // Takes the candidate (rather than a per-card closure) so callers can pass
+  // a stable handler and memo() actually skips re-renders.
+  onSelect?: (candidate: ClusterCandidate) => void;
 }
 
-export function CandidateCard({ candidate, result, onClick }: CandidateCardProps) {
-  const interactive = !!onClick;
+export const CandidateCard = memo(function CandidateCard({
+  candidate,
+  result,
+  onSelect,
+}: CandidateCardProps) {
+  const interactive = !!onSelect;
   return (
     <div
-      onClick={onClick}
+      onClick={onSelect ? () => onSelect(candidate) : undefined}
       className={`rounded-lg border border-border p-3 space-y-2.5 ${
         interactive ? "cursor-pointer hover:bg-muted/30 transition-colors" : ""
       }`}
@@ -27,6 +34,8 @@ export function CandidateCard({ candidate, result, onClick }: CandidateCardProps
           <img
             src={candidate.ethosProfile.avatarUrl}
             alt={candidate.ethosProfile.displayName}
+            loading="lazy"
+            decoding="async"
             className={`h-10 w-10 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
           />
         )}
@@ -73,4 +82,4 @@ export function CandidateCard({ candidate, result, onClick }: CandidateCardProps
       </div>
     </div>
   );
-}
+});

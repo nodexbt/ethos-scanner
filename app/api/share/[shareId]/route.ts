@@ -25,5 +25,10 @@ export async function GET(
   if (!investigation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  return NextResponse.json(investigation);
+  // Public-by-design payload behind an unguessable token; let browsers/CDN
+  // reuse it briefly so repeat opens of a shared link skip the DB read.
+  // 60s bounds how long a just-unshared link can linger in caches.
+  return NextResponse.json(investigation, {
+    headers: { "Cache-Control": "public, max-age=60" },
+  });
 }

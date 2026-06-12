@@ -220,7 +220,7 @@ export default function ProfileDetailPage({ params }: PageParams) {
             <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               {profile?.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <img loading="lazy" decoding="async"
                   src={profile.avatarUrl}
                   alt=""
                   className="h-14 w-14 rounded-full ring-2 ring-border shrink-0"
@@ -514,7 +514,7 @@ function XpTipsCard({
                 >
                   {cp.avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={cp.avatarUrl} alt="" className="h-6 w-6 rounded-full ring-1 ring-border" />
+                    <img loading="lazy" decoding="async" src={cp.avatarUrl} alt="" className="h-6 w-6 rounded-full ring-1 ring-border" />
                   ) : (
                     <div className="h-6 w-6 rounded-full bg-muted" />
                   )}
