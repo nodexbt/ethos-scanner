@@ -39,4 +39,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
-        run: npx tsx scripts/backfill/scan-verified.ts --owner=2 --skip-days=3650 --limit=300
+        # --owner=61 is @nodexbt — automated scans are credited to him, same
+        # as the historical manual backfill runs.
+        run: npx tsx scripts/backfill/scan-verified.ts --owner=61 --skip-days=3650 --limit=300
