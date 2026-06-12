@@ -12,6 +12,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Loader2, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { AppHeader } from "@/components/app-header";
 import type {
@@ -508,8 +509,33 @@ export default function MonitoringPage() {
       </Card>
 
       {loading && !data && (
-        <div className="flex justify-center py-16">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="space-y-4">
+          {/* Last-run card */}
+          <Card>
+            <CardContent className="py-4 flex items-center gap-3">
+              <Skeleton className="h-4 w-4 rounded-full" />
+              <Skeleton className="h-4 w-64" />
+            </CardContent>
+          </Card>
+          {/* Leaderboard card grid */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {Array.from({ length: 6 }, (_, i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <Skeleton className="h-4 w-44" />
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {Array.from({ length: 5 }, (_, j) => (
+                    <div key={j} className="flex items-center gap-3">
+                      <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+                      <Skeleton className="h-3.5 flex-1 max-w-40" />
+                      <Skeleton className="h-3.5 w-12 ml-auto" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 

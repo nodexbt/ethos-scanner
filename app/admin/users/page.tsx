@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/app-header";
 
 interface AllowedUser {
@@ -188,9 +189,18 @@ export default function AdminUsersPage() {
         </CardHeader>
         <CardContent>
           {loading && !users && (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
+            <ul className="divide-y divide-border">
+              {Array.from({ length: 5 }, (_, i) => (
+                <li key={i} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <Skeleton className="h-9 w-9 rounded-md shrink-0" />
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Skeleton className="h-3.5 w-40 max-w-full" />
+                    <Skeleton className="h-3 w-56 max-w-full" />
+                  </div>
+                  <Skeleton className="h-8 w-8 shrink-0" />
+                </li>
+              ))}
+            </ul>
           )}
           {error && (
             <div className="flex items-start gap-2 text-sm text-destructive py-2">

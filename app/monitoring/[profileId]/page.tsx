@@ -12,6 +12,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, Network, Star } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/app-header";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -180,8 +181,28 @@ export default function ProfileDetailPage({ params }: PageParams) {
       </div>
 
       {loading && !data && (
-        <div className="flex justify-center py-16">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="space-y-4">
+          {/* Profile header card */}
+          <Card>
+            <div className="p-4 flex items-center gap-4">
+              <Skeleton className="h-14 w-14 rounded-full shrink-0" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-5 w-48 max-w-full" />
+                <Skeleton className="h-3 w-64 max-w-full" />
+              </div>
+            </div>
+          </Card>
+          {/* Chart / activity cards */}
+          {Array.from({ length: 2 }, (_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-36" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-32 w-full" />
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
