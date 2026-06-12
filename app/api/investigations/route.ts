@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
-import { listInvestigations, saveInvestigation } from "@/lib/db/investigations";
+import { listInvestigations, getInvestigationStats, saveInvestigation } from "@/lib/db/investigations";
 
 // Cap on the serialized cluster result size (2 MB). Larger payloads are rejected
 // to prevent DB bloat / DoS via arbitrary writes.
@@ -90,12 +90,27 @@ async function resolveProfiles(
   return out;
 }
 
-// GET /api/investigations — list all
-export async function GET() {
+// GET /api/investigations?limit=25&offset=0[&scope=mine][&stats=1]
+// Server-paginated like /api/investigations/verified — returns
+// { rows, total } sorted by updated_at desc. scope=mine filters to the
+// caller's own scans; stats=1 additionally returns global signal sums
+// for the scanner empty-state cards.
+export async function GET(req: NextRequest) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
 
-  const investigations = await listInvestigations();
+  const url = req.nextUrl;
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
+  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0);
+  const scope = url.searchParams.get("scope");
+  const withStats = url.searchParams.get("stats") === "1";
+
+  const { rows: investigations, total } = await listInvestigations({
+    limit,
+    offset,
+    ownerProfileId: scope === "mine" ? auth.profileId : null,
+  });
+  const stats = withStats ? await getInvestigationStats() : undefined;
 
   // Scanner attribution is admin-only — non-admins should not see who scanned
   // a wallet. Skip the resolve step entirely for non-admins so we don't leak
@@ -125,7 +140,7 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json(enriched);
+  return NextResponse.json({ rows: enriched, total, ...(stats && { stats }) });
 }
 
 // POST /api/investigations — save/update

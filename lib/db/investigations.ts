@@ -27,27 +27,38 @@ export interface InvestigationRow {
   twitterEvidence: Record<string, unknown> | null;
 }
 
-export async function listInvestigations(): Promise<InvestigationSummary[]> {
+export async function listInvestigations(
+  {
+    limit = 50,
+    offset = 0,
+    ownerProfileId = null,
+  }: { limit?: number; offset?: number; ownerProfileId?: number | null } = {}
+): Promise<{ rows: InvestigationSummary[]; total: number }> {
   const supabase = getSupabase();
   // strong_count + possible_count are STORED generated columns (see
   // scripts/migrations/2026-05-14-investigation-counts.sql), so we no
   // longer need to fetch the entire cluster_result JSONB just to count
   // signals. The cluster_result column averages ~15 KB per row — pulling
   // it for 100 rows on every list call adds noticeable latency.
-  const { data, error } = await supabase
+  let query = supabase
     .from("investigations")
     .select(
-      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
-    )
+      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count",
+      { count: "exact" }
+    );
+  if (ownerProfileId !== null) {
+    query = query.eq("owner_profile_id", ownerProfileId);
+  }
+  const { data, count, error } = await query
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .range(offset, offset + limit - 1);
 
   if (error) {
     console.error("listInvestigations error:", error);
-    return [];
+    return { rows: [], total: 0 };
   }
 
-  return (data || []).map((row) => ({
+  const rows = (data || []).map((row) => ({
     id: row.id,
     target: row.target,
     targetName: row.target_name,
@@ -61,6 +72,39 @@ export async function listInvestigations(): Promise<InvestigationSummary[]> {
     ownerProfileId: row.owner_profile_id ?? null,
     lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
   }));
+  return { rows, total: count ?? rows.length };
+}
+
+/**
+ * Global signal totals across every investigation, for the scanner
+ * empty-state stat cards. Pages the two thin generated-count columns
+ * (PostgREST caps a single response at 1000 rows) and sums in JS.
+ */
+export async function getInvestigationStats(): Promise<{
+  strongSum: number;
+  possibleSum: number;
+}> {
+  const supabase = getSupabase();
+  let strongSum = 0;
+  let possibleSum = 0;
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("investigations")
+      .select("strong_count, possible_count")
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("getInvestigationStats error:", error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const row of data as { strong_count: number | null; possible_count: number | null }[]) {
+      strongSum += row.strong_count ?? 0;
+      possibleSum += row.possible_count ?? 0;
+    }
+    if (data.length < PAGE) break;
+  }
+  return { strongSum, possibleSum };
 }
 
 export interface VerifiedListPage {

@@ -93,7 +93,17 @@ export default function Home() {
   // Persisted with the investigation so saved scans retain their tweet evidence.
   // Shape mirrors TwitterSearchResult from /api/twitter/search.
   const [twitterEvidence, setTwitterEvidence] = useState<Record<string, unknown>>({});
-  const [savedInvestigations, setSavedInvestigations] = useState<InvestigationSummary[]>([]);
+  // Server-paginated scan lists (mirrors the verified tab): "all" is every
+  // investigation, "yours" is owner-filtered server-side via scope=mine.
+  const [allInvestigations, setAllInvestigations] = useState<InvestigationSummary[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
+  const [allLoadingMore, setAllLoadingMore] = useState(false);
+  const [yourInvestigations, setYourInvestigations] = useState<InvestigationSummary[]>([]);
+  const [yourTotal, setYourTotal] = useState(0);
+  const [yourLoadingMore, setYourLoadingMore] = useState(false);
+  // Global signal sums for the scanner empty-state stat cards — computed
+  // server-side so they cover every investigation, not just loaded pages.
+  const [scanStats, setScanStats] = useState<{ strongSum: number; possibleSum: number } | null>(null);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
@@ -112,11 +122,21 @@ export default function Home() {
   const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/investigations")
-      .then((r) => r.json())
-      .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setScansLoading(false));
+    Promise.all([
+      loadScansPage("all", 0, true).then((page) => {
+        if (page) {
+          setAllInvestigations(page.rows);
+          setAllTotal(page.total);
+          if (page.stats) setScanStats(page.stats);
+        }
+      }),
+      loadScansPage("mine", 0).then((page) => {
+        if (page) {
+          setYourInvestigations(page.rows);
+          setYourTotal(page.total);
+        }
+      }),
+    ]).finally(() => setScansLoading(false));
 
     // Prefetch the human-verified list eagerly — matches the All/Your Scans
     // behaviour and means the tab is already populated by the time the user
@@ -412,11 +432,70 @@ export default function Home() {
     }
   };
 
+  // Server-paginated fetch for the yours/all tabs — same { rows, total }
+  // shape and load-more pattern as the verified tab below. scope=mine
+  // filters to the caller's scans server-side; withStats piggybacks the
+  // global signal sums for the scanner empty-state cards.
+  const SCANS_PAGE_SIZE = 25;
+  const loadScansPage = async (
+    scope: "all" | "mine",
+    offset: number,
+    withStats = false,
+    limit: number = SCANS_PAGE_SIZE
+  ) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (scope === "mine") params.set("scope", "mine");
+    if (withStats) params.set("stats", "1");
+    const resp = await fetch(`/api/investigations?${params}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.rows)) return null;
+    return {
+      rows: data.rows as InvestigationSummary[],
+      total: Number(data.total) || 0,
+      stats: data.stats as { strongSum: number; possibleSum: number } | undefined,
+    };
+  };
+  const loadMoreAll = async () => {
+    if (allLoadingMore) return;
+    setAllLoadingMore(true);
+    const page = await loadScansPage("all", allInvestigations.length);
+    if (page) {
+      setAllInvestigations((prev) => [...prev, ...page.rows]);
+      setAllTotal(page.total);
+    }
+    setAllLoadingMore(false);
+  };
+  const loadMoreYours = async () => {
+    if (yourLoadingMore) return;
+    setYourLoadingMore(true);
+    const page = await loadScansPage("mine", yourInvestigations.length);
+    if (page) {
+      setYourInvestigations((prev) => [...prev, ...page.rows]);
+      setYourTotal(page.total);
+    }
+    setYourLoadingMore(false);
+  };
+
+  // Refresh after save/delete/share: re-fetch as many rows as are currently
+  // loaded (rounded up to a page, capped at the API's 200 max) so the user
+  // doesn't lose their load-more position, plus fresh totals and stats.
   const refreshInvestigations = () => {
-    fetch("/api/investigations")
-      .then((r) => r.json())
-      .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
-      .catch(() => {});
+    const reload = (loaded: number) =>
+      Math.min(200, Math.max(SCANS_PAGE_SIZE, Math.ceil(loaded / SCANS_PAGE_SIZE) * SCANS_PAGE_SIZE));
+    loadScansPage("all", 0, true, reload(allInvestigations.length)).then((page) => {
+      if (page) {
+        setAllInvestigations(page.rows);
+        setAllTotal(page.total);
+        if (page.stats) setScanStats(page.stats);
+      }
+    });
+    loadScansPage("mine", 0, false, reload(yourInvestigations.length)).then((page) => {
+      if (page) {
+        setYourInvestigations(page.rows);
+        setYourTotal(page.total);
+      }
+    });
   };
 
   // Server-paginated fetch for the verified-scans tab. Initial load grabs
@@ -815,10 +894,7 @@ export default function Home() {
   const currentProfileId = (session?.user?.ethos?.profileId as number | undefined) ?? null;
   // @ts-expect-error - isAdmin field added in session callback
   const isAdmin = Boolean(session?.user?.isAdmin);
-  const yourInvestigations = currentProfileId
-    ? savedInvestigations.filter((inv) => inv.ownerProfileId === currentProfileId)
-    : [];
-  const yourScansCount = yourInvestigations.length;
+  const yourScansCount = yourTotal;
   const canDelete = (inv: InvestigationSummary) =>
     isAdmin || inv.ownerProfileId === null || inv.ownerProfileId === currentProfileId;
 
@@ -965,8 +1041,8 @@ export default function Home() {
           >
             <FolderOpen className="h-4 w-4" />
             All Scans
-            {savedInvestigations.length > 0 && (
-              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{savedInvestigations.length}</span>
+            {allTotal > 0 && (
+              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{allTotal}</span>
             )}
           </button>
           <button
@@ -1227,7 +1303,7 @@ export default function Home() {
                       Total Scans
                     </div>
                     <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {savedInvestigations.length}
+                      {allTotal}
                     </div>
                   </CardContent>
                 </Card>
@@ -1238,7 +1314,7 @@ export default function Home() {
                       Strong Clusters
                     </div>
                     <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {savedInvestigations.reduce((sum, inv) => sum + inv.strongCount, 0)}
+                      {scanStats?.strongSum ?? allInvestigations.reduce((sum, inv) => sum + inv.strongCount, 0)}
                     </div>
                   </CardContent>
                 </Card>
@@ -1249,14 +1325,14 @@ export default function Home() {
                       Possible Matches
                     </div>
                     <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {savedInvestigations.reduce((sum, inv) => sum + inv.possibleCount, 0)}
+                      {scanStats?.possibleSum ?? allInvestigations.reduce((sum, inv) => sum + inv.possibleCount, 0)}
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
               {/* Recent scans */}
-              {savedInvestigations.length > 0 && (
+              {allInvestigations.length > 0 && (
                 <Card>
                   <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -1272,7 +1348,7 @@ export default function Home() {
                     </button>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {savedInvestigations.slice(0, 5).map((inv) => (
+                    {allInvestigations.slice(0, 5).map((inv) => (
                       <button
                         key={inv.id}
                         onClick={() => handleLoadInvestigation(inv)}
@@ -1335,11 +1411,11 @@ export default function Home() {
       )}
 
       {/* Your Scans / All Scans Tab */}
-      {(activeTab === "yours" || activeTab === "all") && (scansLoading && savedInvestigations.length === 0 ? (
+      {(activeTab === "yours" || activeTab === "all") && (scansLoading && allInvestigations.length === 0 ? (
         <ScansListSkeleton />
       ) : (
         <ScansList
-          investigations={activeTab === "yours" ? yourInvestigations : savedInvestigations}
+          investigations={activeTab === "yours" ? yourInvestigations : allInvestigations}
           emptyLabel={
             activeTab === "yours"
               ? "You haven't run any scans yet."
@@ -1354,6 +1430,10 @@ export default function Home() {
             setActiveTab("scanner");
           }}
           onDelete={handleDeleteInvestigation}
+          totalCount={activeTab === "yours" ? yourTotal : allTotal}
+          onLoadMore={activeTab === "yours" ? loadMoreYours : loadMoreAll}
+          loadingMore={activeTab === "yours" ? yourLoadingMore : allLoadingMore}
+          loadMoreBatchSize={SCANS_PAGE_SIZE}
         />
       ))}
 
