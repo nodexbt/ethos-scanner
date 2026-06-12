@@ -103,6 +103,9 @@ export default function Home() {
   const [verifiedTotal, setVerifiedTotal] = useState<number>(0);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [verifiedLoadingMore, setVerifiedLoadingMore] = useState(false);
+  // True until the initial /api/investigations fetch settles, so the
+  // yours/all tabs show a skeleton instead of a false "No scans yet".
+  const [scansLoading, setScansLoading] = useState(true);
   const [investigationSearch, setInvestigationSearch] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
@@ -112,12 +115,14 @@ export default function Home() {
     fetch("/api/investigations")
       .then((r) => r.json())
       .then((data) => setSavedInvestigations(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setScansLoading(false));
 
     // Prefetch the human-verified list eagerly — matches the All/Your Scans
     // behaviour and means the tab is already populated by the time the user
     // clicks. Cheap (~300 ms server-side) thanks to the indexed count
     // columns, and the result is cached for the session.
+    setVerifiedLoading(true);
     fetch(`/api/investigations/verified?limit=25&offset=0`)
       .then((r) => r.json())
       .then((data) => {
@@ -126,7 +131,8 @@ export default function Home() {
           setVerifiedTotal(Number(data.total) || 0);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setVerifiedLoading(false));
 
     // Check if URL has a wallet address to load
     const path = window.location.pathname;
@@ -1329,7 +1335,9 @@ export default function Home() {
       )}
 
       {/* Your Scans / All Scans Tab */}
-      {(activeTab === "yours" || activeTab === "all") && (
+      {(activeTab === "yours" || activeTab === "all") && (scansLoading && savedInvestigations.length === 0 ? (
+        <ScansListSkeleton />
+      ) : (
         <ScansList
           investigations={activeTab === "yours" ? yourInvestigations : savedInvestigations}
           emptyLabel={
@@ -1347,7 +1355,7 @@ export default function Home() {
           }}
           onDelete={handleDeleteInvestigation}
         />
-      )}
+      ))}
 
       {/* Human Verified Tab — scans whose target is the primary wallet of an
           Ethos human-verified profile. Sorted by strong-cluster count desc on
@@ -1364,10 +1372,7 @@ export default function Home() {
             </div>
           </div>
           {verifiedLoading && verifiedInvestigations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <p>Loading…</p>
-            </div>
+            <ScansListSkeleton />
           ) : (
             <ScansList
               investigations={verifiedInvestigations}
@@ -1407,6 +1412,38 @@ export default function Home() {
 // ---------------------------------------------------------------------------
 // ScansList: shared renderer for the "Your Scans" and "All Scans" tabs
 // ---------------------------------------------------------------------------
+
+/** Placeholder mirroring ScansList's layout (search bar + rows with avatar,
+ * name/address lines, and meta column) shown while the first page loads, so
+ * the tab doesn't flash its empty state during the initial fetch. */
+function ScansListSkeleton({ rows = 8 }: { rows?: number }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-full max-w-sm bg-muted rounded-md animate-pulse" />
+        <div className="h-4 w-16 bg-muted rounded animate-pulse" />
+      </div>
+      <div className="grid gap-2 min-w-0">
+        {Array.from({ length: rows }, (_, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3 sm:gap-4 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3"
+          >
+            <div className="h-10 w-10 rounded-full bg-muted animate-pulse shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="h-4 w-40 max-w-full bg-muted rounded animate-pulse" />
+              <div className="h-3 w-72 max-w-full bg-muted rounded animate-pulse" />
+            </div>
+            <div className="hidden md:flex items-center gap-3 shrink-0">
+              <div className="h-3 w-16 bg-muted rounded animate-pulse" />
+              <div className="h-3 w-20 bg-muted rounded animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface ScansListProps {
   investigations: InvestigationSummary[];
