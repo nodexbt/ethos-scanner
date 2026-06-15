@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed } from "@/lib/db/allowed-users";
+import { meetsScoreVerificationBar } from "@/lib/access";
 
 export interface AuthedUser {
   profileId: number;
@@ -26,12 +27,19 @@ export async function requireAuth(): Promise<AuthedUser | NextResponse> {
   }
 
   // @ts-expect-error - ethos field added in session callback
-  const profileId = session.user.ethos?.profileId;
+  const ethos = session.user.ethos;
+  const profileId = ethos?.profileId;
   if (typeof profileId !== "number") {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
-  if (!(await isAllowed(profileId))) {
+  // Same OR-rule as login: open bar (verified + score) OR manual allowlist.
+  const eligible =
+    meetsScoreVerificationBar({
+      score: ethos?.score,
+      humanVerificationStatus: ethos?.humanVerificationStatus,
+    }) || (await isAllowed(profileId));
+  if (!eligible) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 

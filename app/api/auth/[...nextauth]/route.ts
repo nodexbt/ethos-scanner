@@ -3,6 +3,7 @@ import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed, seedFromEnvIfMissing } from "@/lib/db/allowed-users";
+import { meetsScoreVerificationBar } from "@/lib/access";
 
 // Run the env→DB seed at most once per process. The seeded rows make the
 // transition from ETHOS_PROFILE_ALLOWLIST to the DB-backed allowlist
@@ -94,8 +95,12 @@ export const authOptions: NextAuthOptions = {
 
       await ensureSeeded();
 
-      if (ethos.profileId === null || !(await isAllowed(ethos.profileId))) {
-        return "/?error=NotAllowlisted";
+      // Open bar: human-verified with a high enough score. The manual
+      // allowlist remains an override for anyone who doesn't clear the bar.
+      const onAllowlist =
+        ethos.profileId !== null && (await isAllowed(ethos.profileId));
+      if (!meetsScoreVerificationBar(ethos) && !onAllowlist) {
+        return "/?error=NotEligible";
       }
       return true;
     },
@@ -113,6 +118,7 @@ export const authOptions: NextAuthOptions = {
           token.ethosDisplayName = ethos.displayName;
           token.ethosAvatarUrl = ethos.avatarUrl;
           token.ethosScore = ethos.score;
+          token.ethosHumanVerification = ethos.humanVerificationStatus;
           token.ethosProfileUrl = ethos.links?.profile;
         }
       }
@@ -122,14 +128,21 @@ export const authOptions: NextAuthOptions = {
       // is the second line of defense, not the only one.)
       if (token.ethosProfileId !== undefined) {
         const stillAllowed =
-          typeof token.ethosProfileId === "number" &&
-          (await isAllowed(token.ethosProfileId));
+          (typeof token.ethosProfileId === "number" &&
+            (await isAllowed(token.ethosProfileId))) ||
+          meetsScoreVerificationBar({
+            score: token.ethosScore as number | undefined,
+            humanVerificationStatus: token.ethosHumanVerification as
+              | string
+              | undefined,
+          });
         if (!stillAllowed) {
           // Revoke: clear identity fields so session callback won't populate user
           delete token.ethosProfileId;
           delete token.ethosDisplayName;
           delete token.ethosAvatarUrl;
           delete token.ethosScore;
+          delete token.ethosHumanVerification;
           delete token.ethosProfileUrl;
           delete token.twitterId;
           delete token.twitterUsername;
@@ -155,6 +168,7 @@ export const authOptions: NextAuthOptions = {
           displayName: token.ethosDisplayName,
           avatarUrl: token.ethosAvatarUrl,
           score: token.ethosScore,
+          humanVerificationStatus: token.ethosHumanVerification,
           profileUrl: token.ethosProfileUrl,
         };
         // @ts-expect-error - extending session user with admin flag

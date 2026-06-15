@@ -157,7 +157,12 @@ export default function Home() {
     // Check for auth error in query string
     const params = new URLSearchParams(window.location.search);
     const err = params.get("error");
-    if (err === "NotAllowlisted") {
+    if (err === "NotEligible") {
+      setTwitterAuthError(
+        "Access requires a human-verified Ethos profile with a score of 1800 or higher."
+      );
+    } else if (err === "NotAllowlisted") {
+      // Legacy error code — kept so old links still show a sensible message.
       setTwitterAuthError("Your Ethos profile is not on the allowlist.");
     } else if (err === "NoEthosProfile") {
       setTwitterAuthError("No Ethos profile found for your X account.");
