@@ -62,7 +62,6 @@ interface InvestigationSummary {
   savedAt: number;
   strongCount: number;
   possibleCount: number;
-  hasAnalysis: boolean;
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
@@ -197,7 +196,6 @@ export default function Home() {
           targetName: clusterResult.targetEthos?.displayName ?? null,
           clusterResult,
           twitterEvidence,
-          aiAnalysis: null,
         }),
       }).catch(() => {});
     }, 2000);
@@ -362,7 +360,6 @@ export default function Home() {
             target: addr.toLowerCase(),
             targetName: (scanResult as ClusterScanResult).targetEthos?.displayName ?? null,
             clusterResult: scanResult,
-            aiAnalysis: null,
             scanDurationMs,
           }),
         });
@@ -541,7 +538,6 @@ export default function Home() {
         clusterResult,
         screenshots: Object.fromEntries(screenshots),
         twitterEvidence,
-        aiAnalysis: null,
       }),
     });
     setCurrentInvestigationId(id);
