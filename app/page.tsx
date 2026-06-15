@@ -158,7 +158,7 @@ export default function Home() {
     const err = params.get("error");
     if (err === "NotEligible") {
       setTwitterAuthError(
-        "Access requires a human-verified Ethos profile with a score of 1800 or higher."
+        "Access requires an Ethos validator NFT, or a human-verified profile with a score of 1800 or higher."
       );
     } else if (err === "NotAllowlisted") {
       // Legacy error code — kept so old links still show a sensible message.
