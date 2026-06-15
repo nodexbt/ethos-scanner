@@ -94,26 +94,6 @@ export function isEthereumAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-export function extractIdentifier(input: string): string {
-  // Ethos profile URL for Twitter
-  const ethosTwitterMatch = input.match(
-    /app\.ethos\.network\/profile\/x\/([^/?#]+)/i
-  );
-  if (ethosTwitterMatch) return ethosTwitterMatch[1];
-
-  // Ethos profile URL for wallet
-  const ethosWalletMatch = input.match(
-    /app\.ethos\.network\/profile\/(0x[a-fA-F0-9]{40})/i
-  );
-  if (ethosWalletMatch) return ethosWalletMatch[1];
-
-  // Twitter/X URL
-  const twitterMatch = input.match(/(?:twitter\.com|x\.com)\/([^/?#]+)/i);
-  if (twitterMatch) return twitterMatch[1];
-
-  return input;
-}
-
 export async function fetchProfile(
   identifier: string
 ): Promise<EthosProfile | null> {
