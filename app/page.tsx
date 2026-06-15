@@ -1267,6 +1267,7 @@ export default function Home() {
               {/* Evidence Collection */}
               {(clusterResult.strongCluster.length > 0 || clusterResult.possibleCluster.length > 0) && (
                 <EvidenceCard
+                  key={currentInvestigationId ?? "new"}
                   result={clusterResult}
                   screenshots={screenshots}
                   onScreenshotUpload={handleScreenshotUpload}
