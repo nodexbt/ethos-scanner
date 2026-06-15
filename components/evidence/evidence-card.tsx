@@ -20,6 +20,7 @@ import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import Link from "next/link";
 import type { TwitterTweet, TwitterSearchResult } from "@/app/api/twitter/search/route";
+import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 
 type Tweet = TwitterTweet;
 
@@ -377,18 +378,20 @@ export function EvidenceCard({
               cross-cluster mention patterns.
             </CardDescription>
           </div>
-          <button
-            onClick={scanAll}
-            disabled={scanningAll}
-            className="inline-flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-md px-2.5 py-1.5 hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer shrink-0"
-          >
-            {scanningAll ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Zap className="h-3 w-3" />
-            )}
-            {scanningAll ? "Scanning…" : "Scan all candidates"}
-          </button>
+          {TWITTER_SEARCH_ENABLED && (
+            <button
+              onClick={scanAll}
+              disabled={scanningAll}
+              className="inline-flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-md px-2.5 py-1.5 hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer shrink-0"
+            >
+              {scanningAll ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Zap className="h-3 w-3" />
+              )}
+              {scanningAll ? "Scanning…" : "Scan all candidates"}
+            </button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -470,18 +473,20 @@ export function EvidenceCard({
                     {entry.score}
                   </span>
                 )}
-                <button
-                  onClick={() => runAutoSearch(entry.address)}
-                  disabled={isSearching}
-                  className="p-1.5 rounded hover:bg-muted transition-colors cursor-pointer disabled:cursor-wait shrink-0"
-                  title="Auto-search X via API"
-                >
-                  {isSearching ? (
-                    <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-                  ) : (
-                    <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  )}
-                </button>
+                {TWITTER_SEARCH_ENABLED && (
+                  <button
+                    onClick={() => runAutoSearch(entry.address)}
+                    disabled={isSearching}
+                    className="p-1.5 rounded hover:bg-muted transition-colors cursor-pointer disabled:cursor-wait shrink-0"
+                    title="Auto-search X via API"
+                  >
+                    {isSearching ? (
+                      <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    )}
+                  </button>
+                )}
                 {!screenshots.has(entry.address) ? (
                   <div className="flex items-center gap-1 shrink-0">
                     <button
@@ -547,7 +552,11 @@ export function EvidenceCard({
         })}
 
         <div className="text-[10px] text-muted-foreground">
-          ⚡ Auto-search via API (costs ~$0.0002 per query). If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.
+          {TWITTER_SEARCH_ENABLED ? (
+            <>⚡ Auto-search via API (costs ~$0.0002 per query). If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.</>
+          ) : (
+            <>Auto-search is temporarily disabled. Use the X search links above to check each wallet manually, then attach screenshots.</>
+          )}
         </div>
       </CardContent>
     </Card>

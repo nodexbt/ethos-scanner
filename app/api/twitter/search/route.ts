@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { searchTweets, TwitterSearchError } from "@/lib/twitter-search";
+import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 
 // Re-exported so existing imports from
 // "@/app/api/twitter/search/route" keep working.
@@ -12,6 +13,13 @@ export type { TwitterTweet, TwitterSearchResult } from "@/lib/twitter-search";
 export async function GET(req: NextRequest) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
+
+  if (!TWITTER_SEARCH_ENABLED) {
+    return NextResponse.json(
+      { error: "Twitter search is temporarily disabled." },
+      { status: 503 }
+    );
+  }
 
   const q = req.nextUrl.searchParams.get("q");
   if (!q || q.length < 3 || q.length > 200) {
