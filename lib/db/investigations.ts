@@ -9,7 +9,6 @@ export interface InvestigationSummary {
   savedAt: number;
   strongCount: number;
   possibleCount: number;
-  hasAnalysis: boolean;
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
@@ -21,7 +20,6 @@ export interface InvestigationRow {
   target: string;
   targetName: string | null;
   clusterResult: unknown;
-  aiAnalysis: string | null;
   shareId: string | null;
   isPublic: boolean;
   twitterEvidence: Record<string, unknown> | null;
@@ -43,7 +41,7 @@ export async function listInvestigations(
   let query = supabase
     .from("investigations")
     .select(
-      "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count",
+      "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count",
       { count: "exact" }
     );
   if (ownerProfileId !== null) {
@@ -66,7 +64,6 @@ export async function listInvestigations(
     savedAt: new Date(row.updated_at).getTime(),
     strongCount: row.strong_count ?? 0,
     possibleCount: row.possible_count ?? 0,
-    hasAnalysis: !!row.ai_analysis,
     shareId: row.share_id,
     isPublic: row.is_public ?? false,
     ownerProfileId: row.owner_profile_id ?? null,
@@ -194,7 +191,6 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     target: string;
     target_name: string | null;
     target_avatar: string | null;
-    ai_analysis: string | null;
     share_id: string | null;
     is_public: boolean | null;
     owner_profile_id: number | null;
@@ -209,7 +205,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     const { data, error } = await supabase
       .from("investigations")
       .select(
-        "id, target, target_name, target_avatar, ai_analysis, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+        "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
       )
       .order("strong_count", { ascending: false, nullsFirst: false })
       .order("possible_count", { ascending: false, nullsFirst: false })
@@ -237,7 +233,6 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     savedAt: new Date(row.updated_at).getTime(),
     strongCount: row.strong_count ?? 0,
     possibleCount: row.possible_count ?? 0,
-    hasAnalysis: !!row.ai_analysis,
     shareId: row.share_id,
     isPublic: row.is_public ?? false,
     ownerProfileId: row.owner_profile_id ?? null,
@@ -262,7 +257,6 @@ export async function getInvestigation(id: string): Promise<InvestigationRow | n
     clusterResult: typeof data.cluster_result === "string"
       ? JSON.parse(data.cluster_result)
       : data.cluster_result,
-    aiAnalysis: data.ai_analysis,
     shareId: data.share_id,
     isPublic: data.is_public ?? false,
     twitterEvidence:
@@ -290,7 +284,6 @@ export async function getInvestigationByShareId(shareId: string): Promise<Invest
     clusterResult: typeof data.cluster_result === "string"
       ? JSON.parse(data.cluster_result)
       : data.cluster_result,
-    aiAnalysis: data.ai_analysis,
     shareId: data.share_id,
     isPublic: data.is_public ?? false,
     twitterEvidence:
@@ -305,7 +298,6 @@ export async function saveInvestigation(data: {
   target: string;
   targetName: string | null;
   clusterResult: unknown;
-  aiAnalysis: string | null;
   ownerProfileId: number;
   /**
    * Who to display as the scanner. Defaults to ownerProfileId. Pass null
@@ -358,7 +350,6 @@ export async function saveInvestigation(data: {
       target_name: data.targetName,
       target_avatar: result?.targetEthos?.avatarUrl ?? null,
       cluster_result: data.clusterResult,
-      ai_analysis: data.aiAnalysis,
       owner_profile_id: ownerToWrite,
       // last_scanned_by is always overwritten with the current scanner (null
       // for automated scans), unlike owner_profile_id which is sticky to the

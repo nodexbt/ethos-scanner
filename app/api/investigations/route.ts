@@ -189,10 +189,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "clusterResult too large" }, { status: 413 });
   }
 
-  if (data.aiAnalysis !== null && data.aiAnalysis !== undefined && typeof data.aiAnalysis !== "string") {
-    return NextResponse.json({ error: "Invalid aiAnalysis" }, { status: 400 });
-  }
-
   // twitterEvidence is the cross-cluster tweet search payload. Optional;
   // when present must be a plain object map (address → result). Cap the
   // serialized size at 4 MB to prevent runaway saves on big clusters.
@@ -228,7 +224,6 @@ export async function POST(req: NextRequest) {
       target: data.target.toLowerCase(),
       targetName: (data.targetName as string | null) ?? null,
       clusterResult: data.clusterResult,
-      aiAnalysis: (data.aiAnalysis as string | null) ?? null,
       ownerProfileId: auth.profileId,
       scanDurationMs,
       twitterEvidence,

@@ -110,7 +110,14 @@ export async function searchTweets(q: string): Promise<TwitterSearchResult> {
   if (!upstream.ok) {
     const body = await upstream.text();
     console.error(`twitterapi.io returned ${upstream.status}: ${body.slice(0, 500)}`);
-    throw new TwitterSearchError(`Twitter search failed (${upstream.status})`, 502);
+    // Pass the upstream status through (instead of a blanket 502) so the
+    // failure is diagnosable from the network tab, and give 402 a message
+    // that actually says what's wrong: the provider account is out of credits.
+    const message =
+      upstream.status === 402
+        ? "Twitter search credits exhausted — recharge required"
+        : `Twitter search failed (${upstream.status})`;
+    throw new TwitterSearchError(message, upstream.status);
   }
 
   const raw = (await upstream.json()) as { tweets?: RawTweet[] };

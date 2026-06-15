@@ -20,6 +20,7 @@ import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import Link from "next/link";
 import type { TwitterTweet, TwitterSearchResult } from "@/app/api/twitter/search/route";
+import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 
 type Tweet = TwitterTweet;
 
@@ -28,6 +29,24 @@ type TweetResultEntry = {
   rawCount: number;
   ethosCount: number;
 };
+
+/** Build the address→results map from a saved investigation's evidence blob. */
+function evidenceToMap(
+  evidence: Record<string, unknown> | undefined
+): Map<string, TweetResultEntry> {
+  const m = new Map<string, TweetResultEntry>();
+  if (!evidence) return m;
+  for (const [addr, raw] of Object.entries(evidence)) {
+    const r = raw as Partial<TweetResultEntry> | undefined;
+    if (!r) continue;
+    m.set(addr, {
+      tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
+      rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
+      ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
+    });
+  }
+  return m;
+}
 
 interface EvidenceCardProps {
   result: ClusterScanResult;
@@ -227,32 +246,42 @@ export function EvidenceCard({
   onTwitterEvidenceChange,
 }: EvidenceCardProps) {
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-  const [tweetResults, setTweetResults] = useState<Map<string, TweetResultEntry>>(() => {
-    // Hydrate from the saved investigation if present.
-    const m = new Map<string, TweetResultEntry>();
-    if (initialTwitterEvidence) {
-      for (const [addr, raw] of Object.entries(initialTwitterEvidence)) {
-        const r = raw as Partial<TweetResultEntry> | undefined;
-        if (!r) continue;
-        m.set(addr, {
-          tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
-          rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
-          ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
-        });
-      }
-    }
-    return m;
-  });
+  const [tweetResults, setTweetResults] = useState<Map<string, TweetResultEntry>>(
+    () => evidenceToMap(initialTwitterEvidence)
+  );
+  const [searching, setSearching] = useState<Set<string>>(new Set());
+  const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
+  const [scanningAll, setScanningAll] = useState(false);
+
+  // Tracks the exact object we last handed to the parent. The parent stores
+  // that same reference back into initialTwitterEvidence, so when the prop is
+  // referentially equal to it, the parent is just echoing our own change —
+  // there's nothing new to absorb. Any *other* reference means a different
+  // investigation was loaded.
+  const lastSyncedRef = useRef<Record<string, unknown> | undefined>(initialTwitterEvidence);
+
+  // Re-hydrate when a different investigation's evidence arrives. Switching
+  // saved scans reuses this component instance, so without this the previous
+  // scan's tweets would linger (shown under the new candidates, and re-saved
+  // onto the wrong investigation by the parent's autosave). Comparing the prop
+  // reference against what we last emitted resets on real switches without
+  // looping on our own round-tripped updates.
+  useEffect(() => {
+    if (initialTwitterEvidence === lastSyncedRef.current) return;
+    lastSyncedRef.current = initialTwitterEvidence;
+    setTweetResults(evidenceToMap(initialTwitterEvidence));
+    setSearching(new Set());
+    setSearchErrors(new Map());
+  }, [initialTwitterEvidence]);
 
   // Surface changes back to the parent so they can be saved alongside the
   // investigation. Sent as a plain object for JSON serialisation.
   useEffect(() => {
     if (!onTwitterEvidenceChange) return;
-    onTwitterEvidenceChange(Object.fromEntries(tweetResults));
+    const obj = Object.fromEntries(tweetResults);
+    lastSyncedRef.current = obj;
+    onTwitterEvidenceChange(obj);
   }, [tweetResults, onTwitterEvidenceChange]);
-  const [searching, setSearching] = useState<Set<string>>(new Set());
-  const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
-  const [scanningAll, setScanningAll] = useState(false);
 
   const allCandidates = [...result.strongCluster, ...result.possibleCluster];
   if (allCandidates.length === 0) return null;
@@ -377,18 +406,20 @@ export function EvidenceCard({
               cross-cluster mention patterns.
             </CardDescription>
           </div>
-          <button
-            onClick={scanAll}
-            disabled={scanningAll}
-            className="inline-flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-md px-2.5 py-1.5 hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer shrink-0"
-          >
-            {scanningAll ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Zap className="h-3 w-3" />
-            )}
-            {scanningAll ? "Scanning…" : "Scan all candidates"}
-          </button>
+          {TWITTER_SEARCH_ENABLED && (
+            <button
+              onClick={scanAll}
+              disabled={scanningAll}
+              className="inline-flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-md px-2.5 py-1.5 hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait cursor-pointer shrink-0"
+            >
+              {scanningAll ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Zap className="h-3 w-3" />
+              )}
+              {scanningAll ? "Scanning…" : "Scan all candidates"}
+            </button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -470,19 +501,21 @@ export function EvidenceCard({
                     {entry.score}
                   </span>
                 )}
-                <button
-                  onClick={() => runAutoSearch(entry.address)}
-                  disabled={isSearching}
-                  className="p-1.5 rounded hover:bg-muted transition-colors cursor-pointer disabled:cursor-wait shrink-0"
-                  title="Auto-search X via API"
-                >
-                  {isSearching ? (
-                    <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-                  ) : (
-                    <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  )}
-                </button>
-                {!screenshots.has(entry.address) ? (
+                {TWITTER_SEARCH_ENABLED && (
+                  <button
+                    onClick={() => runAutoSearch(entry.address)}
+                    disabled={isSearching}
+                    className="p-1.5 rounded hover:bg-muted transition-colors cursor-pointer disabled:cursor-wait shrink-0"
+                    title="Auto-search X via API"
+                  >
+                    {isSearching ? (
+                      <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    )}
+                  </button>
+                )}
+                {TWITTER_SEARCH_ENABLED && (!screenshots.has(entry.address) ? (
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => onPaste(entry.address)}
@@ -518,7 +551,7 @@ export function EvidenceCard({
                   >
                     <X className="h-3.5 w-3.5 text-muted-foreground" />
                   </button>
-                )}
+                ))}
               </div>
               {error && (
                 <div className="text-[11px] text-destructive">{error}</div>
@@ -547,7 +580,11 @@ export function EvidenceCard({
         })}
 
         <div className="text-[10px] text-muted-foreground">
-          ⚡ Auto-search via API (costs ~$0.0002 per query). If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.
+          {TWITTER_SEARCH_ENABLED ? (
+            <>⚡ Auto-search via API (costs ~$0.0002 per query). If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.</>
+          ) : (
+            <>X/Twitter evidence collection is temporarily disabled. Use the X search links above to review each wallet manually.</>
+          )}
         </div>
       </CardContent>
     </Card>

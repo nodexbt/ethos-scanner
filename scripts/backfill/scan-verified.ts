@@ -265,7 +265,6 @@ async function main() {
         target: p.address,
         targetName: p.displayName,
         clusterResult: serialized,
-        aiAnalysis: null,
         ownerProfileId: flags.owner!,
         // Automated scan — show no personal "Scanned by" attribution.
         scannedByProfileId: null,
