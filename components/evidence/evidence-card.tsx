@@ -30,6 +30,24 @@ type TweetResultEntry = {
   ethosCount: number;
 };
 
+/** Build the address→results map from a saved investigation's evidence blob. */
+function evidenceToMap(
+  evidence: Record<string, unknown> | undefined
+): Map<string, TweetResultEntry> {
+  const m = new Map<string, TweetResultEntry>();
+  if (!evidence) return m;
+  for (const [addr, raw] of Object.entries(evidence)) {
+    const r = raw as Partial<TweetResultEntry> | undefined;
+    if (!r) continue;
+    m.set(addr, {
+      tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
+      rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
+      ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
+    });
+  }
+  return m;
+}
+
 interface EvidenceCardProps {
   result: ClusterScanResult;
   screenshots: Map<string, string>;
@@ -228,32 +246,42 @@ export function EvidenceCard({
   onTwitterEvidenceChange,
 }: EvidenceCardProps) {
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-  const [tweetResults, setTweetResults] = useState<Map<string, TweetResultEntry>>(() => {
-    // Hydrate from the saved investigation if present.
-    const m = new Map<string, TweetResultEntry>();
-    if (initialTwitterEvidence) {
-      for (const [addr, raw] of Object.entries(initialTwitterEvidence)) {
-        const r = raw as Partial<TweetResultEntry> | undefined;
-        if (!r) continue;
-        m.set(addr, {
-          tweets: Array.isArray(r.tweets) ? (r.tweets as Tweet[]) : [],
-          rawCount: typeof r.rawCount === "number" ? r.rawCount : 0,
-          ethosCount: typeof r.ethosCount === "number" ? r.ethosCount : 0,
-        });
-      }
-    }
-    return m;
-  });
+  const [tweetResults, setTweetResults] = useState<Map<string, TweetResultEntry>>(
+    () => evidenceToMap(initialTwitterEvidence)
+  );
+  const [searching, setSearching] = useState<Set<string>>(new Set());
+  const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
+  const [scanningAll, setScanningAll] = useState(false);
+
+  // Tracks the exact object we last handed to the parent. The parent stores
+  // that same reference back into initialTwitterEvidence, so when the prop is
+  // referentially equal to it, the parent is just echoing our own change —
+  // there's nothing new to absorb. Any *other* reference means a different
+  // investigation was loaded.
+  const lastSyncedRef = useRef<Record<string, unknown> | undefined>(initialTwitterEvidence);
+
+  // Re-hydrate when a different investigation's evidence arrives. Switching
+  // saved scans reuses this component instance, so without this the previous
+  // scan's tweets would linger (shown under the new candidates, and re-saved
+  // onto the wrong investigation by the parent's autosave). Comparing the prop
+  // reference against what we last emitted resets on real switches without
+  // looping on our own round-tripped updates.
+  useEffect(() => {
+    if (initialTwitterEvidence === lastSyncedRef.current) return;
+    lastSyncedRef.current = initialTwitterEvidence;
+    setTweetResults(evidenceToMap(initialTwitterEvidence));
+    setSearching(new Set());
+    setSearchErrors(new Map());
+  }, [initialTwitterEvidence]);
 
   // Surface changes back to the parent so they can be saved alongside the
   // investigation. Sent as a plain object for JSON serialisation.
   useEffect(() => {
     if (!onTwitterEvidenceChange) return;
-    onTwitterEvidenceChange(Object.fromEntries(tweetResults));
+    const obj = Object.fromEntries(tweetResults);
+    lastSyncedRef.current = obj;
+    onTwitterEvidenceChange(obj);
   }, [tweetResults, onTwitterEvidenceChange]);
-  const [searching, setSearching] = useState<Set<string>>(new Set());
-  const [searchErrors, setSearchErrors] = useState<Map<string, string>>(new Map());
-  const [scanningAll, setScanningAll] = useState(false);
 
   const allCandidates = [...result.strongCluster, ...result.possibleCluster];
   if (allCandidates.length === 0) return null;
