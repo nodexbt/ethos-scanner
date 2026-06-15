@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed } from "@/lib/db/allowed-users";
-import { meetsScoreVerificationBar } from "@/lib/access";
+import { meetsOpenAccessBar } from "@/lib/access";
 
 export interface AuthedUser {
   profileId: number;
@@ -33,11 +33,13 @@ export async function requireAuth(): Promise<AuthedUser | NextResponse> {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
-  // Same OR-rule as login: open bar (verified + score) OR manual allowlist.
+  // Same OR-rule as login: open bar (validator, or verified + score) OR
+  // manual allowlist.
   const eligible =
-    meetsScoreVerificationBar({
+    meetsOpenAccessBar({
       score: ethos?.score,
       humanVerificationStatus: ethos?.humanVerificationStatus,
+      validatorNftCount: ethos?.validatorNftCount,
     }) || (await isAllowed(profileId));
   if (!eligible) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });

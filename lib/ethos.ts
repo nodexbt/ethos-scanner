@@ -19,6 +19,7 @@ export interface EthosProfile {
   influenceFactor: number;
   influenceFactorPercentile: number;
   humanVerificationStatus: "VERIFIED" | null;
+  validatorNftCount: number;
   links: {
     profile: string;
     scoreBreakdown: string;

@@ -3,7 +3,7 @@ import TwitterProvider from "next-auth/providers/twitter";
 import { fetchProfile } from "@/lib/ethos";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed, seedFromEnvIfMissing } from "@/lib/db/allowed-users";
-import { meetsScoreVerificationBar } from "@/lib/access";
+import { meetsOpenAccessBar } from "@/lib/access";
 
 // Run the env→DB seed at most once per process. The seeded rows make the
 // transition from ETHOS_PROFILE_ALLOWLIST to the DB-backed allowlist
@@ -95,11 +95,11 @@ export const authOptions: NextAuthOptions = {
 
       await ensureSeeded();
 
-      // Open bar: human-verified with a high enough score. The manual
-      // allowlist remains an override for anyone who doesn't clear the bar.
+      // Open bar: validator NFT holder, OR human-verified with a high enough
+      // score. The manual allowlist remains an override for anyone else.
       const onAllowlist =
         ethos.profileId !== null && (await isAllowed(ethos.profileId));
-      if (!meetsScoreVerificationBar(ethos) && !onAllowlist) {
+      if (!meetsOpenAccessBar(ethos) && !onAllowlist) {
         return "/?error=NotEligible";
       }
       return true;
@@ -119,6 +119,7 @@ export const authOptions: NextAuthOptions = {
           token.ethosAvatarUrl = ethos.avatarUrl;
           token.ethosScore = ethos.score;
           token.ethosHumanVerification = ethos.humanVerificationStatus;
+          token.ethosValidatorNftCount = ethos.validatorNftCount;
           token.ethosProfileUrl = ethos.links?.profile;
         }
       }
@@ -130,10 +131,13 @@ export const authOptions: NextAuthOptions = {
         const stillAllowed =
           (typeof token.ethosProfileId === "number" &&
             (await isAllowed(token.ethosProfileId))) ||
-          meetsScoreVerificationBar({
+          meetsOpenAccessBar({
             score: token.ethosScore as number | undefined,
             humanVerificationStatus: token.ethosHumanVerification as
               | string
+              | undefined,
+            validatorNftCount: token.ethosValidatorNftCount as
+              | number
               | undefined,
           });
         if (!stillAllowed) {
@@ -143,6 +147,7 @@ export const authOptions: NextAuthOptions = {
           delete token.ethosAvatarUrl;
           delete token.ethosScore;
           delete token.ethosHumanVerification;
+          delete token.ethosValidatorNftCount;
           delete token.ethosProfileUrl;
           delete token.twitterId;
           delete token.twitterUsername;
@@ -169,6 +174,7 @@ export const authOptions: NextAuthOptions = {
           avatarUrl: token.ethosAvatarUrl,
           score: token.ethosScore,
           humanVerificationStatus: token.ethosHumanVerification,
+          validatorNftCount: token.ethosValidatorNftCount,
           profileUrl: token.ethosProfileUrl,
         };
         // @ts-expect-error - extending session user with admin flag
