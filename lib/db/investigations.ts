@@ -154,38 +154,8 @@ export async function listVerifiedInvestigations(
  * return the complete sorted list (null on any query error). */
 async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] | null> {
   const supabase = getSupabase();
-
-  // Step 1: collect all human-verified primary addresses (paginated, no cap).
-  const addresses: string[] = [];
   const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("profile_latest")
-      .select("primary_address")
-      .eq("human_verified", true)
-      .not("primary_address", "is", null)
-      .range(from, from + PAGE - 1);
-    if (error) {
-      console.error("listVerifiedInvestigations profile fetch error:", error);
-      return null;
-    }
-    if (!data || data.length === 0) break;
-    for (const row of data as { primary_address: string | null }[]) {
-      if (row.primary_address) addresses.push(row.primary_address.toLowerCase());
-    }
-    if (data.length < PAGE) break;
-  }
-  if (addresses.length === 0) return [];
 
-  const verifiedSet = new Set(addresses);
-
-  // Step 2: pull the full investigations list (sorted by strong-count at the
-  // DB level using the composite index), then filter to verified targets in
-  // JS. We can't ship a 1.1k-element .in() filter — PostgREST URL-encodes the
-  // values inline and the result exceeds the proxy's URL limit. PostgREST
-  // also caps any single response at 1000 rows regardless of .limit(), so
-  // page with .range() until exhausted; HARD_CAP bounds the worst case.
-  const HARD_CAP = 5000;
   type Row = {
     id: string;
     target: string;
@@ -200,26 +170,70 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     possible_count: number | null;
   };
 
-  const fetched: Row[] = [];
-  for (let from = 0; from < HARD_CAP; from += PAGE) {
-    const { data, error } = await supabase
-      .from("investigations")
-      .select(
-        "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
-      )
-      .order("strong_count", { ascending: false, nullsFirst: false })
-      .order("possible_count", { ascending: false, nullsFirst: false })
-      .order("updated_at", { ascending: false })
-      .range(from, Math.min(from + PAGE, HARD_CAP) - 1);
+  // The two reads are independent, so run them concurrently rather than
+  // back-to-back — roughly halves the cold-load latency that the verified
+  // tab pays on a cache miss.
 
-    if (error) {
-      console.error("listVerifiedInvestigations select error:", error);
-      return null;
+  // Collect all human-verified primary addresses (paginated, no cap).
+  const collectVerifiedAddresses = async (): Promise<Set<string> | null> => {
+    const set = new Set<string>();
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("profile_latest")
+        .select("primary_address")
+        .eq("human_verified", true)
+        .not("primary_address", "is", null)
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("listVerifiedInvestigations profile fetch error:", error);
+        return null;
+      }
+      if (!data || data.length === 0) break;
+      for (const row of data as { primary_address: string | null }[]) {
+        if (row.primary_address) set.add(row.primary_address.toLowerCase());
+      }
+      if (data.length < PAGE) break;
     }
-    if (!data || data.length === 0) break;
-    fetched.push(...(data as Row[]));
-    if (data.length < PAGE) break;
-  }
+    return set;
+  };
+
+  // Pull the full investigations list (sorted by strong-count at the DB level
+  // using the composite index), to be filtered to verified targets in JS. We
+  // can't ship a 1.1k-element .in() filter — PostgREST URL-encodes the values
+  // inline and the result exceeds the proxy's URL limit. PostgREST also caps
+  // any single response at 1000 rows regardless of .limit(), so page with
+  // .range() until exhausted; HARD_CAP bounds the worst case.
+  const HARD_CAP = 5000;
+  const fetchInvestigationsList = async (): Promise<Row[] | null> => {
+    const fetched: Row[] = [];
+    for (let from = 0; from < HARD_CAP; from += PAGE) {
+      const { data, error } = await supabase
+        .from("investigations")
+        .select(
+          "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+        )
+        .order("strong_count", { ascending: false, nullsFirst: false })
+        .order("possible_count", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false })
+        .range(from, Math.min(from + PAGE, HARD_CAP) - 1);
+
+      if (error) {
+        console.error("listVerifiedInvestigations select error:", error);
+        return null;
+      }
+      if (!data || data.length === 0) break;
+      fetched.push(...(data as Row[]));
+      if (data.length < PAGE) break;
+    }
+    return fetched;
+  };
+
+  const [verifiedSet, fetched] = await Promise.all([
+    collectVerifiedAddresses(),
+    fetchInvestigationsList(),
+  ]);
+  if (verifiedSet === null || fetched === null) return null; // error path
+  if (verifiedSet.size === 0) return [];
 
   const verifiedRows = fetched.filter((row) =>
     verifiedSet.has((row.target ?? "").toLowerCase())
