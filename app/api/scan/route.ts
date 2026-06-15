@@ -3,6 +3,7 @@ import { requireAuth, isAuthError } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { runClusterScan } from "@/lib/cluster-scanner";
 import { getRecentScanAverageMs } from "@/lib/db/investigations";
+import { consumeDailyScanQuota } from "@/lib/db/scan-quota";
 
 export const maxDuration = 300; // 5 min timeout for long scans
 
@@ -24,6 +25,20 @@ export async function POST(req: NextRequest) {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Daily scan cap (durable, per UTC day). Checked after address validation so
+  // malformed requests don't burn quota; admins are exempt.
+  if (!auth.isAdmin) {
+    const quota = await consumeDailyScanQuota(auth.profileId);
+    if (!quota.allowed) {
+      return new Response(
+        JSON.stringify({
+          error: `Daily scan limit reached (${quota.limit}/day). Try again tomorrow.`,
+        }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
 
   // Fetch the baseline ETA from recent scan history before we start.
