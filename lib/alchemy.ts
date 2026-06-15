@@ -268,26 +268,6 @@ export async function batchGetCode(
   return result;
 }
 
-/** Try to get a contract's name via token metadata */
-export async function getContractName(
-  address: string,
-  chain: Chain
-): Promise<string | null> {
-  try {
-    const data = await alchemyRequest(chain.rpcBase, "alchemy_getTokenMetadata", [address]) as {
-      name?: string;
-      symbol?: string;
-    } | null;
-    if (!data) return null;
-    if (data.name && data.symbol) return `${data.name} (${data.symbol})`;
-    if (data.name) return data.name;
-    if (data.symbol) return data.symbol;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /** Run tasks with concurrency limit */
 export async function parallel<T, R>(
   items: T[],
@@ -307,63 +287,4 @@ export async function parallel<T, R>(
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
   await Promise.all(workers);
   return results;
-}
-
-/** Check for direct ETH/token transfers between two wallets on a chain */
-export async function getTransfersBetween(
-  walletA: string,
-  walletB: string,
-  chain: (typeof CHAINS)[number]
-): Promise<
-  {
-    from: string;
-    to: string;
-    value: number;
-    txHash: string;
-    asset: string | null;
-  }[]
-> {
-  try {
-    // A -> B
-    const aToBData = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
-      {
-        fromAddress: walletA.toLowerCase(),
-        toAddress: walletB.toLowerCase(),
-        category: ["external", "erc20"],
-        order: "asc",
-        maxCount: "0x10",
-        withMetadata: false,
-        excludeZeroValue: true,
-      },
-    ])) as AssetTransfersResponse;
-
-    // B -> A
-    const bToAData = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
-      {
-        fromAddress: walletB.toLowerCase(),
-        toAddress: walletA.toLowerCase(),
-        category: ["external", "erc20"],
-        order: "asc",
-        maxCount: "0x10",
-        withMetadata: false,
-        excludeZeroValue: true,
-      },
-    ])) as AssetTransfersResponse;
-
-    const allTransfers = [
-      ...(aToBData.result?.transfers || []),
-      ...(bToAData.result?.transfers || []),
-    ];
-
-    return allTransfers.map((t) => ({
-      from: t.from.toLowerCase(),
-      to: t.to.toLowerCase(),
-      value: t.value || 0,
-      txHash: t.hash,
-      asset: t.asset,
-    }));
-  } catch (err) {
-    // Silently return empty on failure
-    return [];
-  }
 }
