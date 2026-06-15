@@ -137,9 +137,16 @@ export default function Home() {
       }),
     ]).finally(() => setScansLoading(false));
 
-    // The verified tab is NOT prefetched here — its tab-open effect loads it
-    // on first visit (showing the skeleton), which skips a wasted round trip
-    // on every mount for sessions that never open that tab.
+    // Warm the verified tab in the background, in parallel with yours/all, so
+    // switching to it is instant instead of showing a first-open skeleton.
+    // Fired outside the Promise.all above so it never gates the yours/all
+    // loading state. The tab-open effect below then no-ops (rows already set).
+    loadVerifiedPage(0).then((page) => {
+      if (page) {
+        setVerifiedInvestigations(page.rows);
+        setVerifiedTotal(page.total);
+      }
+    });
 
     // Check if URL has a wallet address to load
     const path = window.location.pathname;
