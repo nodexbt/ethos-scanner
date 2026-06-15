@@ -515,7 +515,7 @@ export function EvidenceCard({
                     )}
                   </button>
                 )}
-                {!screenshots.has(entry.address) ? (
+                {TWITTER_SEARCH_ENABLED && (!screenshots.has(entry.address) ? (
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => onPaste(entry.address)}
@@ -551,7 +551,7 @@ export function EvidenceCard({
                   >
                     <X className="h-3.5 w-3.5 text-muted-foreground" />
                   </button>
-                )}
+                ))}
               </div>
               {error && (
                 <div className="text-[11px] text-destructive">{error}</div>
@@ -583,7 +583,7 @@ export function EvidenceCard({
           {TWITTER_SEARCH_ENABLED ? (
             <>⚡ Auto-search via API (costs ~$0.0002 per query). If 2+ accounts posted the same address, it&apos;s likely a sybil cluster.</>
           ) : (
-            <>Auto-search is temporarily disabled. Use the X search links above to check each wallet manually, then attach screenshots.</>
+            <>X/Twitter evidence collection is temporarily disabled. Use the X search links above to review each wallet manually.</>
           )}
         </div>
       </CardContent>
