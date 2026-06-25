@@ -88,6 +88,77 @@ async function callUpstream(url: string, key: string): Promise<Response> {
   return lastResp!;
 }
 
+export interface FollowRelationship {
+  /** The handles as echoed back, lower-cased and @-stripped. */
+  source: string;
+  target: string;
+  /** Does source follow target? */
+  sourceFollowsTarget: boolean;
+  /** Does target follow source? */
+  targetFollowsSource: boolean;
+  /** Both directions true. */
+  mutual: boolean;
+}
+
+/** Strip a leading @ and surrounding whitespace; lower-case for consistency. */
+function normalizeHandle(raw: string): string {
+  return raw.trim().replace(/^@+/, "").toLowerCase();
+}
+
+/**
+ * Check the follow relationship between two X accounts via twitterapi.io's
+ * check_follow_relationship endpoint (a single call covers both directions).
+ * Handles may include a leading @ and any case.
+ *
+ * Throws TwitterSearchError on bad input or non-OK upstream responses (after
+ * retries for 429/5xx). 402 means the provider account is out of credits.
+ */
+export async function checkFollowRelationship(
+  sourceRaw: string,
+  targetRaw: string
+): Promise<FollowRelationship> {
+  const key = process.env.TWITTERAPI_IO_KEY;
+  if (!key) throw new TwitterSearchError("Twitter API not configured", 500);
+
+  const source = normalizeHandle(sourceRaw);
+  const target = normalizeHandle(targetRaw);
+  const valid = (h: string) => /^[a-z0-9_]{1,15}$/.test(h);
+  if (!valid(source) || !valid(target)) {
+    throw new TwitterSearchError("Enter two valid X handles", 400);
+  }
+
+  const url = new URL(`${TWITTERAPI_IO_BASE}/twitter/user/check_follow_relationship`);
+  url.searchParams.set("source_user_name", source);
+  url.searchParams.set("target_user_name", target);
+
+  const upstream = await callUpstream(url.toString(), key);
+  if (!upstream.ok) {
+    const body = await upstream.text();
+    console.error(`twitterapi.io returned ${upstream.status}: ${body.slice(0, 500)}`);
+    const message =
+      upstream.status === 402
+        ? "Twitter API credits exhausted — recharge required"
+        : upstream.status === 404
+        ? "One or both handles don't exist"
+        : `Follow check failed (${upstream.status})`;
+    throw new TwitterSearchError(message, upstream.status);
+  }
+
+  const raw = (await upstream.json()) as {
+    data?: { following?: boolean; followed_by?: boolean };
+  };
+  const sourceFollowsTarget = Boolean(raw.data?.following);
+  const targetFollowsSource = Boolean(raw.data?.followed_by);
+
+  return {
+    source,
+    target,
+    sourceFollowsTarget,
+    targetFollowsSource,
+    mutual: sourceFollowsTarget && targetFollowsSource,
+  };
+}
+
 /**
  * Search twitterapi.io's advanced_search for tweets containing the given
  * query (typically a wallet address). Returns all matched tweets with
