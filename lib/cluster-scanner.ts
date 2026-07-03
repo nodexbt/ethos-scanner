@@ -138,8 +138,22 @@ export interface ClusterCandidate {
   networks: string[];
 }
 
+/** Scan target: an Ethos profile with all its attested wallets, or a
+    single unattested wallet (profileId null). */
+export interface ScanTarget {
+  profileId: number | null;
+  wallets: string[];
+  primaryWallet: string;
+}
+
 export interface ClusterScanResult {
+  /** Primary wallet of the target — kept as the single-address field so
+      older consumers (verified-tab matching, saved results) keep working. */
   target: string;
+  /** All target wallets that were scanned. Absent on results saved before
+      multi-wallet scanning; treat as [target]. */
+  targetWallets?: string[];
+  targetProfileId?: number | null;
   targetEthos?: {
     profileId: number;
     displayName: string;
@@ -197,7 +211,7 @@ function transferValue(tx: AssetTransfer): number {
 // --- Core Analysis Functions ---
 
 function analyzeDirectTransfers(
-  target: string,
+  targetSet: Set<string>,
   txs: AssetTransfer[],
   contractCache: Map<string, boolean>
 ): Map<string, DirectWalletInfo> {
@@ -206,13 +220,18 @@ function analyzeDirectTransfers(
   for (const tx of txs) {
     const from = normalizeAddress(tx.from);
     const to = normalizeAddress(tx.to);
-    if (!from || !to || !([from, to].includes(target))) continue;
+    if (!from || !to) continue;
+    const fromIsTarget = targetSet.has(from);
+    const toIsTarget = targetSet.has(to);
+    // Skip non-target txs and transfers between the target's own wallets —
+    // another wallet of the same profile must never become a candidate.
+    if (fromIsTarget === toIsTarget) continue;
 
-    const counterparty = from === target ? to : from;
-    if (counterparty === target || counterparty === ZERO_ADDRESS) continue;
+    const counterparty = fromIsTarget ? to : from;
+    if (counterparty === ZERO_ADDRESS) continue;
     if (contractCache.get(counterparty)) continue;
 
-    const direction = from === target ? "out" : "in";
+    const direction = fromIsTarget ? "out" : "in";
     const ts = transferTimestamp(tx);
     const val = transferValue(tx);
 
@@ -248,7 +267,7 @@ function analyzeDirectTransfers(
 
 
 function findSharedFundingSources(
-  target: string,
+  targetSet: Set<string>,
   targetTxs: AssetTransfer[],
   candidateWallets: string[],
   candidateTxsMap: Map<string, AssetTransfer[]>,
@@ -266,7 +285,14 @@ function findSharedFundingSources(
     return sources;
   }
 
-  const targetSources = incomingSources(target, targetTxs);
+  // Union of incoming sources across all target wallets, excluding the
+  // target's own wallets (internal profile transfers aren't funding).
+  const targetSources = new Set<string>();
+  for (const wallet of targetSet) {
+    for (const src of incomingSources(wallet, targetTxs)) {
+      if (!targetSet.has(src)) targetSources.add(src);
+    }
+  }
   const result = new Map<string, string[]>();
 
   for (const wallet of candidateWallets) {
@@ -294,7 +320,6 @@ const W_FUNDED_BY_CLUSTER = 10;
 
 function scoreCandidate(
   address: string,
-  target: string,
   directInfo: DirectWalletInfo | undefined,
   sharedFunders: string[],
   sharedFirstFunder: boolean,
@@ -380,7 +405,7 @@ function scoreCandidate(
 // --- Network Scan ---
 
 async function scanNetwork(
-  target: string,
+  targetWallets: string[],
   chain: Chain,
   log: (level: LogLevel, message: string) => void,
   stepDone?: (phase: string) => void
@@ -390,13 +415,29 @@ async function scanNetwork(
   candidateTxs: Map<string, AssetTransfer[]>;
   contractCache: Map<string, boolean>;
   txCount: number;
-  targetFirstFunder: FirstFunderInfo | null;
+  targetFirstFunders: FirstFunderInfo[];
 }> {
   const network = chain.name;
+  const targetSet = new Set(targetWallets);
 
-  // Step 1: Fetch target transactions
-  log("info", `[${network}] Fetching target transactions...`);
-  const txs = await getAllTransactions(target, chain, { maxPages: MAX_PAGES });
+  // Step 1: Fetch target transactions — one fetch per target wallet, so a
+  // multi-wallet profile's full activity is covered.
+  log(
+    "info",
+    `[${network}] Fetching target transactions (${targetWallets.length} wallet${targetWallets.length === 1 ? "" : "s"})...`
+  );
+  const txsByTargetWallet = new Map<string, AssetTransfer[]>();
+  await parallel(
+    targetWallets,
+    async (wallet) => {
+      txsByTargetWallet.set(
+        wallet,
+        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES })
+      );
+    },
+    CONCURRENCY
+  );
+  const txs = [...txsByTargetWallet.values()].flat();
   log("info", `[${network}] ${txs.length} transactions fetched`);
   stepDone?.(`${network}: Fetched transactions`);
 
@@ -410,7 +451,7 @@ async function scanNetwork(
       candidateTxs: new Map(),
       contractCache: new Map(),
       txCount: 0,
-      targetFirstFunder: null,
+      targetFirstFunders: [],
     };
   }
 
@@ -425,8 +466,8 @@ async function scanNetwork(
   for (const tx of txs) {
     const from = normalizeAddress(tx.from);
     const to = normalizeAddress(tx.to);
-    if (from && from !== target) counterparties.add(from);
-    if (to && to !== target) counterparties.add(to);
+    if (from && !targetSet.has(from)) counterparties.add(from);
+    if (to && !targetSet.has(to)) counterparties.add(to);
   }
 
   log("info", `[${network}] Filtering ${counterparties.size} counterparties to Ethos profiles...`);
@@ -447,7 +488,7 @@ async function scanNetwork(
   // Step 3: Direct transfer analysis (skips contracts via empty cache,
   // then we narrow to Ethos profiles below)
   log("info", `[${network}] Analyzing direct transfers...`);
-  const directWalletsRaw = analyzeDirectTransfers(target, txs, contractCache);
+  const directWalletsRaw = analyzeDirectTransfers(targetSet, txs, contractCache);
   const directWallets = new Map<string, DirectWalletInfo>();
   for (const [addr, info] of directWalletsRaw) {
     if (ethosCounterparties.has(addr)) directWallets.set(addr, info);
@@ -480,7 +521,9 @@ async function scanNetwork(
   // Step 7: Fetch candidate transactions (only for promising candidates)
   log("info", `[${network}] Fetching transactions for ${allCandidateAddrs.length} promising candidates...`);
   const candidateTxsMap = new Map<string, AssetTransfer[]>();
-  candidateTxsMap.set(target, txs);
+  for (const [wallet, walletTxs] of txsByTargetWallet) {
+    candidateTxsMap.set(wallet, walletTxs);
+  }
 
   await parallel(
     allCandidateAddrs,
@@ -498,7 +541,7 @@ async function scanNetwork(
   // Step 8: Shared funding sources
   log("info", `[${network}] Checking shared funding sources...`);
   const sharedFundingRaw = findSharedFundingSources(
-    target,
+    targetSet,
     txs,
     allCandidateAddrs,
     candidateTxsMap,
@@ -542,10 +585,27 @@ async function scanNetwork(
   // Step 9: First funder analysis (only for promising candidates)
   log("info", `[${network}] Checking first funders for target + ${allCandidateAddrs.length} candidates...`);
 
-  const targetFirstFunder = await getFirstFunder(target, chain);
-  if (targetFirstFunder) {
-    log("info", `[${network}] Target first funder: ${targetFirstFunder.funder.slice(0, 10)}... (${targetFirstFunder.value} ETH)`);
-  }
+  // First funder per target wallet — a candidate sharing a first funder
+  // with ANY of the target's wallets is a shared-first-funder hit.
+  const targetFirstFunders: FirstFunderInfo[] = [];
+  await parallel(
+    targetWallets,
+    async (wallet) => {
+      const ff = await getFirstFunder(wallet, chain);
+      if (ff) {
+        targetFirstFunders.push({
+          chain: network,
+          funder: ff.funder,
+          funderLabel: getAddressLabel(ff.funder),
+          txHash: ff.txHash,
+          value: ff.value,
+        });
+        log("info", `[${network}] Target first funder: ${ff.funder.slice(0, 10)}... (${ff.value} ETH)`);
+      }
+    },
+    CONCURRENCY
+  );
+  const targetFunderAddrs = new Set(targetFirstFunders.map((f) => f.funder));
 
   const candidateFirstFunders = new Map<string, FirstFunderInfo>();
   await parallel(
@@ -566,12 +626,10 @@ async function scanNetwork(
   );
 
   const sharedFirstFunderAddrs = new Set<string>();
-  if (targetFirstFunder) {
-    for (const [addr, ff] of candidateFirstFunders) {
-      if (ff.funder === targetFirstFunder.funder) {
-        sharedFirstFunderAddrs.add(addr);
-        log("warn", `[${network}] Shared first funder! ${addr.slice(0, 10)}... and target both funded by ${ff.funder.slice(0, 10)}...`);
-      }
+  for (const [addr, ff] of candidateFirstFunders) {
+    if (targetFunderAddrs.has(ff.funder)) {
+      sharedFirstFunderAddrs.add(addr);
+      log("warn", `[${network}] Shared first funder! ${addr.slice(0, 10)}... and target both funded by ${ff.funder.slice(0, 10)}...`);
     }
   }
 
@@ -593,14 +651,13 @@ async function scanNetwork(
     const candFF = candidateFirstFunders.get(addr);
     const candFirstFunders: FirstFunderInfo[] = candFF ? [candFF] : [];
 
-    const isFundedByTarget = candFF?.funder === target;
+    const isFundedByTarget = candFF ? targetSet.has(candFF.funder) : false;
     const isFundedByCluster = !isFundedByTarget && candFF
       ? allCandidateAddrs.some((other) => other !== addr && other === candFF.funder)
       : false;
 
     const candidate = scoreCandidate(
       addr,
-      target,
       directInfo,
       sharedFunders,
       hasSharedFirstFunder,
@@ -620,11 +677,7 @@ async function scanNetwork(
   log("success", `[${network}] Scoring complete: ${strong} strong, ${possible} possible`);
   stepDone?.(`${network}: Scoring complete`);
 
-  const targetFF: FirstFunderInfo | null = targetFirstFunder
-    ? { chain: network, funder: targetFirstFunder.funder, funderLabel: getAddressLabel(targetFirstFunder.funder), txHash: targetFirstFunder.txHash, value: targetFirstFunder.value }
-    : null;
-
-  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunder: targetFF };
+  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders };
 }
 
 // --- Shared CEX deposit address detection ---
@@ -755,7 +808,9 @@ export interface ScanProgress {
 const MIN_REMAINING_MS = 1_000;
 
 export async function runClusterScan(
-  targetAddress: string,
+  /** A resolved profile target (all attested wallets) or, for backward
+      compatibility, a single raw address string. */
+  targetInput: ScanTarget | string,
   onLog?: (entry: LogEntry) => void,
   onProgress?: (progress: ScanProgress) => void,
   /** Rolling-average baseline duration in ms, fetched by the caller
@@ -792,8 +847,26 @@ export async function runClusterScan(
     emitProgress(phase);
   }
 
-  const target = targetAddress.toLowerCase();
-  log("info", `Starting cluster scan for ${target}`);
+  const scanTarget: ScanTarget =
+    typeof targetInput === "string"
+      ? {
+          profileId: null,
+          wallets: [targetInput.toLowerCase()],
+          primaryWallet: targetInput.toLowerCase(),
+        }
+      : {
+          profileId: targetInput.profileId,
+          wallets: [...new Set(targetInput.wallets.map((w) => w.toLowerCase()))],
+          primaryWallet: targetInput.primaryWallet.toLowerCase(),
+        };
+  const targetWallets = scanTarget.wallets;
+  const targetSet = new Set(targetWallets);
+  const target = scanTarget.primaryWallet;
+
+  log(
+    "info",
+    `Starting cluster scan for ${target}${targetWallets.length > 1 ? ` (+${targetWallets.length - 1} more wallet${targetWallets.length > 2 ? "s" : ""} of the same profile)` : ""}`
+  );
   log("info", `Networks: ${CHAINS.map((c) => c.name).join(", ")}`);
   emitProgress("Starting...");
 
@@ -802,7 +875,7 @@ export async function runClusterScan(
     [...CHAINS],
     async (chain) => {
       try {
-        const result = await scanNetwork(target, chain, log, stepDone);
+        const result = await scanNetwork(targetWallets, chain, log, stepDone);
         return { chain, result, error: null };
       } catch (err) {
         log("error", `[${chain.name}] Network scan failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -836,9 +909,7 @@ export async function runClusterScan(
     txsByNetwork.set(chain.name, result.candidateTxs);
     contractCacheByNetwork.set(chain.name, result.contractCache);
 
-    if (result.targetFirstFunder) {
-      allTargetFirstFunders.push(result.targetFirstFunder);
-    }
+    allTargetFirstFunders.push(...result.targetFirstFunders);
 
     for (const [addr, candidate] of result.candidates) {
       const existing = mergedCandidates.get(addr);
@@ -876,7 +947,7 @@ export async function runClusterScan(
     ...allTargetFirstFunders.map((f) => f.funder),
     ...[...strongCluster, ...possibleCluster].flatMap((c) => (c.firstFunders || []).map((f) => f.funder)),
   ];
-  const ethosAddresses = [...new Set([target, ...allCandidateAddrs, ...allFirstFunderAddrs])];
+  const ethosAddresses = [...new Set([...targetWallets, ...allCandidateAddrs, ...allFirstFunderAddrs])];
   log("info", `Checking ${ethosAddresses.length} addresses on Ethos Network (bulk)...`);
 
   const ethosMap = await fetchProfilesByAddresses(ethosAddresses);
@@ -897,7 +968,8 @@ export async function runClusterScan(
   }
 
   let targetEthos: ClusterScanResult["targetEthos"];
-  const targetProfile = ethosMap.get(target);
+  const targetProfile =
+    targetWallets.map((w) => ethosMap.get(w)).find((p) => p && p.profileId) ?? null;
   if (targetProfile && targetProfile.profileId) {
     targetEthos = toEthosData(targetProfile);
     log("success", `Target has Ethos profile: ${targetProfile.displayName} (score: ${targetProfile.score})`);
@@ -934,11 +1006,17 @@ export async function runClusterScan(
 
   // Filter to only candidates with Ethos profiles, exclude target's own profile,
   // and merge candidates that belong to the same Ethos profile
-  const targetProfileId = targetEthos?.profileId;
+  const targetProfileId = targetEthos?.profileId ?? scanTarget.profileId ?? undefined;
 
   function dedupeByProfile(candidates: ClusterCandidate[]): ClusterCandidate[] {
     const withEthos = candidates.filter(
-      (c) => c.ethosProfile && c.ethosProfile.profileId !== targetProfileId
+      (c) =>
+        c.ethosProfile &&
+        c.ethosProfile.profileId !== targetProfileId &&
+        // Belt-and-braces: a candidate whose wallets overlap the target's
+        // own wallet set is the target itself, even if the Ethos bulk
+        // lookup failed to resolve the overlap to the same profile id.
+        !c.wallets.some((w) => targetSet.has(w))
     );
     const byProfileId = new Map<number, ClusterCandidate>();
     for (const c of withEthos) {
@@ -1097,7 +1175,7 @@ export async function runClusterScan(
   }
 
   // Multi-hop funding: trace funder wallets to discover additional Ethos profiles
-  const knownAddresses = new Set([target, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
+  const knownAddresses = new Set([...targetWallets, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
   const uniqueFunderAddrs = new Set<string>();
   for (const ff of allTargetFirstFunders) {
     if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);
@@ -1182,7 +1260,7 @@ export async function runClusterScan(
 
   // Shared CEX deposit address detection
   const allClusterWallets = [
-    target,
+    ...targetWallets,
     ...strongWithEthos.flatMap((c) => c.wallets || [c.address]),
     ...possibleWithEthos.flatMap((c) => c.wallets || [c.address]),
   ];
@@ -1237,6 +1315,8 @@ export async function runClusterScan(
 
   return {
     target,
+    targetWallets,
+    targetProfileId: targetProfileId ?? null,
     targetEthos,
     targetFirstFunders: allTargetFirstFunders,
     funderProfiles,

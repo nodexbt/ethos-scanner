@@ -19,7 +19,8 @@ export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubm
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Wallet Cluster Scan</CardTitle>
         <CardDescription className="text-xs">
-          Enter any EVM wallet address to discover related wallets across 5 chains.
+          Enter an EVM address or X handle to discover related wallets across 5 chains.
+          Profiles with multiple attested wallets are scanned as one.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -28,7 +29,7 @@ export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubm
             <Wallet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="text"
-              placeholder="0x..."
+              placeholder="0x address or @handle"
               value={walletInput}
               onChange={(e) => setWalletInput(e.target.value)}
               className="pl-10 h-9 font-mono"

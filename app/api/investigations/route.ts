@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { listInvestigations, getInvestigationStats, saveInvestigation } from "@/lib/db/investigations";
+import { verifyProfileWallet } from "@/lib/scan-target";
 
 // Cap on the serialized cluster result size (2 MB). Larger payloads are rejected
 // to prevent DB bloat / DoS via arbitrary writes.
@@ -160,17 +161,40 @@ export async function POST(req: NextRequest) {
   }
   const data = body as Record<string, unknown>;
 
-  // ID must be of the form `scan-0x<40 hex>` to prevent arbitrary key writes.
-  if (typeof data.id !== "string" || !/^scan-0x[a-f0-9]{40}$/i.test(data.id)) {
+  // ID must be `scan-0x<40 hex>` (unattested wallet) or `scan-p<profileId>`
+  // (Ethos profile) to prevent arbitrary key writes.
+  if (typeof data.id !== "string" || !/^scan-(0x[a-f0-9]{40}|p\d{1,12})$/i.test(data.id)) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
-  // target must match the ID's address
   if (typeof data.target !== "string" || !/^0x[a-f0-9]{40}$/i.test(data.target)) {
     return NextResponse.json({ error: "Invalid target" }, { status: 400 });
   }
-  if (data.id.toLowerCase() !== `scan-${data.target.toLowerCase()}`) {
-    return NextResponse.json({ error: "id/target mismatch" }, { status: 400 });
+
+  // Canonicalize the id so case variants (scan-P123, scan-0xABC…) can't
+  // create shadow rows that bypass the owner/PK guards, which key on the
+  // exact id string.
+  let id: string;
+  let profileId: number | null = null;
+  let targetWallets: string[] | null = null;
+
+  // For profile-keyed ids, verify server-side that the target address is
+  // actually attested to that profile — the client-supplied clusterResult
+  // is not trusted for this. For legacy address ids, the target must match
+  // the id's address.
+  const profileMatch = data.id.match(/^scan-p(\d{1,12})$/i);
+  if (profileMatch) {
+    profileId = Number(profileMatch[1]);
+    id = `scan-p${profileId}`;
+    targetWallets = await verifyProfileWallet(profileId, data.target);
+    if (!targetWallets) {
+      return NextResponse.json({ error: "id/target mismatch" }, { status: 400 });
+    }
+  } else {
+    id = `scan-${data.target.toLowerCase()}`;
+    if (data.id.toLowerCase() !== id) {
+      return NextResponse.json({ error: "id/target mismatch" }, { status: 400 });
+    }
   }
 
   if (data.targetName !== null && typeof data.targetName !== "string") {
@@ -220,11 +244,13 @@ export async function POST(req: NextRequest) {
 
   try {
     await saveInvestigation({
-      id: data.id,
+      id,
       target: data.target.toLowerCase(),
       targetName: (data.targetName as string | null) ?? null,
       clusterResult: data.clusterResult,
       ownerProfileId: auth.profileId,
+      profileId,
+      targetWallets,
       scanDurationMs,
       twitterEvidence,
     });
