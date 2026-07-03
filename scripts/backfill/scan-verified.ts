@@ -32,6 +32,7 @@ try {
 import { getSupabase } from "@/lib/db/supabase";
 import { runClusterScan } from "@/lib/cluster-scanner";
 import { MAX_WALLETS_PER_SCAN } from "@/lib/scan-target";
+import { getContractFlags } from "@/lib/wallet-classify";
 import { saveInvestigation } from "@/lib/db/investigations";
 import { searchTweets, TwitterSearchError } from "@/lib/twitter-search";
 
@@ -43,6 +44,8 @@ interface CliFlags {
   skipDays: number;
   dryRun: boolean;
   paceMs: number;
+  /** Scan every profile with score > N instead of only human-verified ones. */
+  minScore: number | null;
 }
 
 function parseFlags(argv: string[]): CliFlags {
@@ -54,6 +57,7 @@ function parseFlags(argv: string[]): CliFlags {
     skipDays: 7,
     dryRun: false,
     paceMs: 1500,
+    minScore: null,
   };
   for (const arg of argv) {
     if (arg === "--twitter") flags.twitter = true;
@@ -63,6 +67,7 @@ function parseFlags(argv: string[]): CliFlags {
     else if (arg.startsWith("--limit=")) flags.limit = Number(arg.slice("--limit=".length));
     else if (arg.startsWith("--skip-days=")) flags.skipDays = Number(arg.slice("--skip-days=".length));
     else if (arg.startsWith("--pace-ms=")) flags.paceMs = Number(arg.slice("--pace-ms=".length));
+    else if (arg.startsWith("--min-score=")) flags.minScore = Number(arg.slice("--min-score=".length));
   }
   return flags;
 }
@@ -78,17 +83,19 @@ interface VerifiedProfile {
   username: string | null;
 }
 
-async function loadVerifiedProfiles(): Promise<VerifiedProfile[]> {
+async function loadVerifiedProfiles(minScore: number | null): Promise<VerifiedProfile[]> {
   const supabase = getSupabase();
   // Paginate — Supabase REST caps at 1000/page by default.
   const all: VerifiedProfile[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("profile_latest")
       .select("profile_id, primary_address, display_name, username")
-      .eq("human_verified", true)
-      .not("primary_address", "is", null)
+      .not("primary_address", "is", null);
+    // --min-score selects by score; otherwise the default is human-verified.
+    query = minScore !== null ? query.gt("score", minScore) : query.eq("human_verified", true);
+    const { data, error } = await query
       .order("profile_id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`profile_latest fetch failed: ${error.message}`);
@@ -112,29 +119,33 @@ async function loadVerifiedProfiles(): Promise<VerifiedProfile[]> {
     if (data.length < PAGE) break;
   }
 
-  // Attach every attested wallet per profile. Scan only EOAs (is_contract
-  // false/null); keep smart wallets in allWallets for self-exclusion.
+  // Attach every attested wallet per profile.
   const pids = all.map((p) => p.profileId);
   const byPid = new Map(all.map((p) => [p.profileId, p]));
   for (let i = 0; i < pids.length; i += 200) {
     const chunk = pids.slice(i, i + 200);
     const { data, error } = await supabase
       .from("profile_addresses")
-      .select("profile_id, address, is_contract")
+      .select("profile_id, address")
       .in("profile_id", chunk);
     if (error) throw new Error(`profile_addresses fetch failed: ${error.message}`);
-    for (const row of (data ?? []) as { profile_id: number; address: string; is_contract: boolean | null }[]) {
+    for (const row of (data ?? []) as { profile_id: number; address: string }[]) {
       const p = byPid.get(row.profile_id);
       const addr = row.address?.toLowerCase();
-      if (!p || !addr) continue;
-      if (!p.allWallets.includes(addr)) p.allWallets.push(addr);
-      if (!row.is_contract && !p.wallets.includes(addr)) p.wallets.push(addr);
+      if (p && addr && !p.allWallets.includes(addr)) p.allWallets.push(addr);
     }
   }
 
-  // Prefer an EOA as the primary/target address; fall back to the primary or
-  // any attested wallet if the profile has only smart wallets.
+  // Classify all wallets as EOA vs smart-contract (cache-backed, live fallback
+  // for any not yet in is_contract) so this run is correct even while the
+  // classification backfill is still in progress. Scan only EOAs; keep smart
+  // wallets in allWallets for self-exclusion.
+  const everyWallet = [...new Set(all.flatMap((p) => p.allWallets))];
+  const flags = await getContractFlags(everyWallet);
   for (const p of all) {
+    p.wallets = p.allWallets.filter((w) => !flags.get(w));
+    // Prefer an EOA as primary/target; fall back if the profile has only
+    // smart wallets so it's still coverable.
     if (p.wallets.length === 0) p.wallets = p.allWallets.length ? [p.allWallets[0]] : [p.address];
     if (!p.wallets.includes(p.address)) p.address = p.wallets[0];
     if (p.allWallets.length === 0) p.allWallets = [...p.wallets];
@@ -197,9 +208,10 @@ async function main() {
   console.log(`[backfill] log → ${logPath}`);
   console.log(`[backfill] flags`, flags);
 
-  console.log("[backfill] loading verified profiles…");
-  const profiles = await loadVerifiedProfiles();
-  console.log(`[backfill] ${profiles.length} verified profiles with primary_address`);
+  const cohort = flags.minScore !== null ? `profiles with score > ${flags.minScore}` : "human-verified profiles";
+  console.log(`[backfill] loading ${cohort}…`);
+  const profiles = await loadVerifiedProfiles(flags.minScore);
+  console.log(`[backfill] ${profiles.length} ${cohort} with primary_address`);
 
   const ids = profiles.map((p) => `scan-p${p.profileId}`);
   const existing = await loadExistingScans(ids);
