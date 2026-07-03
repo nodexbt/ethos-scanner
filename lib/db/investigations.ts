@@ -14,10 +14,95 @@ export interface InvestigationSummary {
   savedAt: number;
   strongCount: number;
   possibleCount: number;
+  score: number | null;
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
   lastScannedByProfileId: number | null;
+}
+
+export type SortField = "recent" | "strong" | "possible" | "score";
+
+/** Search / sort / filter knobs shared by the scan-list tabs. */
+export interface ListParams {
+  /** Case-insensitive match against target address or display name. */
+  search?: string;
+  sort?: SortField;
+  dir?: "asc" | "desc";
+  /** Only investigations with at least one strong or possible cluster hit. */
+  flaggedOnly?: boolean;
+  minScore?: number | null;
+  maxScore?: number | null;
+}
+
+const SUMMARY_COLUMNS =
+  "id, target, profile_id, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count, score";
+
+/** PostgREST .or() filter strings are comma/paren-delimited — strip the
+    delimiters and wildcard from user input so a stray char can't break the
+    query or inject a filter. */
+function sanitizeSearch(q: string): string {
+  return q.replace(/[,()*%\\]/g, " ").trim().slice(0, 100);
+}
+
+const SORT_COLUMN: Record<SortField, string> = {
+  recent: "updated_at",
+  strong: "strong_count",
+  possible: "possible_count",
+  score: "score",
+};
+
+/** Apply search/sort/filter params to a supabase investigations query. */
+function applyListParams<T>(query: T, params: ListParams): T {
+  // supabase-js query builder is chainable; cast keeps this generic.
+  let q = query as unknown as {
+    or: (s: string) => typeof q;
+    gte: (c: string, v: number) => typeof q;
+    lte: (c: string, v: number) => typeof q;
+    order: (c: string, o: { ascending: boolean; nullsFirst?: boolean }) => typeof q;
+  };
+  const search = params.search ? sanitizeSearch(params.search) : "";
+  if (search) q = q.or(`target.ilike.*${search}*,target_name.ilike.*${search}*`);
+  if (params.flaggedOnly) q = q.or("strong_count.gt.0,possible_count.gt.0");
+  if (params.minScore != null) q = q.gte("score", params.minScore);
+  if (params.maxScore != null) q = q.lte("score", params.maxScore);
+
+  const field = params.sort ?? "recent";
+  const ascending = params.dir === "asc";
+  q = q.order(SORT_COLUMN[field], { ascending, nullsFirst: false });
+  // Stable secondary ordering so paging is deterministic within ties.
+  if (field !== "recent") q = q.order("updated_at", { ascending: false });
+  return q as unknown as T;
+}
+
+function toSummary(row: {
+  id: string;
+  target: string;
+  target_name: string | null;
+  target_avatar: string | null;
+  updated_at: string;
+  strong_count: number | null;
+  possible_count: number | null;
+  score: number | null;
+  share_id: string | null;
+  is_public: boolean | null;
+  owner_profile_id: number | null;
+  last_scanned_by_profile_id: number | null;
+}): InvestigationSummary {
+  return {
+    id: row.id,
+    target: row.target,
+    targetName: row.target_name,
+    targetAvatar: row.target_avatar ?? null,
+    savedAt: new Date(row.updated_at).getTime(),
+    strongCount: row.strong_count ?? 0,
+    possibleCount: row.possible_count ?? 0,
+    score: row.score ?? null,
+    shareId: row.share_id,
+    isPublic: row.is_public ?? false,
+    ownerProfileId: row.owner_profile_id ?? null,
+    lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
+  };
 }
 
 export interface InvestigationRow {
@@ -35,7 +120,8 @@ export async function listInvestigations(
     limit = 50,
     offset = 0,
     ownerProfileId = null,
-  }: { limit?: number; offset?: number; ownerProfileId?: number | null } = {}
+    ...params
+  }: { limit?: number; offset?: number; ownerProfileId?: number | null } & ListParams = {}
 ): Promise<{ rows: InvestigationSummary[]; total: number }> {
   const supabase = getSupabase();
   // strong_count + possible_count are STORED generated columns (see
@@ -45,35 +131,19 @@ export async function listInvestigations(
   // it for 100 rows on every list call adds noticeable latency.
   let query = supabase
     .from("investigations")
-    .select(
-      "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count",
-      { count: "exact" }
-    );
+    .select(SUMMARY_COLUMNS, { count: "exact" });
   if (ownerProfileId !== null) {
     query = query.eq("owner_profile_id", ownerProfileId);
   }
-  const { data, count, error } = await query
-    .order("updated_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+  query = applyListParams(query, params);
+  const { data, count, error } = await query.range(offset, offset + limit - 1);
 
   if (error) {
     console.error("listInvestigations error:", error);
     return { rows: [], total: 0 };
   }
 
-  const rows = (data || []).map((row) => ({
-    id: row.id,
-    target: row.target,
-    targetName: row.target_name,
-    targetAvatar: row.target_avatar ?? null,
-    savedAt: new Date(row.updated_at).getTime(),
-    strongCount: row.strong_count ?? 0,
-    possibleCount: row.possible_count ?? 0,
-    shareId: row.share_id,
-    isPublic: row.is_public ?? false,
-    ownerProfileId: row.owner_profile_id ?? null,
-    lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
-  }));
+  const rows = (data ?? []).map((r) => toSummary(r as Parameters<typeof toSummary>[0]));
   return { rows, total: count ?? rows.length };
 }
 
@@ -143,15 +213,49 @@ export interface VerifiedListPage {
  * how big the universe gets.
  */
 export async function listVerifiedInvestigations(
-  { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {}
+  { limit = 50, offset = 0, ...params }: { limit?: number; offset?: number } & ListParams = {}
 ): Promise<VerifiedListPage> {
   if (!verifiedListCache || verifiedListCache.expires <= Date.now()) {
     const rows = await fetchVerifiedInvestigationRows();
     if (rows === null) return { rows: [], total: 0 }; // error path — don't cache
     verifiedListCache = { rows, expires: Date.now() + LIST_CACHE_TTL_MS };
   }
-  const all = verifiedListCache.rows;
+  // The verified set is fully cached, so search/sort/filter run in JS over it.
+  const all = applyListParamsInMemory(verifiedListCache.rows, params);
   return { rows: all.slice(offset, offset + limit), total: all.length };
+}
+
+/** In-memory equivalent of applyListParams for the cached verified list. */
+function applyListParamsInMemory(
+  rows: InvestigationSummary[],
+  params: ListParams
+): InvestigationSummary[] {
+  let out = rows;
+  const search = params.search ? sanitizeSearch(params.search).toLowerCase() : "";
+  if (search) {
+    out = out.filter(
+      (r) =>
+        r.target.toLowerCase().includes(search) ||
+        (r.targetName ?? "").toLowerCase().includes(search)
+    );
+  }
+  if (params.flaggedOnly) out = out.filter((r) => r.strongCount > 0 || r.possibleCount > 0);
+  if (params.minScore != null) out = out.filter((r) => (r.score ?? -Infinity) >= params.minScore!);
+  if (params.maxScore != null) out = out.filter((r) => (r.score ?? Infinity) <= params.maxScore!);
+
+  const field = params.sort ?? "strong";
+  const asc = params.dir === "asc" ? 1 : -1;
+  const key = (r: InvestigationSummary): number =>
+    field === "recent" ? r.savedAt
+    : field === "possible" ? r.possibleCount
+    : field === "score" ? r.score ?? -Infinity
+    : r.strongCount;
+  // Copy before sort so the cached array keeps its canonical order.
+  out = [...out].sort((a, b) => {
+    const d = (key(a) - key(b)) * asc;
+    return d !== 0 ? d : b.savedAt - a.savedAt;
+  });
+  return out;
 }
 
 /** The uncached full fetch backing listVerifiedInvestigations: collect all
@@ -174,6 +278,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     updated_at: string;
     strong_count: number | null;
     possible_count: number | null;
+    score: number | null;
   };
 
   // The two reads are independent, so run them concurrently rather than
@@ -220,9 +325,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     for (let from = 0; from < HARD_CAP; from += PAGE) {
       const { data, error } = await supabase
         .from("investigations")
-        .select(
-          "id, target, profile_id, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
-        )
+        .select(SUMMARY_COLUMNS)
         .order("strong_count", { ascending: false, nullsFirst: false })
         .order("possible_count", { ascending: false, nullsFirst: false })
         .order("updated_at", { ascending: false })
@@ -252,19 +355,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
       verified.addresses.has((row.target ?? "").toLowerCase())
   );
 
-  return verifiedRows.map<InvestigationSummary>((row) => ({
-    id: row.id,
-    target: row.target,
-    targetName: row.target_name,
-    targetAvatar: row.target_avatar ?? null,
-    savedAt: new Date(row.updated_at).getTime(),
-    strongCount: row.strong_count ?? 0,
-    possibleCount: row.possible_count ?? 0,
-    shareId: row.share_id,
-    isPublic: row.is_public ?? false,
-    ownerProfileId: row.owner_profile_id ?? null,
-    lastScannedByProfileId: row.last_scanned_by_profile_id ?? null,
-  }));
+  return verifiedRows.map((row) => toSummary(row));
 }
 
 export async function getInvestigation(id: string): Promise<InvestigationRow | null> {
@@ -341,7 +432,8 @@ export async function saveInvestigation(data: {
   twitterEvidence?: Record<string, unknown> | null;
 }): Promise<void> {
   const supabase = getSupabase();
-  const result = data.clusterResult as { targetEthos?: { avatarUrl?: string } };
+  const result = data.clusterResult as { targetEthos?: { avatarUrl?: string; score?: number } };
+  const score = typeof result?.targetEthos?.score === "number" ? result.targetEthos.score : null;
 
   // On upsert, only stamp owner_profile_id on new rows or legacy rows without
   // an owner — never overwrite an existing owner.
@@ -382,6 +474,7 @@ export async function saveInvestigation(data: {
       target_avatar: result?.targetEthos?.avatarUrl ?? null,
       cluster_result: data.clusterResult,
       owner_profile_id: ownerToWrite,
+      score,
       ...(data.profileId !== undefined && { profile_id: data.profileId }),
       ...(data.targetWallets !== undefined && { target_wallets: data.targetWallets }),
       // last_scanned_by is always overwritten with the current scanner (null
