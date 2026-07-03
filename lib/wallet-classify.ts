@@ -61,15 +61,35 @@ export async function getContractFlags(
     for (const [addr, isContract] of live) flags.set(addr, isContract);
     // Best-effort cache write so the next scan doesn't re-check on-chain.
     try {
-      const rows = [...live.entries()].map(([address, is_contract]) => ({ address, is_contract }));
-      // Only update rows that already exist (attested wallets); ignore misses.
-      for (const r of rows) {
-        await supabase.from("profile_addresses").update({ is_contract: r.is_contract }).eq("address", r.address);
-      }
+      await writeContractFlags(live);
     } catch {
       // Caching is optional; classification already returned above.
     }
   }
 
   return flags;
+}
+
+/**
+ * Persist is_contract for the given addresses. Groups by boolean value and
+ * issues one bulk .in() update per (value, chunk) — two queries per chunk
+ * instead of one per address, which matters at 89k-wallet scale.
+ */
+export async function writeContractFlags(
+  flags: Map<string, boolean>
+): Promise<void> {
+  const supabase = getSupabase();
+  const contracts = [...flags].filter(([, v]) => v).map(([a]) => a);
+  const eoas = [...flags].filter(([, v]) => !v).map(([a]) => a);
+  for (const [value, addrs] of [[true, contracts], [false, eoas]] as const) {
+    for (let i = 0; i < addrs.length; i += 200) {
+      const chunk = addrs.slice(i, i + 200);
+      if (chunk.length === 0) continue;
+      const { error } = await supabase
+        .from("profile_addresses")
+        .update({ is_contract: value })
+        .in("address", chunk);
+      if (error) console.error("writeContractFlags error:", error.message);
+    }
+  }
 }

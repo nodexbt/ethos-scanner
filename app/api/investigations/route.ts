@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { listInvestigations, getInvestigationStats, saveInvestigation } from "@/lib/db/investigations";
+import { parseListParams } from "@/lib/list-params";
 import { verifyProfileWallet } from "@/lib/scan-target";
 
 // Cap on the serialized cluster result size (2 MB). Larger payloads are rejected
@@ -110,6 +111,7 @@ export async function GET(req: NextRequest) {
     limit,
     offset,
     ownerProfileId: scope === "mine" ? auth.profileId : null,
+    ...parseListParams(url.searchParams),
   });
   const stats = withStats ? await getInvestigationStats() : undefined;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +53,7 @@ import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
 import { EvidenceCard } from "@/components/evidence/evidence-card";
 import { AppHeader } from "@/components/app-header";
+import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 // --- Saved Investigations ---
 
@@ -64,6 +65,7 @@ interface InvestigationSummary {
   savedAt: number;
   strongCount: number;
   possibleCount: number;
+  score: number | null;
   shareId: string | null;
   isPublic: boolean;
   ownerProfileId: number | null;
@@ -71,6 +73,46 @@ interface InvestigationSummary {
 }
 
 type ActiveTab = "scanner" | "yours" | "all" | "verified";
+
+// Sort options for the scan-list tabs. "" = the tab's natural default (recent
+// for yours/all, most-flagged for verified) — sent as no sort param.
+const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: string }[] = [
+  { value: "", label: "Default sort" },
+  { value: "recent-desc", label: "Newest first", sort: "recent", dir: "desc" },
+  { value: "recent-asc", label: "Oldest first", sort: "recent", dir: "asc" },
+  { value: "strong-desc", label: "Most strong", sort: "strong", dir: "desc" },
+  { value: "possible-desc", label: "Most possible", sort: "possible", dir: "desc" },
+  { value: "score-desc", label: "Highest score", sort: "score", dir: "desc" },
+  { value: "score-asc", label: "Lowest score", sort: "score", dir: "asc" },
+];
+
+const SCORE_BANDS: { value: string; label: string; min?: number }[] = [
+  { value: "", label: "Any score" },
+  { value: "1400", label: "Score > 1400", min: 1400 },
+  { value: "1600", label: "Score > 1600", min: 1600 },
+  { value: "1800", label: "Score > 1800", min: 1800 },
+  { value: "2000", label: "Score > 2000", min: 2000 },
+];
+
+/** Build the shared search/sort/filter query params from control state. */
+function listControlParams(c: {
+  search: string;
+  sortValue: string;
+  flaggedOnly: boolean;
+  scoreBand: string;
+}): URLSearchParams {
+  const p = new URLSearchParams();
+  if (c.search.trim()) p.set("search", c.search.trim());
+  const sort = SORT_OPTIONS.find((o) => o.value === c.sortValue);
+  if (sort?.sort) {
+    p.set("sort", sort.sort);
+    if (sort.dir) p.set("dir", sort.dir);
+  }
+  if (c.flaggedOnly) p.set("flagged", "1");
+  const band = SCORE_BANDS.find((b) => b.value === c.scoreBand);
+  if (band?.min != null) p.set("minScore", String(band.min));
+  return p;
+}
 
 /** Investigation id for a scan result: per-profile when the target has an
     Ethos profile, legacy per-address otherwise. Mirrors lib/scan-target. */
@@ -126,6 +168,11 @@ export default function Home() {
   // yours/all tabs show a skeleton instead of a false "No scans yet".
   const [scansLoading, setScansLoading] = useState(true);
   const [investigationSearch, setInvestigationSearch] = useState("");
+  // Server-side search/sort/filter controls, shared across the scan-list tabs.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortValue, setSortValue] = useState("");
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [scoreBand, setScoreBand] = useState("");
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
@@ -481,13 +528,19 @@ export default function Home() {
   // filters to the caller's scans server-side; withStats piggybacks the
   // global signal sums for the scanner empty-state cards.
   const SCANS_PAGE_SIZE = 25;
+  // Current control state as query params. Read fresh on each call so loaders
+  // always reflect the active search/sort/filter.
+  const controlParams = () =>
+    listControlParams({ search: debouncedSearch, sortValue, flaggedOnly, scoreBand });
   const loadScansPage = async (
     scope: "all" | "mine",
     offset: number,
     withStats = false,
     limit: number = SCANS_PAGE_SIZE
   ) => {
-    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    const params = controlParams();
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
     if (scope === "mine") params.set("scope", "mine");
     if (withStats) params.set("stats", "1");
     const resp = await fetch(`/api/investigations?${params}`);
@@ -547,8 +600,10 @@ export default function Home() {
   // across tab switches so re-opening the tab is instant.
   const VERIFIED_PAGE_SIZE = 25;
   const loadVerifiedPage = async (offset: number) => {
-    const url = `/api/investigations/verified?limit=${VERIFIED_PAGE_SIZE}&offset=${offset}`;
-    const resp = await fetch(url);
+    const params = controlParams();
+    params.set("limit", String(VERIFIED_PAGE_SIZE));
+    params.set("offset", String(offset));
+    const resp = await fetch(`/api/investigations/verified?${params}`);
     if (!resp.ok) return null;
     const data = await resp.json();
     if (!data || !Array.isArray(data.rows)) return null;
@@ -564,20 +619,49 @@ export default function Home() {
     }
     setVerifiedLoadingMore(false);
   };
+  // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => {
-    if (activeTab !== "verified") return;
-    if (verifiedInvestigations.length > 0) return;
-    setVerifiedLoading(true);
-    loadVerifiedPage(0)
-      .then((page) => {
+    const t = setTimeout(() => setDebouncedSearch(investigationSearch), 300);
+    return () => clearTimeout(t);
+  }, [investigationSearch]);
+
+  // Refetch the active list tab's first page whenever the tab or any
+  // search/sort/filter control changes. The initial mount load is handled by
+  // the mount effect above, so skip the first run here to avoid a double fetch.
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (activeTab === "all") {
+      loadScansPage("all", 0, true).then((page) => {
         if (page) {
-          setVerifiedInvestigations(page.rows);
-          setVerifiedTotal(page.total);
+          setAllInvestigations(page.rows);
+          setAllTotal(page.total);
+          if (page.stats) setScanStats(page.stats);
         }
-      })
-      .finally(() => setVerifiedLoading(false));
+      });
+    } else if (activeTab === "yours") {
+      loadScansPage("mine", 0).then((page) => {
+        if (page) {
+          setYourInvestigations(page.rows);
+          setYourTotal(page.total);
+        }
+      });
+    } else if (activeTab === "verified") {
+      setVerifiedLoading(true);
+      loadVerifiedPage(0)
+        .then((page) => {
+          if (page) {
+            setVerifiedInvestigations(page.rows);
+            setVerifiedTotal(page.total);
+          }
+        })
+        .finally(() => setVerifiedLoading(false));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, debouncedSearch, sortValue, flaggedOnly, scoreBand]);
 
   const handleSaveInvestigation = async () => {
     if (!clusterResult) return;
@@ -1477,6 +1561,12 @@ export default function Home() {
           }
           search={investigationSearch}
           onSearchChange={setInvestigationSearch}
+          sortValue={sortValue}
+          onSortChange={setSortValue}
+          flaggedOnly={flaggedOnly}
+          onFlaggedChange={setFlaggedOnly}
+          scoreBand={scoreBand}
+          onScoreBandChange={setScoreBand}
           currentInvestigationId={currentInvestigationId}
           canDelete={canDelete}
           onLoad={(inv) => {
@@ -1513,6 +1603,12 @@ export default function Home() {
               emptyLabel="No human-verified profiles scanned yet."
               search={investigationSearch}
               onSearchChange={setInvestigationSearch}
+              sortValue={sortValue}
+              onSortChange={setSortValue}
+              flaggedOnly={flaggedOnly}
+              onFlaggedChange={setFlaggedOnly}
+              scoreBand={scoreBand}
+              onScoreBandChange={setScoreBand}
               currentInvestigationId={currentInvestigationId}
               canDelete={canDelete}
               onLoad={(inv) => {
@@ -1584,6 +1680,13 @@ interface ScansListProps {
   emptyLabel: string;
   search: string;
   onSearchChange: (value: string) => void;
+  // Server-side sort/filter controls (shared across tabs).
+  sortValue: string;
+  onSortChange: (value: string) => void;
+  flaggedOnly: boolean;
+  onFlaggedChange: (value: boolean) => void;
+  scoreBand: string;
+  onScoreBandChange: (value: string) => void;
   currentInvestigationId: string | null;
   canDelete: (inv: InvestigationSummary) => boolean;
   onLoad: (inv: InvestigationSummary) => void;
@@ -1602,6 +1705,12 @@ function ScansList({
   emptyLabel,
   search,
   onSearchChange,
+  sortValue,
+  onSortChange,
+  flaggedOnly,
+  onFlaggedChange,
+  scoreBand,
+  onScoreBandChange,
   currentInvestigationId,
   canDelete,
   onLoad,
@@ -1611,55 +1720,74 @@ function ScansList({
   loadingMore,
   loadMoreBatchSize = 50,
 }: ScansListProps) {
-  const filtered = useMemo(() => {
-    if (!search.trim()) return investigations;
-    const q = search.toLowerCase();
-    return investigations.filter(
-      (inv) =>
-        inv.target.toLowerCase().includes(q) ||
-        (inv.targetName && inv.targetName.toLowerCase().includes(q))
-    );
-  }, [investigations, search]);
-
-  // If the caller passes a totalCount + onLoadMore, this list is being driven
-  // by a server-paginated source — show a Load-more button under the rows
-  // when more results are available remotely. Without those props the list
-  // just renders everything it was given (used by yours/all tabs).
+  // Search/sort/filter are all applied server-side now, so this list renders
+  // exactly the rows it was given for the current query.
   const displayedTotal = totalCount ?? investigations.length;
   const hasRemoteMore =
-    onLoadMore != null &&
-    totalCount != null &&
-    investigations.length < totalCount &&
-    !search.trim();
+    onLoadMore != null && totalCount != null && investigations.length < totalCount;
+  const filtersActive = flaggedOnly || scoreBand !== "" || search.trim() !== "";
+  const selectClass =
+    "h-9 rounded-md border border-border bg-card px-2.5 text-xs text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary";
 
   return (
     <div className="space-y-4">
-      {/* Search */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      {/* Search + controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[10rem] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search scans..."
+            placeholder="Search name or address..."
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-9 h-9"
           />
         </div>
-        <span className="text-sm text-muted-foreground">
-          {search.trim() && filtered.length !== investigations.length
-            ? `${filtered.length} of ${displayedTotal}`
-            : `${displayedTotal} scan${displayedTotal === 1 ? "" : "s"}`}
+        <select
+          aria-label="Sort scans"
+          value={sortValue}
+          onChange={(e) => onSortChange(e.target.value)}
+          className={selectClass}
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by score"
+          value={scoreBand}
+          onChange={(e) => onScoreBandChange(e.target.value)}
+          className={selectClass}
+        >
+          {SCORE_BANDS.map((b) => (
+            <option key={b.value} value={b.value}>{b.label}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => onFlaggedChange(!flaggedOnly)}
+          className={`h-9 rounded-md border px-2.5 text-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors ${
+            flaggedOnly
+              ? "border-red-500/50 bg-red-500/10 text-red-500"
+              : "border-border bg-card text-muted-foreground hover:text-foreground"
+          }`}
+          title="Show only scans with at least one strong or possible cluster"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Flagged only
+        </button>
+        <span className="text-sm text-muted-foreground ml-auto">
+          {displayedTotal.toLocaleString()} {filtersActive ? "match" : "scan"}
+          {displayedTotal === 1 ? "" : filtersActive ? "es" : "s"}
         </span>
       </div>
 
       {investigations.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
           <FolderOpen className="h-8 w-8" />
-          <p>{emptyLabel}</p>
+          <p>{filtersActive ? "No scans match these filters." : emptyLabel}</p>
         </div>
       ) : (
         <div className="grid gap-2 min-w-0">
-          {filtered.map((inv) => (
+          {investigations.map((inv) => (
             <div
               key={inv.id}
               className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
@@ -1689,6 +1817,12 @@ function ScansList({
                 </div>
               </button>
               <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                {inv.score != null && (
+                  <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
+                    {inv.score}
+                    <EthosScoreIcon size={9} className="ml-0.5" />
+                  </span>
+                )}
                 {inv.strongCount > 0 && (
                   <span className="flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3 text-red-500" />

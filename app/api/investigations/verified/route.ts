@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { listVerifiedInvestigations } from "@/lib/db/investigations";
+import { parseListParams } from "@/lib/list-params";
 
 // GET /api/investigations/verified?limit=50&offset=0
 // Investigations whose target is the primary wallet of a human-verified
@@ -14,7 +15,11 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0);
 
-  const { rows, total } = await listVerifiedInvestigations({ limit, offset });
+  const { rows, total } = await listVerifiedInvestigations({
+    limit,
+    offset,
+    ...parseListParams(url.searchParams),
+  });
 
   const enriched = rows.map((inv) => {
     const { lastScannedByProfileId, ...rest } = inv;

@@ -23,7 +23,7 @@ try {
 }
 
 import { getSupabase } from "@/lib/db/supabase";
-import { classifyContractsOnChain } from "@/lib/wallet-classify";
+import { classifyContractsOnChain, writeContractFlags } from "@/lib/wallet-classify";
 
 const ALL = process.argv.includes("--all");
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -56,17 +56,9 @@ async function main() {
     const flags = await classifyContractsOnChain(chunk);
     for (const isC of flags.values()) isC ? contracts++ : eoas++;
 
-    if (!DRY_RUN) {
-      // Update every profile_addresses row for each address (address is not
-      // unique — same wallet can be attested to multiple profiles).
-      for (const [address, is_contract] of flags) {
-        const { error } = await supabase
-          .from("profile_addresses")
-          .update({ is_contract })
-          .eq("address", address);
-        if (error) console.error(`  update ${address} failed: ${error.message}`);
-      }
-    }
+    // Bulk-write grouped by value (address isn't unique — the .in() update
+    // covers every profile_addresses row for these wallets).
+    if (!DRY_RUN) await writeContractFlags(flags);
     console.log(`[classify] ${Math.min(i + CHUNK, list.length)}/${list.length} · contracts=${contracts} eoas=${eoas}`);
   }
 
