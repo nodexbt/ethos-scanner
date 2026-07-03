@@ -187,6 +187,28 @@ export function OverviewCard({
           </div>
         )}
 
+        {/* All attested wallets scanned for this profile */}
+        {result.targetWallets && result.targetWallets.length > 1 && (
+          <div className="rounded-lg border border-border p-3 space-y-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              Scanned Wallets ({result.targetWallets.length})
+            </div>
+            {result.targetWallets.map((w) => (
+              <div key={w} className="text-xs font-mono flex items-center gap-1">
+                <Wallet className="h-3 w-3 opacity-50 shrink-0" />
+                <a
+                  href={getExplorerAddressUrl(w)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline truncate"
+                >
+                  {w}
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Key Findings */}
         {hasFindings && (
           <div className="rounded-lg border border-border p-3 space-y-1.5">

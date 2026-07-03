@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { runClusterScan } from "@/lib/cluster-scanner";
+import { resolveScanTarget } from "@/lib/scan-target";
 import { getRecentScanAverageMs } from "@/lib/db/investigations";
 import { consumeDailyScanQuota } from "@/lib/db/scan-quota";
 
@@ -19,12 +20,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Accept an address, @handle, or profile URL; resolve server-side to the
+  // profile's full attested-wallet set (don't trust a client wallet list).
+  // One scan = one rate-limit token + one daily-quota unit regardless of
+  // how many wallets the profile has.
   const { target } = await req.json();
-  if (!target || !/^0x[a-fA-F0-9]{40}$/.test(target)) {
-    return new Response(JSON.stringify({ error: "Invalid address" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  const resolved = typeof target === "string" ? await resolveScanTarget(target) : null;
+  if (!resolved) {
+    return new Response(
+      JSON.stringify({ error: "No Ethos profile or valid address found for that input" }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   // Daily scan cap (durable, per UTC day). Checked after address validation so
@@ -54,7 +63,7 @@ export async function POST(req: NextRequest) {
       const scanStart = Date.now();
       try {
         const result = await runClusterScan(
-          target,
+          resolved,
           (logEntry) => {
             controller.enqueue(
               encoder.encode(JSON.stringify({ type: "log", data: logEntry }) + "\n")

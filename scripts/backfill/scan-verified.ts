@@ -31,6 +31,7 @@ try {
 
 import { getSupabase } from "@/lib/db/supabase";
 import { runClusterScan } from "@/lib/cluster-scanner";
+import { MAX_WALLETS_PER_SCAN } from "@/lib/scan-target";
 import { saveInvestigation } from "@/lib/db/investigations";
 import { searchTweets, TwitterSearchError } from "@/lib/twitter-search";
 
@@ -69,6 +70,8 @@ function parseFlags(argv: string[]): CliFlags {
 interface VerifiedProfile {
   profileId: number;
   address: string;
+  /** All attested wallets (from profile_addresses); always includes address. */
+  wallets: string[];
   displayName: string | null;
   username: string | null;
 }
@@ -98,12 +101,32 @@ async function loadVerifiedProfiles(): Promise<VerifiedProfile[]> {
       all.push({
         profileId: row.profile_id,
         address: row.primary_address.toLowerCase(),
+        wallets: [row.primary_address.toLowerCase()],
         displayName: row.display_name,
         username: row.username,
       });
     }
     if (data.length < PAGE) break;
   }
+
+  // Attach every attested wallet per profile so the scan covers the
+  // profile's full activity, not just the primary address.
+  const pids = all.map((p) => p.profileId);
+  const byPid = new Map(all.map((p) => [p.profileId, p]));
+  for (let i = 0; i < pids.length; i += 200) {
+    const chunk = pids.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from("profile_addresses")
+      .select("profile_id, address")
+      .in("profile_id", chunk);
+    if (error) throw new Error(`profile_addresses fetch failed: ${error.message}`);
+    for (const row of (data ?? []) as { profile_id: number; address: string }[]) {
+      const p = byPid.get(row.profile_id);
+      const addr = row.address?.toLowerCase();
+      if (p && addr && !p.wallets.includes(addr)) p.wallets.push(addr);
+    }
+  }
+
   return all;
 }
 
@@ -165,7 +188,7 @@ async function main() {
   const profiles = await loadVerifiedProfiles();
   console.log(`[backfill] ${profiles.length} verified profiles with primary_address`);
 
-  const ids = profiles.map((p) => `scan-${p.address}`);
+  const ids = profiles.map((p) => `scan-p${p.profileId}`);
   const existing = await loadExistingScans(ids);
 
   const skipThresholdMs = flags.skipDays * 24 * 60 * 60 * 1000;
@@ -175,7 +198,7 @@ async function main() {
   let skipFresh = 0;
   let skipTwitter = 0;
   for (const p of profiles) {
-    const id = `scan-${p.address}`;
+    const id = `scan-p${p.profileId}`;
     const ex = existing.get(id);
     if (!flags.force && ex) {
       const age = now - new Date(ex.updatedAt).getTime();
@@ -217,13 +240,17 @@ async function main() {
 
   for (let i = 0; i < queue.length; i++) {
     const p = queue[i];
-    const id = `scan-${p.address}`;
+    const id = `scan-p${p.profileId}`;
     const tag = `[${i + 1}/${queue.length}] ${p.username ?? p.address.slice(0, 10)}`;
-    console.log(`${tag} scanning ${p.address}…`);
+    console.log(`${tag} scanning ${p.address}${p.wallets.length > 1 ? ` (+${p.wallets.length - 1} wallets)` : ""}…`);
 
     const scanStart = Date.now();
     try {
-      const result = await runClusterScan(p.address);
+      const result = await runClusterScan({
+        profileId: p.profileId,
+        wallets: p.wallets.slice(0, MAX_WALLETS_PER_SCAN),
+        primaryWallet: p.address,
+      });
       const scanDurationMs = Date.now() - scanStart;
 
       const candidates = [...result.strongCluster, ...result.possibleCluster];
@@ -266,6 +293,8 @@ async function main() {
         targetName: p.displayName,
         clusterResult: serialized,
         ownerProfileId: flags.owner!,
+        profileId: p.profileId,
+        targetWallets: p.wallets,
         // Automated scan — show no personal "Scanned by" attribution.
         scannedByProfileId: null,
         scanDurationMs,
@@ -347,6 +376,7 @@ async function runVerifiedInVerifiedReport(
     signalTypes?: string[];
   };
   type ClusterResultLite = {
+    targetProfileId?: number | null;
     targetEthos?: { profileId?: number; humanVerified?: boolean; displayName?: string; username?: string | null };
     strongCluster?: CandidateLite[];
     possibleCluster?: CandidateLite[];
@@ -368,21 +398,23 @@ async function runVerifiedInVerifiedReport(
   for (let from = 0; ; from += ROW_PAGE) {
     const { data, error } = await supabase
       .from("investigations")
-      .select("id, target, cluster_result")
+      .select("id, target, profile_id, cluster_result")
       .range(from, from + ROW_PAGE - 1);
     if (error) throw new Error(`investigations fetch: ${error.message}`);
     if (!data || data.length === 0) break;
-    for (const row of data as { id: string; target: string; cluster_result: unknown }[]) {
+    for (const row of data as { id: string; target: string; profile_id: number | null; cluster_result: unknown }[]) {
       scanned += 1;
-      const targetAddr = (row.target ?? "").toLowerCase();
-      if (!verifiedAddresses.has(targetAddr)) continue;
-
+      // Verification is decided by the target's profile id — profile-keyed
+      // rows may have a non-primary wallet as target, so an address gate
+      // would drop them. Prefer the persisted profile_id column, then the
+      // in-result targetProfileId, then targetEthos (which can be undefined
+      // when the bulk Ethos lookup missed at scan time).
       const cr = (typeof row.cluster_result === "string"
         ? JSON.parse(row.cluster_result)
         : row.cluster_result) as ClusterResultLite | null;
       if (!cr) continue;
 
-      const targetPid = cr.targetEthos?.profileId;
+      const targetPid = row.profile_id ?? cr.targetProfileId ?? cr.targetEthos?.profileId;
       if (!targetPid || !verifiedProfileIds.has(targetPid)) continue;
 
       const collect = (list: CandidateLite[] | undefined) =>

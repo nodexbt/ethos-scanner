@@ -1,5 +1,10 @@
 import { getSupabase } from "./supabase";
 import { nanoid } from "../utils";
+import {
+  edgesFromClusterResult,
+  replaceEdgesForSource,
+  deleteEdgesForInvestigation,
+} from "./investigation-edges";
 
 export interface InvestigationSummary {
   id: string;
@@ -159,6 +164,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
   type Row = {
     id: string;
     target: string;
+    profile_id: number | null;
     target_name: string | null;
     target_avatar: string | null;
     share_id: string | null;
@@ -174,27 +180,32 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
   // back-to-back — roughly halves the cold-load latency that the verified
   // tab pays on a cache miss.
 
-  // Collect all human-verified primary addresses (paginated, no cap).
-  const collectVerifiedAddresses = async (): Promise<Set<string> | null> => {
-    const set = new Set<string>();
+  // Collect all human-verified profiles: primary addresses (legacy
+  // address-keyed rows) and profile ids (profile-keyed rows). Paginated, no cap.
+  const collectVerified = async (): Promise<{
+    addresses: Set<string>;
+    profileIds: Set<number>;
+  } | null> => {
+    const addresses = new Set<string>();
+    const profileIds = new Set<number>();
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from("profile_latest")
-        .select("primary_address")
+        .select("profile_id, primary_address")
         .eq("human_verified", true)
-        .not("primary_address", "is", null)
         .range(from, from + PAGE - 1);
       if (error) {
         console.error("listVerifiedInvestigations profile fetch error:", error);
         return null;
       }
       if (!data || data.length === 0) break;
-      for (const row of data as { primary_address: string | null }[]) {
-        if (row.primary_address) set.add(row.primary_address.toLowerCase());
+      for (const row of data as { profile_id: number; primary_address: string | null }[]) {
+        if (row.primary_address) addresses.add(row.primary_address.toLowerCase());
+        if (row.profile_id != null) profileIds.add(row.profile_id);
       }
       if (data.length < PAGE) break;
     }
-    return set;
+    return { addresses, profileIds };
   };
 
   // Pull the full investigations list (sorted by strong-count at the DB level
@@ -210,7 +221,7 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
       const { data, error } = await supabase
         .from("investigations")
         .select(
-          "id, target, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
+          "id, target, profile_id, target_name, target_avatar, share_id, is_public, owner_profile_id, last_scanned_by_profile_id, updated_at, strong_count, possible_count"
         )
         .order("strong_count", { ascending: false, nullsFirst: false })
         .order("possible_count", { ascending: false, nullsFirst: false })
@@ -228,15 +239,17 @@ async function fetchVerifiedInvestigationRows(): Promise<InvestigationSummary[] 
     return fetched;
   };
 
-  const [verifiedSet, fetched] = await Promise.all([
-    collectVerifiedAddresses(),
+  const [verified, fetched] = await Promise.all([
+    collectVerified(),
     fetchInvestigationsList(),
   ]);
-  if (verifiedSet === null || fetched === null) return null; // error path
-  if (verifiedSet.size === 0) return [];
+  if (verified === null || fetched === null) return null; // error path
+  if (verified.addresses.size === 0 && verified.profileIds.size === 0) return [];
 
-  const verifiedRows = fetched.filter((row) =>
-    verifiedSet.has((row.target ?? "").toLowerCase())
+  const verifiedRows = fetched.filter(
+    (row) =>
+      (row.profile_id != null && verified.profileIds.has(row.profile_id)) ||
+      verified.addresses.has((row.target ?? "").toLowerCase())
   );
 
   return verifiedRows.map<InvestigationSummary>((row) => ({
@@ -313,6 +326,10 @@ export async function saveInvestigation(data: {
   targetName: string | null;
   clusterResult: unknown;
   ownerProfileId: number;
+  /** Ethos profile the investigation targets; null for unattested wallets. */
+  profileId?: number | null;
+  /** Full wallet set that was scanned. */
+  targetWallets?: string[] | null;
   /**
    * Who to display as the scanner. Defaults to ownerProfileId. Pass null
    * explicitly for automated (cron/backfill) scans so the UI shows no
@@ -365,6 +382,8 @@ export async function saveInvestigation(data: {
       target_avatar: result?.targetEthos?.avatarUrl ?? null,
       cluster_result: data.clusterResult,
       owner_profile_id: ownerToWrite,
+      ...(data.profileId !== undefined && { profile_id: data.profileId }),
+      ...(data.targetWallets !== undefined && { target_wallets: data.targetWallets }),
       // last_scanned_by is always overwritten with the current scanner (null
       // for automated scans), unlike owner_profile_id which is sticky to the
       // original creator.
@@ -384,6 +403,24 @@ export async function saveInvestigation(data: {
     throw new Error(error.message);
   }
   invalidateInvestigationCaches();
+
+  // Refresh the cross-profile connection graph for this source profile.
+  // Only automated scans (scannedByProfileId === null — the backfill /
+  // cron path) feed the global edge graph. clusterResult is client-
+  // supplied on interactive saves, and the graph is world-visible in
+  // every user's connections panel, so we never let an arbitrary user
+  // write edges under a profile key. Best-effort: an edge failure must
+  // not fail the save.
+  if (data.profileId && data.scannedByProfileId === null) {
+    try {
+      await replaceEdgesForSource(
+        data.profileId,
+        edgesFromClusterResult(data.profileId, data.id, data.clusterResult)
+      );
+    } catch (err) {
+      console.error("saveInvestigation edge refresh failed:", err);
+    }
+  }
 }
 
 /**
@@ -412,6 +449,9 @@ export async function deleteInvestigation(id: string): Promise<void> {
   if (error) {
     console.error("deleteInvestigation error:", error);
   }
+  // Drop any connection-graph edges this scan contributed so the
+  // connections panel doesn't reference a deleted investigation.
+  await deleteEdgesForInvestigation(id);
   invalidateInvestigationCaches();
 }
 

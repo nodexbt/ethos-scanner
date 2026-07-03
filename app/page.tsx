@@ -38,6 +38,7 @@ import {
   type LogEntry,
   type ScanProgress,
 } from "@/lib/cluster-scanner";
+import type { ResolvedScanTarget } from "@/lib/scan-target";
 import { getAddressLabel } from "@/lib/known-addresses";
 import { safeExternalUrl } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -46,6 +47,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
+import { ConnectionsCard } from "@/components/results/connections-card";
 import { OverviewCard } from "@/components/results/overview-card";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
@@ -69,6 +71,14 @@ interface InvestigationSummary {
 }
 
 type ActiveTab = "scanner" | "yours" | "all" | "verified";
+
+/** Investigation id for a scan result: per-profile when the target has an
+    Ethos profile, legacy per-address otherwise. Mirrors lib/scan-target. */
+function investigationIdForResult(result: ClusterScanResult): string {
+  return result.targetProfileId != null
+    ? `scan-p${result.targetProfileId}`
+    : `scan-${result.target.toLowerCase()}`;
+}
 
 /** Derive the active tab from a URL search string (?tab=...). Defaults to scanner. */
 function tabFromSearch(search: string): ActiveTab {
@@ -148,13 +158,18 @@ export default function Home() {
       }
     });
 
-    // Check if URL has a wallet address to load
+    // Check if URL has a scan target to load — either /scan/0x<address>
+    // or /scan/x/<handle>.
     const path = window.location.pathname;
-    const match = path.match(/^\/scan\/(0x[a-fA-F0-9]{40})$/i);
-    if (match) {
-      const addr = match[1].toLowerCase();
-      setWalletInput(addr);
-      loadCachedScan(addr);
+    const addrMatch = path.match(/^\/scan\/(0x[a-fA-F0-9]{40})$/i);
+    const handleMatch = path.match(/^\/scan\/x\/([A-Za-z0-9_]{1,15})$/);
+    const urlTarget = addrMatch ? addrMatch[1].toLowerCase() : handleMatch ? `@${handleMatch[1]}` : null;
+    if (urlTarget) {
+      setWalletInput(urlTarget);
+      setLoadingCached(true);
+      resolveTarget(urlTarget)
+        .then((resolved) => (resolved ? loadCachedScan(resolved) : null))
+        .finally(() => setLoadingCached(false));
     }
 
     // Restore the active tab from the URL (?tab=yours|all|verified).
@@ -209,11 +224,28 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [twitterEvidence, currentInvestigationId, clusterResult, scanning]);
 
-  const pushScanUrl = (addr: string) => {
-    const url = `/scan/${addr.toLowerCase()}`;
+  const pushScanUrl = (target: ResolvedScanTarget) => {
+    const url = target.ethos?.username
+      ? `/scan/x/${target.ethos.username}`
+      : `/scan/${target.primaryWallet.toLowerCase()}`;
     if (window.location.pathname !== url) {
       window.history.pushState({}, "", url);
     }
+  };
+
+  // Resolve free-form input (0x address, @handle, x.com / Ethos profile
+  // URL) to the profile + wallet set server-side. Returns null (and sets
+  // the error state) when nothing matches.
+  const resolveTarget = async (input: string): Promise<ResolvedScanTarget | null> => {
+    try {
+      const resp = await fetch(`/api/resolve?q=${encodeURIComponent(input.trim())}`);
+      if (resp.ok) return (await resp.json()) as ResolvedScanTarget;
+      const data = await resp.json().catch(() => null);
+      setError(data?.error || "Could not resolve that address or handle");
+    } catch {
+      setError("Could not resolve that address or handle");
+    }
+    return null;
   };
 
   // Switch tabs and reflect it in the URL so browser back/forward moves
@@ -237,15 +269,14 @@ export default function Home() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const loadCachedScan = async (addr: string) => {
-    const cachedId = `scan-${addr.toLowerCase()}`;
+  const loadCachedScan = async (target: ResolvedScanTarget) => {
     setLoadingCached(true);
     try {
-      const resp = await fetch(`/api/investigations/${cachedId}`);
+      const resp = await fetch(`/api/investigations/${target.investigationId}`);
       if (resp.ok) {
         const data = await resp.json();
         setClusterResult(data.clusterResult);
-        setCurrentInvestigationId(cachedId);
+        setCurrentInvestigationId(target.investigationId);
         setScreenshots(new Map(Object.entries(data.screenshots || {})));
         setTwitterEvidence(
           (data.twitterEvidence as Record<string, unknown> | null) ?? {}
@@ -253,7 +284,7 @@ export default function Home() {
         setClusterLogs([]);
         setError(null);
         setLoadingCached(false);
-        pushScanUrl(addr);
+        pushScanUrl(target);
         return true;
       }
     } catch {}
@@ -261,7 +292,7 @@ export default function Home() {
     return false;
   };
 
-  const runFreshScan = async (addr: string) => {
+  const runFreshScan = async (target: ResolvedScanTarget) => {
     setScanning(true);
     setClusterResult(null);
     setClusterLogs([]);
@@ -275,8 +306,7 @@ export default function Home() {
     // so we don't burn API credits re-fetching tweets we already have. Falls
     // back to empty when this is a brand-new target.
     try {
-      const cachedId = `scan-${addr.toLowerCase()}`;
-      const resp = await fetch(`/api/investigations/${cachedId}`);
+      const resp = await fetch(`/api/investigations/${target.investigationId}`);
       if (resp.ok) {
         const data = await resp.json();
         setTwitterEvidence(
@@ -296,7 +326,9 @@ export default function Home() {
       const resp = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: addr }),
+        // The server re-resolves the target itself; the primary wallet is
+        // enough to identify the profile.
+        body: JSON.stringify({ target: target.primaryWallet }),
       });
 
       if (!resp.ok) {
@@ -358,20 +390,20 @@ export default function Home() {
 
       // Auto-save after scan completes
       if (scanResult) {
-        const id = `scan-${addr.toLowerCase()}`;
+        const id = target.investigationId;
         await fetch("/api/investigations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id,
-            target: addr.toLowerCase(),
+            target: target.primaryWallet.toLowerCase(),
             targetName: (scanResult as ClusterScanResult).targetEthos?.displayName ?? null,
             clusterResult: scanResult,
             scanDurationMs,
           }),
         });
         setCurrentInvestigationId(id);
-        pushScanUrl(addr);
+        pushScanUrl(target);
         refreshInvestigations();
       }
     } catch (err) {
@@ -384,17 +416,32 @@ export default function Home() {
 
   const startScan = async (e: React.FormEvent) => {
     e.preventDefault();
-    const addr = walletInput.trim().toLowerCase();
-    if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
-      setError("Please enter a valid EVM address (0x...)");
+    const input = walletInput.trim();
+    if (!input) {
+      setError("Enter an EVM address (0x...) or an X handle (@name)");
       return;
     }
 
+    await scanTargetInput(input);
+  };
+
+  /** Resolve free-form input and load the cached scan or run a fresh one. */
+  const scanTargetInput = async (input: string) => {
+    setWalletInput(input);
+    const resolved = await resolveTarget(input);
+    if (!resolved) return;
+
     // Check if we have a cached scan
-    const cached = await loadCachedScan(addr);
+    const cached = await loadCachedScan(resolved);
     if (cached) return;
 
-    await runFreshScan(addr);
+    await runFreshScan(resolved);
+  };
+
+  /** Re-resolve free-form input (or an address) and run a fresh scan. */
+  const rescanTarget = async (input: string) => {
+    const resolved = await resolveTarget(input);
+    if (resolved) await runFreshScan(resolved);
   };
 
   const getScoreBorderColor = (score: number): string => {
@@ -534,7 +581,7 @@ export default function Home() {
 
   const handleSaveInvestigation = async () => {
     if (!clusterResult) return;
-    const id = currentInvestigationId || `scan-${clusterResult.target}`;
+    const id = currentInvestigationId || investigationIdForResult(clusterResult);
     await fetch("/api/investigations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1186,13 +1233,13 @@ export default function Home() {
                 result={clusterResult}
                 scanning={scanning}
                 onShare={() => {
-                  const id = currentInvestigationId || `scan-${clusterResult.target}`;
+                  const id = currentInvestigationId || investigationIdForResult(clusterResult);
                   handleShareInvestigation(id);
                 }}
-                onRescan={() => runFreshScan(clusterResult.target)}
+                onRescan={() => rescanTarget(clusterResult.target)}
                 onCopyWallets={() => {
                   const wallets = [
-                    clusterResult.target,
+                    ...(clusterResult.targetWallets ?? [clusterResult.target]),
                     ...clusterResult.strongCluster.flatMap((c) => c.wallets || [c.address]),
                     ...clusterResult.possibleCluster.flatMap((c) => c.wallets || [c.address]),
                   ];
@@ -1268,6 +1315,17 @@ export default function Home() {
                   )}
                 </Card>
               </motion.div>
+              )}
+
+              {/* Second-degree connections from other saved scans */}
+              {currentInvestigationId && !scanning && (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
+                  <ConnectionsCard
+                    investigationId={currentInvestigationId}
+                    scanning={scanning}
+                    onScanProfile={scanTargetInput}
+                  />
+                </motion.div>
               )}
 
               {/* Manual Checks + Evidence Collection */}

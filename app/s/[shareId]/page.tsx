@@ -131,7 +131,7 @@ export default function SharedInvestigation() {
   // screenshots that only exist in the owner's session.
   const handleCopyWallets = () => {
     const wallets = [
-      result.target,
+      ...(result.targetWallets ?? [result.target]),
       ...result.strongCluster.flatMap((c) => c.wallets || [c.address]),
       ...result.possibleCluster.flatMap((c) => c.wallets || [c.address]),
     ];

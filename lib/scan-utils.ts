@@ -22,7 +22,7 @@ export function getExplorerAddressUrl(address: string, chain?: string): string {
 
 export function resolveAddressName(addr: string, result: ClusterScanResult | null): string {
   if (!result) return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-  if (addr === result.target) {
+  if ((result.targetWallets ?? [result.target]).includes(addr)) {
     return result.targetEthos?.displayName || `${addr.slice(0, 8)}...${addr.slice(-4)}`;
   }
   for (const c of [...result.strongCluster, ...result.possibleCluster]) {
@@ -49,7 +49,7 @@ export function buildConnectionSummary(
   if (candidate.firstFunders && candidate.firstFunders.length > 0 && result) {
     for (const ff of candidate.firstFunders) {
       const funderName = resolveAddressName(ff.funder, result);
-      const isFundedByTarget = ff.funder === result.target;
+      const isFundedByTarget = (result.targetWallets ?? [result.target]).includes(ff.funder);
       const isFundedByResult = !isFundedByTarget && [...result.strongCluster, ...result.possibleCluster]
         .some((c) => c.address !== candidate.address && (c.wallets?.includes(ff.funder) || c.address === ff.funder));
 
