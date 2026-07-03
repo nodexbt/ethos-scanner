@@ -70,8 +70,10 @@ function parseFlags(argv: string[]): CliFlags {
 interface VerifiedProfile {
   profileId: number;
   address: string;
-  /** All attested wallets (from profile_addresses); always includes address. */
+  /** Personal EOA wallets to scan (smart wallets excluded via is_contract). */
   wallets: string[];
+  /** Every attested wallet incl. smart wallets, for self-exclusion. */
+  allWallets: string[];
   displayName: string | null;
   username: string | null;
 }
@@ -101,7 +103,8 @@ async function loadVerifiedProfiles(): Promise<VerifiedProfile[]> {
       all.push({
         profileId: row.profile_id,
         address: row.primary_address.toLowerCase(),
-        wallets: [row.primary_address.toLowerCase()],
+        wallets: [],
+        allWallets: [],
         displayName: row.display_name,
         username: row.username,
       });
@@ -109,22 +112,32 @@ async function loadVerifiedProfiles(): Promise<VerifiedProfile[]> {
     if (data.length < PAGE) break;
   }
 
-  // Attach every attested wallet per profile so the scan covers the
-  // profile's full activity, not just the primary address.
+  // Attach every attested wallet per profile. Scan only EOAs (is_contract
+  // false/null); keep smart wallets in allWallets for self-exclusion.
   const pids = all.map((p) => p.profileId);
   const byPid = new Map(all.map((p) => [p.profileId, p]));
   for (let i = 0; i < pids.length; i += 200) {
     const chunk = pids.slice(i, i + 200);
     const { data, error } = await supabase
       .from("profile_addresses")
-      .select("profile_id, address")
+      .select("profile_id, address, is_contract")
       .in("profile_id", chunk);
     if (error) throw new Error(`profile_addresses fetch failed: ${error.message}`);
-    for (const row of (data ?? []) as { profile_id: number; address: string }[]) {
+    for (const row of (data ?? []) as { profile_id: number; address: string; is_contract: boolean | null }[]) {
       const p = byPid.get(row.profile_id);
       const addr = row.address?.toLowerCase();
-      if (p && addr && !p.wallets.includes(addr)) p.wallets.push(addr);
+      if (!p || !addr) continue;
+      if (!p.allWallets.includes(addr)) p.allWallets.push(addr);
+      if (!row.is_contract && !p.wallets.includes(addr)) p.wallets.push(addr);
     }
+  }
+
+  // Prefer an EOA as the primary/target address; fall back to the primary or
+  // any attested wallet if the profile has only smart wallets.
+  for (const p of all) {
+    if (p.wallets.length === 0) p.wallets = p.allWallets.length ? [p.allWallets[0]] : [p.address];
+    if (!p.wallets.includes(p.address)) p.address = p.wallets[0];
+    if (p.allWallets.length === 0) p.allWallets = [...p.wallets];
   }
 
   return all;
@@ -249,6 +262,7 @@ async function main() {
       const result = await runClusterScan({
         profileId: p.profileId,
         wallets: p.wallets.slice(0, MAX_WALLETS_PER_SCAN),
+        allWallets: p.allWallets,
         primaryWallet: p.address,
       });
       const scanDurationMs = Date.now() - scanStart;

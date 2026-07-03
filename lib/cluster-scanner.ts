@@ -142,7 +142,12 @@ export interface ClusterCandidate {
     single unattested wallet (profileId null). */
 export interface ScanTarget {
   profileId: number | null;
+  /** Personal EOA wallets to actually scan (fetch transactions for). */
   wallets: string[];
+  /** Every attested wallet incl. smart-contract wallets. Used only for
+      self-exclusion so a candidate isn't flagged for touching the target's
+      own smart wallet. Defaults to `wallets` when omitted. */
+  allWallets?: string[];
   primaryWallet: string;
 }
 
@@ -408,7 +413,10 @@ async function scanNetwork(
   targetWallets: string[],
   chain: Chain,
   log: (level: LogLevel, message: string) => void,
-  stepDone?: (phase: string) => void
+  stepDone?: (phase: string) => void,
+  /** Every attested wallet of the target (incl. smart wallets we don't
+      fetch) for self-exclusion. Defaults to targetWallets. */
+  exclusionWallets: string[] = targetWallets
 ): Promise<{
   directWallets: Map<string, DirectWalletInfo>;
   candidates: Map<string, ClusterCandidate>;
@@ -418,7 +426,9 @@ async function scanNetwork(
   targetFirstFunders: FirstFunderInfo[];
 }> {
   const network = chain.name;
-  const targetSet = new Set(targetWallets);
+  // Exclude every attested wallet from becoming a candidate, but only fetch
+  // transactions for the scannable (EOA) targetWallets below.
+  const targetSet = new Set([...exclusionWallets, ...targetWallets]);
 
   // Step 1: Fetch target transactions — one fetch per target wallet, so a
   // multi-wallet profile's full activity is covered.
@@ -857,10 +867,19 @@ export async function runClusterScan(
       : {
           profileId: targetInput.profileId,
           wallets: [...new Set(targetInput.wallets.map((w) => w.toLowerCase()))],
+          allWallets: targetInput.allWallets
+            ? [...new Set(targetInput.allWallets.map((w) => w.toLowerCase()))]
+            : undefined,
           primaryWallet: targetInput.primaryWallet.toLowerCase(),
         };
+  // targetWallets = EOAs we fetch and scan. exclusionWallets = every attested
+  // wallet (incl. smart wallets we don't fetch) that must never surface as a
+  // candidate of the target's own profile.
   const targetWallets = scanTarget.wallets;
-  const targetSet = new Set(targetWallets);
+  const exclusionWallets = [
+    ...new Set([...(scanTarget.allWallets ?? []), ...targetWallets]),
+  ];
+  const targetSet = new Set(exclusionWallets);
   const target = scanTarget.primaryWallet;
 
   log(
@@ -875,7 +894,7 @@ export async function runClusterScan(
     [...CHAINS],
     async (chain) => {
       try {
-        const result = await scanNetwork(targetWallets, chain, log, stepDone);
+        const result = await scanNetwork(targetWallets, chain, log, stepDone, exclusionWallets);
         return { chain, result, error: null };
       } catch (err) {
         log("error", `[${chain.name}] Network scan failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -947,7 +966,7 @@ export async function runClusterScan(
     ...allTargetFirstFunders.map((f) => f.funder),
     ...[...strongCluster, ...possibleCluster].flatMap((c) => (c.firstFunders || []).map((f) => f.funder)),
   ];
-  const ethosAddresses = [...new Set([...targetWallets, ...allCandidateAddrs, ...allFirstFunderAddrs])];
+  const ethosAddresses = [...new Set([...exclusionWallets, ...allCandidateAddrs, ...allFirstFunderAddrs])];
   log("info", `Checking ${ethosAddresses.length} addresses on Ethos Network (bulk)...`);
 
   const ethosMap = await fetchProfilesByAddresses(ethosAddresses);
@@ -969,7 +988,7 @@ export async function runClusterScan(
 
   let targetEthos: ClusterScanResult["targetEthos"];
   const targetProfile =
-    targetWallets.map((w) => ethosMap.get(w)).find((p) => p && p.profileId) ?? null;
+    exclusionWallets.map((w) => ethosMap.get(w)).find((p) => p && p.profileId) ?? null;
   if (targetProfile && targetProfile.profileId) {
     targetEthos = toEthosData(targetProfile);
     log("success", `Target has Ethos profile: ${targetProfile.displayName} (score: ${targetProfile.score})`);
@@ -1175,7 +1194,7 @@ export async function runClusterScan(
   }
 
   // Multi-hop funding: trace funder wallets to discover additional Ethos profiles
-  const knownAddresses = new Set([...targetWallets, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
+  const knownAddresses = new Set([...exclusionWallets, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
   const uniqueFunderAddrs = new Set<string>();
   for (const ff of allTargetFirstFunders) {
     if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);

@@ -5,6 +5,7 @@ import {
   type EthosProfile,
 } from "./ethos";
 import { getSupabase } from "./db/supabase";
+import { getContractFlags } from "./wallet-classify";
 
 /** Most profiles have 1-2 attested wallets; cap the scan fan-out so a
     profile with many attestations can't multiply Alchemy volume
@@ -14,8 +15,14 @@ export const MAX_WALLETS_PER_SCAN = 5;
 export interface ResolvedScanTarget {
   /** null = unattested wallet; scan proceeds as a single-address scan. */
   profileId: number | null;
-  /** All attested wallets (lowercased), capped at MAX_WALLETS_PER_SCAN. */
+  /** Personal EOA wallets to actually scan (lowercased), capped at
+      MAX_WALLETS_PER_SCAN. Smart-contract wallets are excluded — their
+      history is protocol activity, not the person's. */
   wallets: string[];
+  /** Every attested wallet incl. smart wallets, for self-exclusion during
+      the scan (so a candidate isn't flagged for touching the user's own
+      smart wallet). Absent for unattested single-address scans. */
+  allWallets?: string[];
   primaryWallet: string;
   /** `scan-p<profileId>` for profiles, legacy `scan-<address>` otherwise. */
   investigationId: string;
@@ -71,16 +78,28 @@ export function parseScanInput(input: string): string | null {
   return null;
 }
 
-function toResolvedTarget(
+async function toResolvedTarget(
   profile: EthosProfile | null,
   fallbackAddress: string | null
-): ResolvedScanTarget | null {
+): Promise<ResolvedScanTarget | null> {
   if (profile && profile.profileId) {
     const allWallets = getWalletAddresses(profile);
-    // Keep the queried address in the scanned set even when the cap trims
-    // the list, so "scan this address" always covers that address.
-    let wallets = allWallets;
-    if (fallbackAddress && !wallets.slice(0, MAX_WALLETS_PER_SCAN).includes(fallbackAddress)) {
+
+    // Exclude smart-contract wallets from the scanned set — they're
+    // provisioned (e.g. the Ethos/Privy proxy) rather than personally
+    // controlled, and scanning them pollutes the cluster with shared
+    // protocol counterparties. Fall back to on-chain classification for
+    // wallets not yet in the mirror.
+    const flags = await getContractFlags(allWallets);
+    const eoas = allWallets.filter((w) => !flags.get(w));
+
+    // Scan EOAs; if the profile somehow has only smart wallets, fall back to
+    // scanning them so the profile is still coverable.
+    let wallets = eoas.length > 0 ? eoas : allWallets;
+
+    // Keep the queried address first when it's an EOA, so "scan this address"
+    // always leads with the address the user asked for.
+    if (fallbackAddress && !flags.get(fallbackAddress) && wallets.includes(fallbackAddress)) {
       wallets = [fallbackAddress, ...wallets.filter((w) => w !== fallbackAddress)];
     }
     wallets = wallets.slice(0, MAX_WALLETS_PER_SCAN);
@@ -93,6 +112,7 @@ function toResolvedTarget(
     return {
       profileId: profile.profileId,
       wallets,
+      allWallets,
       primaryWallet: wallets[0],
       investigationId: investigationIdFor(profile.profileId, wallets[0]),
       ethos: {
@@ -178,5 +198,5 @@ export async function resolveScanTarget(
   } catch {
     profile = null;
   }
-  return toResolvedTarget(profile, isAddress ? identifier : null);
+  return await toResolvedTarget(profile, isAddress ? identifier : null);
 }
