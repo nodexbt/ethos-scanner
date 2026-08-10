@@ -18,7 +18,6 @@ import {
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
-import Link from "next/link";
 import type { TwitterTweet, TwitterSearchResult } from "@/app/api/twitter/search/route";
 import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 
@@ -97,8 +96,10 @@ function AuthorPill({
   fallbackName: string;
 }) {
   return (
-    <Link
-      href={`/monitoring/${profile.profileId}`}
+    <a
+      href={`https://app.ethos.network/profile/x/${handle}`}
+      target="_blank"
+      rel="noopener noreferrer"
       className="inline-flex items-center gap-1 hover:underline"
     >
       {profile.avatarUrl ? (
@@ -114,7 +115,7 @@ function AuthorPill({
           <EthosScoreIcon size={7} />
         </span>
       )}
-    </Link>
+    </a>
   );
 }
 
@@ -165,12 +166,14 @@ function TweetList({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1 text-[11px] flex-wrap">
                 {t.ethos ? (
-                  <Link
-                    href={`/monitoring/${t.ethos.profileId}`}
+                  <a
+                    href={`https://app.ethos.network/profile/x/${t.author.userName}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="font-medium truncate hover:underline"
                   >
                     {displayName}
-                  </Link>
+                  </a>
                 ) : (
                   <span className="font-medium truncate">{displayName}</span>
                 )}

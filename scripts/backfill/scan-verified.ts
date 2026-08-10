@@ -21,8 +21,8 @@
 import { resolve } from "path";
 import { writeFileSync, mkdirSync, existsSync, appendFileSync } from "fs";
 
-// Match scripts/monitoring/daily.ts — process.loadEnvFile is the built-in
-// Node 22+ replacement for dotenv. Silent no-op if the file is missing.
+// process.loadEnvFile is the built-in Node 22+ replacement for dotenv.
+// Silent no-op if the file is missing.
 try {
   process.loadEnvFile(".env.local");
 } catch {

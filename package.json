@@ -6,9 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "monitor": "tsx scripts/monitoring/daily.ts",
-    "monitor:backfill-markets": "tsx scripts/monitoring/daily.ts --backfill-markets"
+    "lint": "eslint"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -34,12 +32,10 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25.2.0",
-    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
-    "pg": "^8.20.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"
