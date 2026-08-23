@@ -210,9 +210,9 @@ export function LandingPage({ authError }: LandingPageProps) {
             Reputation you can verify.
           </h1>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground max-w-xl mx-auto text-balance">
-            Scan any Ethos profile for coordinated reputation abuse — sybil
-            clusters, vouch rings, invitation farming — backed by on-chain
-            evidence from five networks.
+            Scan any Ethos profile for hidden wallet clusters — accounts
+            linked by shared funding, exchange deposits, and transfer
+            patterns across five networks.
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3">
