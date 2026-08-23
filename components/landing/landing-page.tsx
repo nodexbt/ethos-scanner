@@ -333,7 +333,7 @@ export function LandingPage({ authError }: LandingPageProps) {
             Ethos Scanner
           </span>
           <a
-            href="https://ethos.network"
+            href="https://app.ethos.network/"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
