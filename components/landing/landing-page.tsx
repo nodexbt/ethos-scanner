@@ -338,7 +338,7 @@ export function LandingPage({ authError }: LandingPageProps) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
           >
-            Built for the Ethos Network
+            Built for Ethos Network
             <ArrowRight className="h-3 w-3" />
           </a>
         </footer>
