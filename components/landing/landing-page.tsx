@@ -322,7 +322,7 @@ export function LandingPage({ authError }: LandingPageProps) {
         {/* Bottom CTA */}
         <section className="text-center pb-8">
           <h2 className="font-[family-name:var(--font-ibm-plex-mono)] text-xl font-semibold mb-6 text-balance">
-            Start with the profile you know best — your own.
+            Know who you&apos;re vouching for.
           </h2>
           <SignInButton />
         </section>
