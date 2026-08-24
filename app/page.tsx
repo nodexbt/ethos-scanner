@@ -51,6 +51,7 @@ import { OverviewCard } from "@/components/results/overview-card";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
 import { EvidenceCard } from "@/components/evidence/evidence-card";
+import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 import { AppHeader } from "@/components/app-header";
 import { LandingPage } from "@/components/landing/landing-page";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
@@ -1351,6 +1352,14 @@ export default function Home() {
                   initialTwitterEvidence={twitterEvidence}
                   onTwitterEvidenceChange={setTwitterEvidence}
                 />
+              )}
+
+              {/* Interpretation caveats — shown for clean results too, since
+                  "no cluster" is not proof of innocence. */}
+              {!scanning && (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
+                  <ResearchDisclaimer />
+                </motion.div>
               )}
             </motion.div>
           )}
