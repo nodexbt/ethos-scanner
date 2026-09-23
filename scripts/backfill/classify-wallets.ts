@@ -11,6 +11,9 @@
  *   default   only classify rows where is_contract IS NULL (cheap refresh
  *             for new attestations — safe to run on a schedule)
  *   --all     re-classify every row
+ *   --contracts  re-classify only rows currently flagged is_contract=true
+ *             (use after a classifier change that narrows what counts as a
+ *             contract, e.g. EIP-7702 delegated EOAs)
  *   --dry-run count only, write nothing
  *
  * Requires scripts/migrations/2026-07-03-wallet-is-contract.sql first.
@@ -26,6 +29,7 @@ import { getSupabase } from "@/lib/db/supabase";
 import { classifyContractsOnChain, writeContractFlags } from "@/lib/wallet-classify";
 
 const ALL = process.argv.includes("--all");
+const CONTRACTS_ONLY = process.argv.includes("--contracts");
 const DRY_RUN = process.argv.includes("--dry-run");
 
 async function main() {
@@ -36,7 +40,8 @@ async function main() {
   const addrs = new Set<string>();
   for (let from = 0; ; from += PAGE) {
     let q = supabase.from("profile_addresses").select("address, is_contract").order("address", { ascending: true });
-    if (!ALL) q = q.is("is_contract", null);
+    if (CONTRACTS_ONLY) q = q.eq("is_contract", true);
+    else if (!ALL) q = q.is("is_contract", null);
     const { data, error } = await q.range(from, from + PAGE - 1);
     if (error) throw new Error(`profile_addresses fetch failed: ${error.message}`);
     if (!data || data.length === 0) break;
@@ -45,7 +50,7 @@ async function main() {
   }
 
   const list = [...addrs];
-  console.log(`[classify] ${list.length} address(es) to classify${ALL ? " (--all)" : " (unclassified only)"}${DRY_RUN ? " [DRY RUN]" : ""}`);
+  console.log(`[classify] ${list.length} address(es) to classify${ALL ? " (--all)" : CONTRACTS_ONLY ? " (flagged contracts only)" : " (unclassified only)"}${DRY_RUN ? " [DRY RUN]" : ""}`);
   if (list.length === 0) return;
 
   let contracts = 0;

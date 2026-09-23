@@ -212,7 +212,22 @@ export async function getAllTransactions(
   return all;
 }
 
-/** Batch check if addresses are contracts via eth_getCode */
+/** EIP-7702 delegation designator: an EOA that has delegated to a smart-account
+    implementation gets code `0xef0100 || <20-byte address>` (23 bytes). It is still
+    a personally-controlled, private-key wallet — treat it as an EOA, not a
+    contract, or every MetaMask/Coinbase "smart account" user gets excluded
+    from scanning. */
+const EIP7702_PREFIX = "0xef0100";
+
+export function hasContractCode(code: string | undefined | null): boolean {
+  const c = (code || "0x").toLowerCase();
+  if (c === "0x" || c === "0x0") return false;
+  if (c.startsWith(EIP7702_PREFIX)) return false;
+  return true;
+}
+
+/** Batch check if addresses are contracts via eth_getCode (EIP-7702
+    delegated EOAs count as EOAs). */
 export async function batchGetCode(
   addresses: string[],
   chain: Chain,
@@ -259,7 +274,7 @@ export async function batchGetCode(
 
       chunk.forEach((addr, idx) => {
         const code = codeById.get(idx) || "0x";
-        result.set(addr, code !== "0x" && code !== "0x0");
+        result.set(addr, hasContractCode(code));
       });
     } catch {
       chunk.forEach((addr) => result.set(addr, false));
