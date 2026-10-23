@@ -5,8 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, ChevronDown, ChevronRight, History, Users, Activity, Network, ArrowRight } from "lucide-react";
 import { ClusterScanResult, ClusterCandidate, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
 import type { ResolvedScanTarget } from "@/lib/scan-target";
-import { getAddressLabel } from "@/lib/known-addresses";
-import { safeExternalUrl } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CandidateCard } from "@/components/results/candidate-card";
@@ -20,14 +18,14 @@ import { ScanLog } from "@/components/scanner/scan-log";
 import { EvidenceCard } from "@/components/evidence/evidence-card";
 import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 import { AppHeader } from "@/components/app-header";
+import { NetworkView } from "@/components/network/network-view";
 import { LandingPage } from "@/components/landing/landing-page";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
-import { ScansList, ScansListSkeleton, SORT_OPTIONS, SCORE_BANDS, listControlParams, type InvestigationSummary } from "@/components/scans/scans-list";
+import { ScansList, ScansListSkeleton, listControlParams, type InvestigationSummary } from "@/components/scans/scans-list";
 
 // --- Saved Investigations ---
 
 
-type ActiveTab = "scanner" | "yours" | "all" | "verified";
+type ActiveTab = "scanner" | "yours" | "all" | "verified" | "network";
 
 // Sort options for the scan-list tabs. "" = the tab's natural default (recent
 // for yours/all, most-flagged for verified) — sent as no sort param.
@@ -41,7 +39,7 @@ function investigationIdForResult(result: ClusterScanResult): string {
 function tabFromSearch(search: string): ActiveTab {
   const t = new URLSearchParams(search).get("tab");
   if (t === "scans") return "all";
-  return t === "yours" || t === "all" || t === "verified" ? t : "scanner";
+  return t === "yours" || t === "all" || t === "verified" || t === "network" ? t : "scanner";
 }
 
 export default function Home() {
@@ -856,9 +854,9 @@ export default function Home() {
             Scanner
           </button>
           <button
-            onClick={() => selectTab(activeTab === "scanner" ? "all" : activeTab)}
+            onClick={() => selectTab(activeTab === "scanner" || activeTab === "network" ? "all" : activeTab)}
             className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab !== "scanner"
+              activeTab !== "scanner" && activeTab !== "network"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
@@ -869,13 +867,17 @@ export default function Home() {
               <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{allTotal}</span>
             )}
           </button>
-          <a
-            href="/network"
-            className="h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          <button
+            onClick={() => selectTab("network")}
+            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === "network"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
           >
             <Network className="h-4 w-4" />
             Network
-          </a>
+          </button>
         </div>
         }
         onLogoClick={() => {
@@ -1396,6 +1398,8 @@ export default function Home() {
           onClose={() => setSelectedCandidate(null)}
         />
       )}
+
+      {activeTab === "network" && <NetworkView />}
 
       <AppFooter />
     </div>
