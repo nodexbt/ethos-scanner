@@ -48,6 +48,8 @@ import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
 import { ConnectionsCard } from "@/components/results/connections-card";
 import { OverviewCard } from "@/components/results/overview-card";
+import { DegradedBanner } from "@/components/results/degraded-banner";
+import { AppFooter } from "@/components/app-footer";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
 import { EvidenceCard } from "@/components/evidence/evidence-card";
@@ -156,6 +158,10 @@ export default function Home() {
   // server-side so they cover every investigation, not just loaded pages.
   const [scanStats, setScanStats] = useState<{ strongSum: number; possibleSum: number } | null>(null);
   const [currentInvestigationId, setCurrentInvestigationId] = useState<string | null>(null);
+  /** When the result on screen was produced; null while scanning. */
+  const [resultScannedAt, setResultScannedAt] = useState<string | null>(null);
+  /** Why the last scan wasn't saved (e.g. degraded over complete), if so. */
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
@@ -324,6 +330,8 @@ export default function Home() {
         const data = await resp.json();
         setClusterResult(data.clusterResult);
         setCurrentInvestigationId(target.investigationId);
+        setResultScannedAt(data.updatedAt ?? null);
+        setSaveNotice(null);
         setScreenshots(new Map(Object.entries(data.screenshots || {})));
         setTwitterEvidence(
           (data.twitterEvidence as Record<string, unknown> | null) ?? {}
@@ -342,6 +350,8 @@ export default function Home() {
   const runFreshScan = async (target: ResolvedScanTarget) => {
     setScanning(true);
     setClusterResult(null);
+    setResultScannedAt(null);
+    setSaveNotice(null);
     setClusterLogs([]);
     setScanProgress(null);
     setError(null);
@@ -438,7 +448,7 @@ export default function Home() {
       // Auto-save after scan completes
       if (scanResult) {
         const id = target.investigationId;
-        await fetch("/api/investigations", {
+        const saveResp = await fetch("/api/investigations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -449,6 +459,16 @@ export default function Home() {
             scanDurationMs,
           }),
         });
+        setResultScannedAt(new Date().toISOString());
+        if (saveResp.ok) {
+          setSaveNotice(null);
+        } else if (saveResp.status === 409) {
+          setSaveNotice("Not saved: this incomplete scan would have replaced a complete one. The previous result is kept; re-scan once the outage clears.");
+        } else if (saveResp.status === 403) {
+          setSaveNotice("Not saved: this scan belongs to another user. Results are shown for this session only.");
+        } else {
+          setSaveNotice("Not saved: the server rejected the result. Results are shown for this session only.");
+        }
         setCurrentInvestigationId(id);
         pushScanUrl(target);
         refreshInvestigations();
@@ -692,6 +712,8 @@ export default function Home() {
       (data.twitterEvidence as Record<string, unknown> | null) ?? {}
     );
     setCurrentInvestigationId(inv.id);
+    setResultScannedAt(data.updatedAt ?? null);
+    setSaveNotice(null);
     setClusterLogs([]);
     setScanProgress(null);
     setWalletInput(inv.target);
@@ -1237,12 +1259,14 @@ export default function Home() {
               animate={{ opacity: 1 }}
               className="space-y-4"
             >
-              {/* Overview */}
+              <DegradedBanner degraded={clusterResult.degraded} notice={saveNotice} />
+
               {/* Overview */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <OverviewCard
                 result={clusterResult}
                 scanning={scanning}
+                scannedAt={resultScannedAt}
                 onShare={() => {
                   const id = currentInvestigationId || investigationIdForResult(clusterResult);
                   handleShareInvestigation(id);
@@ -1270,6 +1294,11 @@ export default function Home() {
                         <AlertTriangle className="h-5 w-5 text-red-500" />
                         {clusterResult.strongCluster.length} Strong Cluster Wallet{clusterResult.strongCluster.length !== 1 && "s"}
                       </>
+                    ) : clusterResult.degraded ? (
+                      <>
+                        <AlertTriangle className="h-5 w-5 text-amber-500" />
+                        No Strong Cluster in Available Data
+                      </>
                     ) : (
                       <>
                         <Shield className="h-5 w-5 text-green-500" />
@@ -1279,7 +1308,9 @@ export default function Home() {
                   </CardTitle>
                   {clusterResult.strongCluster.length === 0 && (
                     <CardDescription className="text-xs">
-                      No wallets scored high enough across multiple signal types.
+                      {clusterResult.degraded
+                        ? "The scan was incomplete, so this is inconclusive rather than clean."
+                        : "No wallets scored high enough across multiple signal types."}
                     </CardDescription>
                   )}
                 </CardHeader>
@@ -1562,6 +1593,8 @@ export default function Home() {
           />
         )}
       </AnimatePresence>
+
+      <AppFooter />
     </div>
   );
 }

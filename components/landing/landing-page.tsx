@@ -11,6 +11,7 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppFooter } from "@/components/app-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { MIN_SCORE } from "@/lib/access";
@@ -327,30 +328,7 @@ export function LandingPage({ authError }: LandingPageProps) {
           <SignInButton />
         </section>
 
-        <footer className="pt-8 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <Shield className="h-3.5 w-3.5" />
-            Ethos Scanner
-            <span aria-hidden="true">·</span>
-            <a
-              href="https://x.com/nodexbt"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-foreground hover:underline"
-            >
-              built by @nodexbt
-            </a>
-          </span>
-          <a
-            href="https://app.ethos.network/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
-          >
-            Built for Ethos Network
-            <ArrowRight className="h-3 w-3" />
-          </a>
-        </footer>
+        <AppFooter className="mt-0 pt-8" />
       </div>
     </div>
   );

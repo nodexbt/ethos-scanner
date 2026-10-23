@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AppFooter } from "@/components/app-footer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,6 +178,8 @@ export default function FollowsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AppFooter />
     </div>
   );
 }
