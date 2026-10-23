@@ -101,7 +101,10 @@ export async function fetchProfile(
   let url: string;
 
   if (/^\d+$/.test(identifier)) {
-    url = `${ETHOS_API}/user/by/profile/${identifier}`;
+    // GET user/by/profile/{id} returns 404 for every id as of Oct 2026;
+    // the bulk POST still resolves ids, so use it for single lookups too.
+    const [profile] = await fetchProfilesByIds([Number(identifier)]);
+    return profile ?? null;
   } else if (isEthereumAddress(identifier)) {
     url = `${ETHOS_API}/user/by/address/${identifier}`;
   } else {

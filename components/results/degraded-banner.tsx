@@ -8,6 +8,9 @@ interface DegradedBannerProps {
   degraded?: DegradedInfo;
   /** Extra line, e.g. "not saved over your previous complete scan". */
   notice?: string | null;
+  /** Deliberate limits hit during the scan (e.g. a per-chain candidate
+      cap). Informational — the scan is complete as designed. */
+  coverage?: string[];
 }
 
 /**
@@ -16,9 +19,21 @@ interface DegradedBannerProps {
  * one, which is the most dangerous outcome for a tool whose "no results"
  * is read as a verdict.
  */
-export function DegradedBanner({ degraded, notice }: DegradedBannerProps) {
+export function DegradedBanner({ degraded, notice, coverage }: DegradedBannerProps) {
   const [open, setOpen] = useState(false);
-  if (!degraded && !notice) return null;
+  const hasCoverage = !!coverage && coverage.length > 0;
+  if (!degraded && !notice && !hasCoverage) return null;
+
+  // Coverage notes alone are informational, not a warning.
+  if (!degraded && !notice) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground space-y-0.5">
+        {coverage!.map((c, i) => (
+          <p key={i}>{c}.</p>
+        ))}
+      </div>
+    );
+  }
 
   const failed = degraded?.failedNetworks ?? [];
   const headline = failed.length > 0
@@ -39,6 +54,9 @@ export function DegradedBanner({ degraded, notice }: DegradedBannerProps) {
             </p>
           )}
           {notice && <p className="text-xs text-foreground">{notice}</p>}
+          {hasCoverage && coverage!.map((c, i) => (
+            <p key={`c${i}`} className="text-xs text-muted-foreground">{c}.</p>
+          ))}
           {degraded && degraded.reasons.length > 0 && (
             <button
               type="button"

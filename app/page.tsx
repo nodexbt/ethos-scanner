@@ -1260,7 +1260,7 @@ export default function Home() {
               animate={{ opacity: 1 }}
               className="space-y-4"
             >
-              <DegradedBanner degraded={clusterResult.degraded} notice={saveNotice} />
+              <DegradedBanner degraded={clusterResult.degraded} notice={saveNotice} coverage={clusterResult.coverageNotes} />
 
               {/* Overview */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

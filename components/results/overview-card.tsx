@@ -132,6 +132,11 @@ export function OverviewCard({
               &middot; Scanned {formatRelativeTime(scannedAt)}
             </span>
           )}
+          {result.usage && (
+            <span title={`${result.usage.alchemyCalls} Alchemy calls`}>
+              &middot; {result.usage.computeUnits.toLocaleString()} CU
+            </span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

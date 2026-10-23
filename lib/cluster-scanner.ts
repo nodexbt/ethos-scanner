@@ -3,6 +3,9 @@ import {
   type Chain,
   type AssetTransfer,
   getAllTransactions,
+  runWithUsage,
+  NATIVE_CATEGORIES,
+  type AlchemyUsage,
   parallel,
   getFirstFunder,
   getOutgoingTransfers,
@@ -50,7 +53,11 @@ async function fetchEthosCounterparties(addrs: string[]): Promise<Set<string>> {
 const MAX_PAGES = 50;
 const CANDIDATE_MAX_PAGES = 6;
 const CANDIDATE_MAX_TXS = 4000;
-const MAX_CANDIDATES_PER_NETWORK = 50;
+// Per-chain cap on counterparties whose history we fetch. Counterparties
+// are ranked by strength first (ETH moves with the target, then volume),
+// so the cap drops the weakest, and the result carries a coverage note
+// whenever it bites.
+const MAX_CANDIDATES_PER_NETWORK = 200;
 const CONCURRENCY = 8;
 
 // Scoring weights
@@ -182,6 +189,12 @@ export interface ClusterScanResult {
       is never saved over a complete one. Absent on complete scans and on
       results saved before this field existed. */
   degraded?: DegradedInfo;
+  /** Alchemy spend for this scan, for cost tracking and pricing. */
+  usage?: { alchemyCalls: number; computeUnits: number };
+  /** Places where the scan deliberately analyzed less than it saw (e.g.
+      a per-chain candidate cap). Not a failure, so it doesn't block
+      saving, but the user should know coverage was bounded. */
+  coverageNotes?: string[];
 }
 
 export interface DegradedInfo {
@@ -198,11 +211,11 @@ interface DirectWalletInfo {
   outgoingCount: number;
   timestamps: number[];
   values: number[];
+  /** Transfers that moved ETH (external/internal), as opposed to tokens. */
+  nativeCount: number;
   bidirectional: boolean;
   repeatTransfer: boolean;
 }
-
-
 
 // --- Helpers ---
 
@@ -263,6 +276,7 @@ function analyzeDirectTransfers(
         outgoingCount: 0,
         timestamps: [],
         values: [],
+        nativeCount: 0,
         bidirectional: false,
         repeatTransfer: false,
       };
@@ -270,6 +284,7 @@ function analyzeDirectTransfers(
     }
 
     info.count++;
+    if (NATIVE_CATEGORIES.has(tx.category)) info.nativeCount++;
     if (direction === "in") info.incomingCount++;
     else info.outgoingCount++;
     if (ts > 0) info.timestamps.push(ts);
@@ -295,6 +310,10 @@ function findSharedFundingSources(
   function incomingSources(wallet: string, txs: AssetTransfer[]): Set<string> {
     const sources = new Set<string>();
     for (const tx of txs) {
+      // Funding means ETH. Token transfers are excluded here because
+      // airdrop spammers send to thousands of wallets and would become a
+      // "shared incoming sender" for every profile.
+      if (!NATIVE_CATEGORIES.has(tx.category)) continue;
       const from = normalizeAddress(tx.from);
       const to = normalizeAddress(tx.to);
       if (to !== wallet || !from || from === wallet || from === ZERO_ADDRESS) continue;
@@ -463,6 +482,8 @@ async function scanNetwork(
   contractCache: Map<string, boolean>;
   txCount: number;
   targetFirstFunders: FirstFunderInfo[];
+  /** Set when more Ethos-profile counterparties existed than were analyzed. */
+  truncated: { analyzed: number; total: number } | null;
 }> {
   const network = chain.name;
   // Exclude every attested wallet from becoming a candidate, but only fetch
@@ -481,7 +502,7 @@ async function scanNetwork(
     async (wallet) => {
       txsByTargetWallet.set(
         wallet,
-        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES, onFailure: onPartial })
+        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES, onFailure: onPartial, scope: "all" })
       );
     },
     CONCURRENCY
@@ -501,6 +522,7 @@ async function scanNetwork(
       contractCache: new Map(),
       txCount: 0,
       targetFirstFunders: [],
+      truncated: null,
     };
   }
 
@@ -545,8 +567,24 @@ async function scanNetwork(
   log("success", `[${network}] ${directWallets.size} Ethos-profile wallets with direct transfers`);
   stepDone?.(`${network}: Direct transfers analyzed`);
 
-  // Step 4: Pre-score candidates from direct transfers
-  const allCandidateAddrsRaw = [...directWallets.keys()].slice(0, MAX_CANDIDATES_PER_NETWORK);
+  // Step 4: Pre-score candidates from direct transfers. Rank before
+  // capping: ETH moves with the target first (bidirectional, then
+  // volume), token-only interactions last — an NFT trade is a weaker tie
+  // than a gas top-up.
+  const ranked = [...directWallets.entries()].sort(([, a], [, b]) =>
+    (b.nativeCount > 0 ? 1 : 0) - (a.nativeCount > 0 ? 1 : 0) ||
+    (b.bidirectional ? 1 : 0) - (a.bidirectional ? 1 : 0) ||
+    b.nativeCount - a.nativeCount ||
+    b.count - a.count
+  );
+  const allCandidateAddrsRaw = ranked.slice(0, MAX_CANDIDATES_PER_NETWORK).map(([addr]) => addr);
+  const truncated =
+    ranked.length > MAX_CANDIDATES_PER_NETWORK
+      ? { analyzed: MAX_CANDIDATES_PER_NETWORK, total: ranked.length }
+      : null;
+  if (truncated) {
+    log("warn", `[${network}] ${truncated.total} Ethos-profile counterparties; analyzing the ${truncated.analyzed} strongest`);
+  }
   const PRE_SCORE_THRESHOLD = 3;
 
   const promisingCandidates: string[] = [];
@@ -580,6 +618,7 @@ async function scanNetwork(
       const candTxs = await getAllTransactions(addr, chain, {
         maxPages: CANDIDATE_MAX_PAGES,
         maxTxs: CANDIDATE_MAX_TXS,
+        scope: "all",
       });
       candidateTxsMap.set(addr, candTxs);
     },
@@ -725,7 +764,7 @@ async function scanNetwork(
   log("success", `[${network}] Scoring complete: ${strong} strong, ${possible} possible`);
   stepDone?.(`${network}: Scoring complete`);
 
-  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders };
+  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders, truncated };
 }
 
 // --- Shared CEX deposit address detection ---
@@ -867,6 +906,25 @@ export async function runClusterScan(
       countdown using this value — no per-step rate calculations. */
   baselineMs: number = 90_000
 ): Promise<ClusterScanResult> {
+  // Every Alchemy call made during the scan is attributed to this result.
+  const { result, usage } = await runWithUsage(() =>
+    runClusterScanInner(targetInput, onLog, onProgress, baselineMs)
+  );
+  result.usage = { alchemyCalls: usage.calls, computeUnits: usage.computeUnits };
+  result.logs.push({
+    timestamp: Date.now(),
+    level: "info",
+    message: `Alchemy usage: ${usage.calls} calls, ${usage.computeUnits.toLocaleString()} compute units`,
+  });
+  return result;
+}
+
+async function runClusterScanInner(
+  targetInput: ScanTarget | string,
+  onLog?: (entry: LogEntry) => void,
+  onProgress?: (progress: ScanProgress) => void,
+  baselineMs: number = 90_000
+): Promise<ClusterScanResult> {
   const logs: LogEntry[] = [];
   const log = (level: LogLevel, message: string) => {
     const entry: LogEntry = { timestamp: Date.now(), level, message };
@@ -970,11 +1028,17 @@ export async function runClusterScan(
   const allTargetFirstFunders: FirstFunderInfo[] = [];
   const txsByNetwork = new Map<string, Map<string, AssetTransfer[]>>();
   const contractCacheByNetwork = new Map<string, Map<string, boolean>>();
+  const coverageNotes: string[] = [];
 
   for (const { chain, result } of networkResults) {
     if (!result) {
       networkStats[chain.name] = { txCount: 0, directWallets: 0, failed: true };
       continue;
+    }
+    if (result.truncated) {
+      coverageNotes.push(
+        `${chain.name}: ${result.truncated.total} Ethos-profile counterparties found; the ${result.truncated.analyzed} strongest were analyzed`
+      );
     }
 
     networkStats[chain.name] = {
@@ -1408,5 +1472,6 @@ export async function runClusterScan(
     ...(degradedReasons.length > 0 && {
       degraded: { failedNetworks: [...failedNetworks], reasons: degradedReasons },
     }),
+    ...(coverageNotes.length > 0 && { coverageNotes }),
   };
 }

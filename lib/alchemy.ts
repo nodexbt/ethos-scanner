@@ -3,13 +3,64 @@ function getAlchemyKey() {
 }
 
 // Chains to check for funding analysis (Base first since Ethos is on Base)
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/** `internal`: whether alchemy_getAssetTransfers supports the "internal"
+    category on this chain (contract-originated ETH moves, e.g. a smart
+    wallet or bridge funding an EOA). Arbitrum and Optimism reject it. */
 export const CHAINS = [
-  { id: "base-mainnet", name: "Base", rpcBase: "https://base-mainnet.g.alchemy.com/v2" },
-  { id: "eth-mainnet", name: "Ethereum", rpcBase: "https://eth-mainnet.g.alchemy.com/v2" },
-  { id: "arb-mainnet", name: "Arbitrum", rpcBase: "https://arb-mainnet.g.alchemy.com/v2" },
-  { id: "opt-mainnet", name: "Optimism", rpcBase: "https://opt-mainnet.g.alchemy.com/v2" },
-  { id: "polygon-mainnet", name: "Polygon", rpcBase: "https://polygon-mainnet.g.alchemy.com/v2" },
+  { id: "base-mainnet", name: "Base", rpcBase: "https://base-mainnet.g.alchemy.com/v2", internal: true },
+  { id: "eth-mainnet", name: "Ethereum", rpcBase: "https://eth-mainnet.g.alchemy.com/v2", internal: true },
+  { id: "arb-mainnet", name: "Arbitrum", rpcBase: "https://arb-mainnet.g.alchemy.com/v2", internal: false },
+  { id: "opt-mainnet", name: "Optimism", rpcBase: "https://opt-mainnet.g.alchemy.com/v2", internal: false },
+  { id: "polygon-mainnet", name: "Polygon", rpcBase: "https://polygon-mainnet.g.alchemy.com/v2", internal: true },
 ] as const;
+
+/**
+ * Transfer categories for a purpose:
+ * - "all": everything the chain supports — ETH, internal, ERC-20/721/1155.
+ *   Used for discovery (who has the target transacted with at all).
+ * - "native": ETH value moves only (external + internal where supported).
+ *   Used for funding analysis: a token airdrop is not funding, and spam
+ *   token senders would otherwise become "shared funders" of everyone.
+ * - "value": native plus ERC-20, for exchange-deposit tracing where
+ *   stablecoin deposits are as telling as ETH ones.
+ */
+export type TransferScope = "all" | "native" | "value";
+export const NATIVE_CATEGORIES = new Set(["external", "internal"]);
+export function transferCategories(chain: Chain, scope: TransferScope): string[] {
+  const native = chain.internal ? ["external", "internal"] : ["external"];
+  if (scope === "native") return native;
+  if (scope === "value") return [...native, "erc20"];
+  return [...native, "erc20", "erc721", "erc1155"];
+}
+
+// --- Usage accounting ---
+// Compute-unit prices from alchemy.com/docs/reference/compute-unit-costs.
+const CU_PER_METHOD: Record<string, number> = {
+  alchemy_getAssetTransfers: 120,
+  eth_getCode: 20,
+};
+export interface AlchemyUsage {
+  calls: number;
+  computeUnits: number;
+  byMethod: Record<string, number>;
+}
+const usageStore = new AsyncLocalStorage<AlchemyUsage>();
+function recordUsage(method: string, n = 1) {
+  const u = usageStore.getStore();
+  if (!u) return;
+  u.calls += n;
+  u.computeUnits += n * (CU_PER_METHOD[method] ?? 0);
+  u.byMethod[method] = (u.byMethod[method] ?? 0) + n;
+}
+/** Run `fn` with a fresh usage counter; every Alchemy call made inside
+    (including in parallel branches) is attributed to it. */
+export async function runWithUsage<T>(fn: () => Promise<T>): Promise<{ result: T; usage: AlchemyUsage }> {
+  const usage: AlchemyUsage = { calls: 0, computeUnits: 0, byMethod: {} };
+  const result = await usageStore.run(usage, fn);
+  return { result, usage };
+}
 
 export type Chain = (typeof CHAINS)[number];
 export type ChainId = Chain["id"];
@@ -42,6 +93,7 @@ async function alchemyRequest(
 ): Promise<unknown | null> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      recordUsage(method);
       const response = await fetch(`${chainRpcBase}/${getAlchemyKey()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +137,9 @@ export async function getFirstFunder(
       {
         fromBlock: "0x0",
         toAddress: wallet.toLowerCase(),
-        category: ["external"],
+        // ETH only, incl. internal where supported: a wallet bootstrapped
+        // by a smart wallet or bridge is funded by an internal transfer.
+        category: transferCategories(chain, "native"),
         order: "asc",
         maxCount: "0x1",
         withMetadata: false,
@@ -119,7 +173,8 @@ export async function getOutgoingTransfers(
       {
         fromBlock: "0x0",
         fromAddress: wallet.toLowerCase(),
-        category: ["external"],
+        // ETH + stablecoins: exchange deposits are often made in USDC.
+        category: transferCategories(chain, "value"),
         order: "asc",
         maxCount: `0x${maxCount.toString(16)}`,
         withMetadata: false,
@@ -152,6 +207,8 @@ export async function getAllTransactions(
         returns whatever was fetched so far, so callers that care about
         completeness must listen here. */
     onFailure?: (reason: string) => void;
+    /** Which transfer categories to fetch. Defaults to plain ETH. */
+    scope?: TransferScope;
   } = {}
 ): Promise<AssetTransfer[]> {
   const maxPages = opts.maxPages ?? 50;
@@ -167,7 +224,7 @@ export async function getAllTransactions(
       const params: Record<string, unknown> = {
         fromBlock: "0x0",
         toBlock: "latest",
-        category: ["external"],
+        category: opts.scope ? transferCategories(chain, opts.scope) : ["external"],
         withMetadata: true,
         excludeZeroValue: false,
         maxCount: "0x3E8", // 1000
@@ -257,6 +314,7 @@ export async function batchGetCode(
       let resp: Response | null = null;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
+          recordUsage("eth_getCode", chunk.length);
           resp = await fetch(`${chain.rpcBase}/${getAlchemyKey()}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

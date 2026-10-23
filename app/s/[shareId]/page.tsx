@@ -155,7 +155,7 @@ export default function SharedInvestigation() {
       </div>
 
       <div className="space-y-4">
-        <DegradedBanner degraded={result.degraded} />
+        <DegradedBanner degraded={result.degraded} coverage={result.coverageNotes} />
         <OverviewCard
           result={result}
           scanning={false}
