@@ -1161,7 +1161,7 @@ export default function Home() {
               <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
               {/* Second-degree connections from other saved scans */}
               {currentInvestigationId && !scanning && (
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
+                <motion.div className="empty:hidden" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
                   <ConnectionsCard
                     investigationId={currentInvestigationId}
                     scanning={scanning}
