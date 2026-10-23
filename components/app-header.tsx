@@ -88,7 +88,10 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
       )}
 
       {nav && (
-        <div className="order-last basis-full lg:order-none lg:basis-auto min-w-0 overflow-x-auto scrollbar-hide">
+        // Takes the remaining width on large screens and scrolls inside it,
+        // so the account controls never wrap to a second row; on narrow
+        // screens it drops to its own full-width row.
+        <div className="order-last basis-full lg:order-none lg:basis-0 lg:flex-1 min-w-0 overflow-x-auto scrollbar-hide">
           {nav}
         </div>
       )}

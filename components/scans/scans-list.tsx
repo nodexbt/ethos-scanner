@@ -292,14 +292,17 @@ export function ScansList({
                   {new Date(inv.savedAt).toLocaleDateString()}
                 </span>
               </div>
-              {canDelete(inv) && (
+              {canDelete(inv) ? (
                 <button
                   onClick={() => onDelete(inv.id)}
-                  className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                  className="shrink-0 h-7 w-7 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
                   title="Delete scan"
                 >
                   <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>
+              ) : (
+                // Reserve the slot so columns line up with rows that can be deleted.
+                <span className="shrink-0 h-7 w-7 hidden md:block" aria-hidden />
               )}
             </div>
           ))}
