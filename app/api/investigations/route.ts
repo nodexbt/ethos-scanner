@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
-import { listInvestigations, getInvestigationStats, saveInvestigation, DegradedOverwriteError } from "@/lib/db/investigations";
+import { listInvestigations, getInvestigationStats, mergeTwitterEvidence } from "@/lib/db/investigations";
 import { parseListParams } from "@/lib/list-params";
-import { verifyProfileWallet } from "@/lib/scan-target";
 
-// Cap on the serialized cluster result size (2 MB). Larger payloads are rejected
-// to prevent DB bloat / DoS via arbitrary writes.
-const MAX_CLUSTER_RESULT_BYTES = 2 * 1024 * 1024;
+// Cap on the serialized evidence payload (4 MB) to prevent runaway writes.
+const MAX_TWITTER_EVIDENCE_BYTES = 4 * 1024 * 1024;
 
 interface ResolvedProfile {
   displayName: string;
@@ -147,6 +145,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/investigations — save/update
+// POST /api/investigations — attach X/Twitter evidence to a saved scan.
+// Scan results themselves are written server-side by /api/scan when a scan
+// completes; clients can no longer submit a cluster result.
 export async function POST(req: NextRequest) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
@@ -157,113 +158,36 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
   const data = body as Record<string, unknown>;
 
-  // ID must be `scan-0x<40 hex>` (unattested wallet) or `scan-p<profileId>`
-  // (Ethos profile) to prevent arbitrary key writes.
   if (typeof data.id !== "string" || !/^scan-(0x[a-f0-9]{40}|p\d{1,12})$/i.test(data.id)) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
+  const id = data.id.toLowerCase().startsWith("scan-p")
+    ? `scan-p${Number(data.id.slice(6))}`
+    : data.id.toLowerCase();
 
-  if (typeof data.target !== "string" || !/^0x[a-f0-9]{40}$/i.test(data.target)) {
-    return NextResponse.json({ error: "Invalid target" }, { status: 400 });
+  if (data.clusterResult !== undefined) {
+    return NextResponse.json(
+      { error: "Scan results are saved by the server; this endpoint only accepts twitterEvidence" },
+      { status: 400 }
+    );
   }
-
-  // Canonicalize the id so case variants (scan-P123, scan-0xABC…) can't
-  // create shadow rows that bypass the owner/PK guards, which key on the
-  // exact id string.
-  let id: string;
-  let profileId: number | null = null;
-  let targetWallets: string[] | null = null;
-
-  // For profile-keyed ids, verify server-side that the target address is
-  // actually attested to that profile — the client-supplied clusterResult
-  // is not trusted for this. For legacy address ids, the target must match
-  // the id's address.
-  const profileMatch = data.id.match(/^scan-p(\d{1,12})$/i);
-  if (profileMatch) {
-    profileId = Number(profileMatch[1]);
-    id = `scan-p${profileId}`;
-    targetWallets = await verifyProfileWallet(profileId, data.target);
-    if (!targetWallets) {
-      return NextResponse.json({ error: "id/target mismatch" }, { status: 400 });
-    }
-  } else {
-    id = `scan-${data.target.toLowerCase()}`;
-    if (data.id.toLowerCase() !== id) {
-      return NextResponse.json({ error: "id/target mismatch" }, { status: 400 });
-    }
+  if (!data.twitterEvidence || typeof data.twitterEvidence !== "object" || Array.isArray(data.twitterEvidence)) {
+    return NextResponse.json({ error: "twitterEvidence required" }, { status: 400 });
   }
-
-  if (data.targetName !== null && typeof data.targetName !== "string") {
-    return NextResponse.json({ error: "Invalid targetName" }, { status: 400 });
-  }
-  if (typeof data.targetName === "string" && data.targetName.length > 200) {
-    return NextResponse.json({ error: "targetName too long" }, { status: 400 });
-  }
-
-  // clusterResult must be an object and under the size cap
-  if (!data.clusterResult || typeof data.clusterResult !== "object") {
-    return NextResponse.json({ error: "Invalid clusterResult" }, { status: 400 });
-  }
-  const serializedSize = JSON.stringify(data.clusterResult).length;
-  if (serializedSize > MAX_CLUSTER_RESULT_BYTES) {
-    return NextResponse.json({ error: "clusterResult too large" }, { status: 413 });
-  }
-
-  // twitterEvidence is the cross-cluster tweet search payload. Optional;
-  // when present must be a plain object map (address → result). Cap the
-  // serialized size at 4 MB to prevent runaway saves on big clusters.
-  let twitterEvidence: Record<string, unknown> | undefined;
-  if (data.twitterEvidence !== undefined && data.twitterEvidence !== null) {
-    if (typeof data.twitterEvidence !== "object" || Array.isArray(data.twitterEvidence)) {
-      return NextResponse.json({ error: "Invalid twitterEvidence" }, { status: 400 });
-    }
-    const serialized = JSON.stringify(data.twitterEvidence);
-    if (serialized.length > 4 * 1024 * 1024) {
-      return NextResponse.json({ error: "twitterEvidence too large" }, { status: 413 });
-    }
-    twitterEvidence = data.twitterEvidence as Record<string, unknown>;
-  }
-
-  // scan_duration_ms is optional and only set when the client is
-  // saving fresh scan results (not when manually editing). Sanity-cap
-  // to 10 minutes so a wildly wrong value can't poison the rolling
-  // average — real scans are 30s-3min.
-  let scanDurationMs: number | null = null;
-  if (data.scanDurationMs != null) {
-    if (typeof data.scanDurationMs !== "number" || !Number.isFinite(data.scanDurationMs)) {
-      return NextResponse.json({ error: "Invalid scanDurationMs" }, { status: 400 });
-    }
-    if (data.scanDurationMs > 0 && data.scanDurationMs < 10 * 60 * 1000) {
-      scanDurationMs = Math.round(data.scanDurationMs);
-    }
+  if (JSON.stringify(data.twitterEvidence).length > MAX_TWITTER_EVIDENCE_BYTES) {
+    return NextResponse.json({ error: "twitterEvidence too large" }, { status: 413 });
   }
 
   try {
-    await saveInvestigation({
-      id,
-      target: data.target.toLowerCase(),
-      targetName: (data.targetName as string | null) ?? null,
-      clusterResult: data.clusterResult,
-      ownerProfileId: auth.profileId,
-      profileId,
-      targetWallets,
-      scanDurationMs,
-      twitterEvidence,
-    });
+    const ok = await mergeTwitterEvidence(id, data.twitterEvidence as Record<string, unknown>);
+    if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (err) {
-    if (err instanceof Error && err.message.includes("Not authorized")) {
-      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
-    }
-    if (err instanceof DegradedOverwriteError) {
-      return NextResponse.json({ error: err.message, code: "DEGRADED_NOT_SAVED" }, { status: 409 });
-    }
-    console.error("saveInvestigation failed:", err);
+    console.error("mergeTwitterEvidence failed:", err);
     return NextResponse.json({ error: "Failed to save" }, { status: 500 });
   }
   return NextResponse.json({ ok: true });

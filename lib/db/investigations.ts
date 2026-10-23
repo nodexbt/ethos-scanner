@@ -547,6 +547,32 @@ export async function saveInvestigation(data: {
 }
 
 /**
+ * Merge X/Twitter evidence into an existing investigation without touching
+ * the scan result. Per-address entries in `evidence` override existing
+ * ones; others are preserved. Returns false if the row doesn't exist.
+ */
+export async function mergeTwitterEvidence(
+  id: string,
+  evidence: Record<string, unknown>
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data: row, error } = await supabase
+    .from("investigations")
+    .select("twitter_evidence")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !row) return false;
+  const existing = ((row as { twitter_evidence?: Record<string, unknown> | null }).twitter_evidence ?? {}) as Record<string, unknown>;
+  const { error: upErr } = await supabase
+    .from("investigations")
+    .update({ twitter_evidence: { ...existing, ...evidence } })
+    .eq("id", id);
+  if (upErr) throw new Error(upErr.message);
+  invalidateInvestigationCaches();
+  return true;
+}
+
+/**
  * Returns the owner_profile_id for an investigation, or null if the
  * row doesn't exist or has no owner set (legacy rows).
  */

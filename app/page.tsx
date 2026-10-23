@@ -253,13 +253,7 @@ export default function Home() {
       fetch("/api/investigations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: currentInvestigationId,
-          target: clusterResult.target,
-          targetName: clusterResult.targetEthos?.displayName ?? null,
-          clusterResult,
-          twitterEvidence,
-        }),
+        body: JSON.stringify({ id: currentInvestigationId, twitterEvidence }),
       }).catch(() => {});
     }, 2000);
     return () => clearTimeout(t);
@@ -364,7 +358,6 @@ export default function Home() {
     }
 
     let scanResult: ClusterScanResult | null = null;
-    let scanDurationMs: number | null = null;
 
     try {
       const resp = await fetch("/api/scan", {
@@ -410,9 +403,11 @@ export default function Home() {
               // Pull off scanDurationMs before storing in state — it's
               // metadata for the save call, not part of the cluster
               // result that gets persisted/displayed.
-              const { scanDurationMs: dur, ...rest } = msg.data as ClusterScanResult & {
+              // scanDurationMs is server metadata, not part of the result.
+              const { scanDurationMs: _dur, ...rest } = msg.data as ClusterScanResult & {
                 scanDurationMs?: number;
               };
+              void _dur;
               const result = rest as ClusterScanResult;
               result.strongCluster.forEach((c) => {
                 c.signalTypes = new Set(c.signalTypes as unknown as string[]);
@@ -422,7 +417,14 @@ export default function Home() {
               });
               setClusterResult(result);
               scanResult = result;
-              if (typeof dur === "number") scanDurationMs = dur;
+            } else if (msg.type === "saved") {
+              // The server persisted (or declined to persist) the result.
+              const saved = msg.data as { ok: boolean; code?: string };
+              setResultScannedAt(new Date().toISOString());
+              if (saved.ok) setSaveNotice(null);
+              else if (saved.code === "DEGRADED_NOT_SAVED")
+                setSaveNotice("Not saved: this incomplete scan would have replaced a complete one. The previous result is kept; re-scan once the outage clears.");
+              else setSaveNotice("Not saved: the server could not store the result. Results are shown for this session only.");
             } else if (msg.type === "error") {
               setError(msg.data);
             }
@@ -432,31 +434,8 @@ export default function Home() {
         }
       }
 
-      // Auto-save after scan completes
       if (scanResult) {
-        const id = target.investigationId;
-        const saveResp = await fetch("/api/investigations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id,
-            target: target.primaryWallet.toLowerCase(),
-            targetName: (scanResult as ClusterScanResult).targetEthos?.displayName ?? null,
-            clusterResult: scanResult,
-            scanDurationMs,
-          }),
-        });
-        setResultScannedAt(new Date().toISOString());
-        if (saveResp.ok) {
-          setSaveNotice(null);
-        } else if (saveResp.status === 409) {
-          setSaveNotice("Not saved: this incomplete scan would have replaced a complete one. The previous result is kept; re-scan once the outage clears.");
-        } else if (saveResp.status === 403) {
-          setSaveNotice("Not saved: this scan belongs to another user. Results are shown for this session only.");
-        } else {
-          setSaveNotice("Not saved: the server rejected the result. Results are shown for this session only.");
-        }
-        setCurrentInvestigationId(id);
+        setCurrentInvestigationId(target.investigationId);
         pushScanUrl(target);
         refreshInvestigations();
       }

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { runClusterScan } from "@/lib/cluster-scanner";
 import { resolveScanTarget } from "@/lib/scan-target";
-import { getRecentScanAverageMs } from "@/lib/db/investigations";
+import { getRecentScanAverageMs, saveInvestigation, DegradedOverwriteError } from "@/lib/db/investigations";
 import { consumeDailyScanQuota } from "@/lib/db/scan-quota";
 
 export const maxDuration = 300; // 5 min timeout for long scans
@@ -93,6 +93,31 @@ export async function POST(req: NextRequest) {
         controller.enqueue(
           encoder.encode(JSON.stringify({ type: "result", data: serialized }) + "\n")
         );
+
+        // Persist server-side: the client never submits a result, so a
+        // saved investigation always reflects what the scanner produced.
+        let saved: { ok: boolean; code?: string; message?: string };
+        try {
+          await saveInvestigation({
+            id: resolved.investigationId,
+            target: resolved.primaryWallet.toLowerCase(),
+            targetName: result.targetEthos?.displayName ?? null,
+            clusterResult: serialized,
+            ownerProfileId: auth.profileId,
+            profileId: resolved.profileId,
+            targetWallets: resolved.wallets,
+            scanDurationMs,
+          });
+          saved = { ok: true };
+        } catch (err) {
+          if (err instanceof DegradedOverwriteError) {
+            saved = { ok: false, code: "DEGRADED_NOT_SAVED", message: err.message };
+          } else {
+            console.error("scan save failed:", err);
+            saved = { ok: false, code: "SAVE_FAILED", message: err instanceof Error ? err.message : "save failed" };
+          }
+        }
+        controller.enqueue(encoder.encode(JSON.stringify({ type: "saved", data: saved }) + "\n"));
       } catch (err) {
         controller.enqueue(
           encoder.encode(
