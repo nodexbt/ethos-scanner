@@ -72,9 +72,9 @@ const DEMO_SIGNALS: { name: string; weight: number; detail: string }[] = [
     detail: "both wallets consolidate to the same exchange deposit address",
   },
   {
-    name: "mutual_vouches",
-    weight: 2,
-    detail: "profiles vouched for each other on Ethos",
+    name: "multi_hop_funding",
+    weight: 6,
+    detail: "one of the target's funders also funded this wallet",
   },
 ];
 
@@ -139,7 +139,7 @@ const STEPS = [
   {
     icon: GitBranch,
     title: "Correlate the cluster",
-    body: "Fourteen weighted signals — shared first funders, common exchange deposit addresses, multi-hop funding chains, mutual vouches — separate coordination from coincidence.",
+    body: "Seven weighted on-chain signals — shared first funders, common exchange deposit addresses, multi-hop funding chains — separate coordination from coincidence. Ethos vouches, reviews and invites are shown alongside as context.",
   },
   {
     icon: FileText,
@@ -163,7 +163,7 @@ const SIGNAL_HIGHLIGHTS = [
   },
   {
     name: "Social corroboration",
-    body: "Mutual vouches, mutual reviews, and invitation trees from the Ethos graph stack on top of the on-chain evidence.",
+    body: "Mutual vouches, mutual reviews, and invitation trees from the Ethos graph are shown next to the on-chain evidence. They don't add points — real people vouch for each other all the time — but they help you read a link.",
   },
 ];
 

@@ -84,16 +84,16 @@ const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: string 
   { value: "recent-asc", label: "Oldest first", sort: "recent", dir: "asc" },
   { value: "strong-desc", label: "Most strong", sort: "strong", dir: "desc" },
   { value: "possible-desc", label: "Most possible", sort: "possible", dir: "desc" },
-  { value: "score-desc", label: "Highest score", sort: "score", dir: "desc" },
-  { value: "score-asc", label: "Lowest score", sort: "score", dir: "asc" },
+  { value: "score-desc", label: "Highest Ethos score", sort: "score", dir: "desc" },
+  { value: "score-asc", label: "Lowest Ethos score", sort: "score", dir: "asc" },
 ];
 
 const SCORE_BANDS: { value: string; label: string; min?: number }[] = [
   { value: "", label: "Any score" },
-  { value: "1400", label: "Score > 1400", min: 1400 },
-  { value: "1600", label: "Score > 1600", min: 1600 },
-  { value: "1800", label: "Score > 1800", min: 1800 },
-  { value: "2000", label: "Score > 2000", min: 2000 },
+  { value: "1400", label: "Ethos score > 1400", min: 1400 },
+  { value: "1600", label: "Ethos score > 1600", min: 1600 },
+  { value: "1800", label: "Ethos score > 1800", min: 1800 },
+  { value: "2000", label: "Ethos score > 2000", min: 2000 },
 ];
 
 /** Build the shared search/sort/filter query params from control state. */
@@ -1166,14 +1166,14 @@ export default function Home() {
                   <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">2</div>
                   <div>
                     <div className="font-medium text-foreground">Signal correlation</div>
-                    <div className="text-xs">Identifies direct transfers, shared funding sources, and CEX deposit patterns.</div>
+                    <div className="text-xs">Direct transfers surface candidates; first funders, shared funding sources and exchange deposit patterns score them.</div>
                   </div>
                 </div>
                 <div className="flex gap-3">
                   <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">3</div>
                   <div>
-                    <div className="font-medium text-foreground">Cluster scoring</div>
-                    <div className="text-xs">Wallets matching multiple signal types are flagged as strong cluster candidates.</div>
+                    <div className="font-medium text-foreground">Link strength</div>
+                    <div className="text-xs">Strong when first funded by the target or its cluster, or 15+ points across two or more signal types. Possible from 8 points.</div>
                   </div>
                 </div>
               </CardContent>

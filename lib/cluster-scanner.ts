@@ -392,10 +392,7 @@ function scoreCandidate(
   }
 
   const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
-  let confidence: "high" | "medium" | "low" = "low";
-  if (fundedByTarget || fundedByClusterWallet) confidence = "high";
-  else if (totalScore >= FINAL_SCORE_THRESHOLD && signalTypes.size >= 2) confidence = "high";
-  else if (totalScore >= POSSIBLE_SCORE_THRESHOLD) confidence = "medium";
+  const confidence = confidenceFor(totalScore, signalTypes, fundedByTarget || fundedByClusterWallet);
 
   return {
     address,
@@ -419,6 +416,31 @@ function scoreCandidate(
     mutualVouches: false,
     networks: [network],
   };
+}
+
+/**
+ * The one place the Strong / Possible rule lives. Strong = first funded by
+ * the target or its cluster (auto-high), or FINAL_SCORE_THRESHOLD+ points
+ * across at least two signal types. Possible = POSSIBLE_SCORE_THRESHOLD+.
+ * Mirrored in plain words by STRONG_RULE in lib/scan-utils.ts.
+ */
+function confidenceFor(
+  score: number,
+  signalTypes: Set<string>,
+  autoHigh: boolean
+): "high" | "medium" | "low" {
+  if (autoHigh) return "high";
+  if (score >= FINAL_SCORE_THRESHOLD && signalTypes.size >= 2) return "high";
+  if (score >= POSSIBLE_SCORE_THRESHOLD) return "medium";
+  return "low";
+}
+
+/** Re-run the rule after signals were added post-scoring (social, CEX). */
+function recalcConfidence(c: ClusterCandidate) {
+  const autoHigh = c.signals.some((s) => s.type === "funded_by_target" || s.type === "funded_by_cluster");
+  const next = confidenceFor(c.score, c.signalTypes, autoHigh);
+  // Never drop below the tier the candidate already earned.
+  if (next === "high" || c.confidence !== "high") c.confidence = next;
 }
 
 // --- Network Scan ---
@@ -1223,10 +1245,7 @@ export async function runClusterScan(
       }
 
       // Recalculate confidence after adding social signals
-      for (const c of allWithEthos) {
-        if (c.score >= FINAL_SCORE_THRESHOLD && c.signalTypes.size >= 2) c.confidence = "high";
-        else if (c.score >= POSSIBLE_SCORE_THRESHOLD) c.confidence = "medium";
-      }
+      for (const c of allWithEthos) recalcConfidence(c);
     } catch (err) {
       log("error", `Ethos social analysis failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1351,9 +1370,7 @@ export async function runClusterScan(
                 details: `same ${dep.exchange} deposit address as other cluster members`,
               });
               candidate.signalTypes.add("shared_cex_deposit");
-              // Recalculate confidence
-              if (candidate.score >= FINAL_SCORE_THRESHOLD && candidate.signalTypes.size >= 2) candidate.confidence = "high";
-              else if (candidate.score >= POSSIBLE_SCORE_THRESHOLD) candidate.confidence = "medium";
+              recalcConfidence(candidate);
             }
           }
         }
@@ -1371,6 +1388,12 @@ export async function runClusterScan(
   const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   log("success", `Cluster scan complete in ${timeStr}`);
 
+  // Social and CEX signals can move a candidate between tiers after the
+  // initial split; re-bucket so the list matches the label.
+  const finalAll = [...strongWithEthos, ...possibleWithEthos];
+  const finalStrong = finalAll.filter((c) => c.confidence === "high").sort((a, b) => b.score - a.score);
+  const finalPossible = finalAll.filter((c) => c.confidence === "medium").sort((a, b) => b.score - a.score);
+
   return {
     target,
     targetWallets,
@@ -1379,8 +1402,8 @@ export async function runClusterScan(
     targetFirstFunders: allTargetFirstFunders,
     funderProfiles,
     sharedCexDeposits,
-    strongCluster: strongWithEthos,
-    possibleCluster: possibleWithEthos,
+    strongCluster: finalStrong,
+    possibleCluster: finalPossible,
     networkStats,
     logs,
     ...(degradedReasons.length > 0 && {

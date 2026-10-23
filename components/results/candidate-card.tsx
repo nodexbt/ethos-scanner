@@ -49,7 +49,7 @@ export const CandidateCard = memo(function CandidateCard({
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                 candidate.confidence === "high" ? "bg-red-500 text-white" : "bg-amber-500 text-white"
               }`}>
-                score: {candidate.score}
+                link strength {candidate.score}
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground shrink-0">
