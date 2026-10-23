@@ -939,6 +939,13 @@ export default function Home() {
               <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{verifiedTotal}</span>
             )}
           </button>
+          <a
+            href="/network"
+            className="h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          >
+            <Network className="h-4 w-4" />
+            Network
+          </a>
         </div>
         }
         onLogoClick={() => {
