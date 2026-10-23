@@ -17,20 +17,21 @@ import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 interface CandidateModalProps {
+  /** The candidate to show; keep passing the last one while closing so
+      the exit animation has content to render. */
   candidate: ClusterCandidate;
+  open: boolean;
   result: ClusterScanResult;
   onClose: () => void;
 }
 
-export function CandidateModal({ candidate, result, onClose }: CandidateModalProps) {
-  const name = candidate.ethosProfile?.displayName || candidate.address;
+export function CandidateModal({ candidate, open, result, onClose }: CandidateModalProps) {
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent
         hideClose
-        className="max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-xl"
+        className="w-[calc(100%-2rem)] max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-xl sm:rounded-xl"
       >
-        <DialogTitle className="sr-only">{name}</DialogTitle>
         <DialogDescription className="sr-only">Evidence behind this profile&apos;s link to the scanned target.</DialogDescription>
         {/* Header */}
         <div className="flex items-start gap-3 p-5 border-b sticky top-0 bg-background rounded-t-xl z-10">
@@ -42,10 +43,12 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
             />
           )}
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-lg inline-flex items-center gap-1.5">
-              {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 12)}...${candidate.address.slice(-6)}`}
-              {candidate.ethosProfile?.humanVerified && <HumanVerifiedBadge size={16} />}
-            </div>
+            <DialogTitle asChild>
+              <div className="font-semibold text-lg inline-flex items-center gap-1.5">
+                {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 12)}...${candidate.address.slice(-6)}`}
+                {candidate.ethosProfile?.humanVerified && <HumanVerifiedBadge size={16} />}
+              </div>
+            </DialogTitle>
             <div className="text-sm text-muted-foreground">
               {candidate.ethosProfile?.username && `@${candidate.ethosProfile.username} · `}
               {candidate.confidence === "high" ? "Strong" : "Possible"} match · Link strength {candidate.score}

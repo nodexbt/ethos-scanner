@@ -78,6 +78,12 @@ export default function Home() {
   /** Bumped after each scan so the header refetches the daily quota. */
   const [quotaKey, setQuotaKey] = useState(0);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
+  /** Last opened candidate, kept while the dialog animates closed. */
+  const [modalCandidate, setModalCandidate] = useState<ClusterCandidate | null>(null);
+  const openCandidate = (c: ClusterCandidate) => {
+    setModalCandidate(c);
+    setSelectedCandidate(c);
+  };
   const [showPossible, setShowPossible] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
@@ -1137,7 +1143,7 @@ export default function Home() {
                         key={candidate.address}
                         candidate={candidate}
                         result={clusterResult}
-                        onSelect={setSelectedCandidate}
+                        onSelect={openCandidate}
                       />
                     ))}
                   </CardContent>
@@ -1166,7 +1172,7 @@ export default function Home() {
                         key={candidate.address}
                         candidate={candidate}
                         result={clusterResult}
-                        onSelect={setSelectedCandidate}
+                        onSelect={openCandidate}
                       />
                     ))}
                   </CardContent>
@@ -1412,16 +1418,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* Candidate Detail Modal */}
-      <AnimatePresence>
-        {selectedCandidate && clusterResult && (
-          <CandidateModal
-            candidate={selectedCandidate}
-            result={clusterResult}
-            onClose={() => setSelectedCandidate(null)}
-          />
-        )}
-      </AnimatePresence>
+      {/* Candidate Detail Modal — stays mounted so Radix can animate it closed */}
+      {modalCandidate && clusterResult && (
+        <CandidateModal
+          candidate={modalCandidate}
+          open={selectedCandidate !== null}
+          result={clusterResult}
+          onClose={() => setSelectedCandidate(null)}
+        />
+      )}
 
       <AppFooter />
     </div>

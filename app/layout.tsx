@@ -72,13 +72,13 @@ export default function RootLayout({
       >
         <SessionProvider>
           <TooltipProvider delayDuration={200}>
-          <ThemeProvider>
-            <Background />
-            <SmoothScroll />
-            <main className="min-h-screen">{children}</main>
-          </ThemeProvider>
-        </TooltipProvider>
-          </SessionProvider>
+            <ThemeProvider>
+              <Background />
+              <SmoothScroll />
+              <main className="min-h-screen">{children}</main>
+            </ThemeProvider>
+          </TooltipProvider>
+        </SessionProvider>
         <SpeedInsights />
         <Analytics />
       </body>

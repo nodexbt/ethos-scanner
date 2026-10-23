@@ -9,6 +9,7 @@ import DecryptedText from "@/components/ui/decrypted-text";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { NotificationsBell } from "@/components/notifications-bell";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface AppHeaderProps {
   /**
@@ -119,8 +120,9 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
               )}
             </div>
             {quota && (
+              <Tooltip>
+              <TooltipTrigger asChild>
               <span
-                title={quota.unlimited ? "Admins have no daily scan limit" : `${quota.used} of ${quota.limit} scans used today (resets 00:00 UTC)`}
                 className={`hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums ${
                   !quota.unlimited && quota.remaining === 0
                     ? "bg-red-500/15 text-red-500"
@@ -131,6 +133,11 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
               >
                 {quota.unlimited ? "∞ scans" : `${quota.remaining} scan${quota.remaining === 1 ? "" : "s"} left`}
               </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {quota.unlimited ? "Admins have no daily scan limit" : `${quota.used} of ${quota.limit} scans used today · resets 00:00 UTC`}
+              </TooltipContent>
+              </Tooltip>
             )}
             <NotificationsBell />
             {isAdmin && (
