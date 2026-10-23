@@ -2,57 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { Shield, AlertTriangle, ArrowRight } from "lucide-react";
+import { Shield, AlertTriangle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { useParams } from "next/navigation";
-import Link from "next/link";
-import DecryptedText from "@/components/ui/decrypted-text";
+import { SiteHeader } from "@/components/site-header";
 import { OverviewCard } from "@/components/results/overview-card";
 import { formatRelativeTime } from "@/lib/utils";
 import { DegradedBanner } from "@/components/results/degraded-banner";
 import { AppFooter } from "@/components/app-footer";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
-
-// Header chip matching the home page wordmark — links back to "/" so visitors
-// landing on a shared link have a clear path to the scanner.
-function ShareHeader() {
-  return (
-    <div className="flex items-center justify-between pb-4">
-      <Link
-        href="/"
-        className="group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors min-w-0"
-      >
-        <Shield className="h-4.5 w-4.5 shrink-0" />
-        <DecryptedText
-          text="Ethos Scanner"
-          speed={40}
-          maxIterations={12}
-          sequential
-          revealDirection="start"
-          animateOn="hover"
-          replayInterval={30000}
-          useOriginalCharsOnly={false}
-          parentClassName="font-[family-name:var(--font-ibm-plex-mono)] font-semibold text-base tracking-tight"
-          className="text-foreground"
-          encryptedClassName="text-muted-foreground"
-        />
-      </Link>
-      <div className="flex items-center gap-2">
-        <Link
-          href="/"
-          className="h-10 hidden sm:inline-flex items-center gap-1.5 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 text-xs font-medium hover:bg-card/90 hover:border-foreground/30 transition-colors"
-        >
-          Run your own scan
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
-        <ThemeToggle />
-      </div>
-    </div>
-  );
-}
 
 export default function SharedInvestigation() {
   const params = useParams();
@@ -79,7 +39,7 @@ export default function SharedInvestigation() {
   if (loading) {
     return (
       <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
-        <ShareHeader />
+        <SiteHeader />
         {/* Title block */}
         <div className="bg-card/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3 mb-4 space-y-2">
           <Skeleton className="h-7 w-56" />
@@ -127,7 +87,7 @@ export default function SharedInvestigation() {
   if (error || !result) {
     return (
       <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
-        <ShareHeader />
+        <SiteHeader />
         <div className="flex items-center justify-center py-16">
           <Card className="w-full max-w-sm">
             <CardHeader className="text-center">
@@ -157,7 +117,7 @@ export default function SharedInvestigation() {
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
-      <ShareHeader />
+      <SiteHeader />
 
       <div className="bg-card/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3 mb-4 space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">

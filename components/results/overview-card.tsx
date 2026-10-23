@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, Download } from "lucide-react";
+import { ExternalLink, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, Download, Globe } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
@@ -69,8 +69,20 @@ export function OverviewCard({
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
-          {(onShare || onRescan) && (
+          {(onShare || onRescan || result.targetEthos?.username) && (
             <div className="flex items-center gap-0.5">
+              {result.targetEthos?.username && (
+                <a
+                  href={`/p/${result.targetEthos.username}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Public summary page for this profile"
+                  className="h-7 px-2 inline-flex items-center gap-1.5 text-xs rounded-md hover:bg-muted transition-colors"
+                >
+                  <Globe className="h-3.5 w-3.5" />
+                  Public page
+                </a>
+              )}
               {onShare && (
                 <Button
                   onClick={(e) => {
