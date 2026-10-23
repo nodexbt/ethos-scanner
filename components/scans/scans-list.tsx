@@ -60,6 +60,16 @@ export function listControlParams(c: {
 /** Investigation id for a scan result: per-profile when the target has an
     Ethos profile, legacy per-address otherwise. Mirrors lib/scan-target. */
 
+/** Native select with its arrow hidden and a chevron drawn inside the padding. */
+function SelectWrap({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative inline-flex">
+      {children}
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+    </div>
+  );
+}
+
 export function ScansListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
     <div className="space-y-4">
@@ -144,12 +154,6 @@ export function ScansList({
   // padding so it never sits on the border.
   const selectClass =
     "h-9 appearance-none rounded-md border border-border bg-card pl-3 pr-8 text-xs text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary";
-  const SelectWrap = ({ children }: { children: React.ReactNode }) => (
-    <div className="relative inline-flex">
-      {children}
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-    </div>
-  );
 
   return (
     <div className="space-y-4">
