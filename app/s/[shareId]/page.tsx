@@ -10,6 +10,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { OverviewCard } from "@/components/results/overview-card";
+import { DegradedBanner } from "@/components/results/degraded-banner";
+import { AppFooter } from "@/components/app-footer";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 
@@ -46,6 +48,7 @@ export default function SharedInvestigation() {
   const params = useParams();
   const shareId = params.shareId as string;
   const [result, setResult] = useState<ClusterScanResult | null>(null);
+  const [scannedAt, setScannedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +58,10 @@ export default function SharedInvestigation() {
         if (!r.ok) throw new Error("Investigation not found");
         return r.json();
       })
-      .then((data) => setResult(data.clusterResult))
+      .then((data) => {
+        setResult(data.clusterResult);
+        setScannedAt(data.updatedAt ?? null);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [shareId]);
@@ -149,10 +155,12 @@ export default function SharedInvestigation() {
       </div>
 
       <div className="space-y-4">
+        <DegradedBanner degraded={result.degraded} />
         <OverviewCard
           result={result}
           scanning={false}
           onCopyWallets={handleCopyWallets}
+          scannedAt={scannedAt}
         />
 
         {result.strongCluster.length > 0 && (
@@ -191,16 +199,31 @@ export default function SharedInvestigation() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-5 w-5 text-green-500" />
-                No Cluster Found
+                {result.degraded ? (
+                  <>
+                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                    No Cluster in Available Data
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-5 w-5 text-green-500" />
+                    No Cluster Found
+                  </>
+                )}
               </CardTitle>
-              <CardDescription className="text-xs">No wallets scored high enough to be flagged.</CardDescription>
+              <CardDescription className="text-xs">
+                {result.degraded
+                  ? "The scan was incomplete, so this is inconclusive rather than clean."
+                  : "No wallets scored high enough to be flagged."}
+              </CardDescription>
             </CardHeader>
           </Card>
         )}
 
         <ResearchDisclaimer />
       </div>
+
+      <AppFooter />
     </div>
   );
 }

@@ -140,7 +140,7 @@ async function toResolvedTarget(
  * Verify that `address` is one of `profileId`'s attested wallets, and
  * return the profile's full wallet list if so (null otherwise). Checks
  * the locally-mirrored profile_addresses table first (cheap), falling
- * back to the live Ethos API for attestations newer than the nightly
+ * back to the live Ethos API for attestations newer than the daily mirror
  * sync. Used to validate `scan-p<profileId>` investigation writes so a
  * client can't save under another profile's key.
  */

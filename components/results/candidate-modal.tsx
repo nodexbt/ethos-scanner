@@ -8,6 +8,8 @@ import {
   getExplorerAddressUrl,
   resolveAddressName,
   buildConnectionSummary,
+  SIGNAL_LABELS,
+  STRONG_RULE,
 } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
@@ -54,7 +56,7 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
             </div>
             <div className="text-sm text-muted-foreground">
               {candidate.ethosProfile?.username && `@${candidate.ethosProfile.username} · `}
-              {candidate.confidence === "high" ? "Strong" : "Possible"} match · Score: {candidate.score}
+              {candidate.confidence === "high" ? "Strong" : "Possible"} match · Link strength {candidate.score}
             </div>
           </div>
           <button
@@ -101,6 +103,29 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
                   <span>{line}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Signal breakdown — the number on the pill, explained */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Link Strength: {candidate.score}</h3>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5">
+              {candidate.signals.map((s: Signal, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <span
+                    className={`shrink-0 w-9 text-right font-mono tabular-nums ${
+                      s.score > 0 ? "text-foreground font-medium" : "text-muted-foreground"
+                    }`}
+                  >
+                    {s.score > 0 ? `+${s.score}` : "ctx"}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="font-medium">{SIGNAL_LABELS[s.type] ?? s.type}</span>
+                    {s.details && <span className="text-muted-foreground"> · {s.details}</span>}
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-muted-foreground pt-2 mt-1 border-t border-border">{STRONG_RULE}</p>
             </div>
           </div>
 

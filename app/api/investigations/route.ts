@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
-import { listInvestigations, getInvestigationStats, saveInvestigation } from "@/lib/db/investigations";
+import { listInvestigations, getInvestigationStats, saveInvestigation, DegradedOverwriteError } from "@/lib/db/investigations";
 import { parseListParams } from "@/lib/list-params";
 import { verifyProfileWallet } from "@/lib/scan-target";
 
@@ -259,6 +259,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof Error && err.message.includes("Not authorized")) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    }
+    if (err instanceof DegradedOverwriteError) {
+      return NextResponse.json({ error: err.message, code: "DEGRADED_NOT_SAVED" }, { status: 409 });
     }
     console.error("saveInvestigation failed:", err);
     return NextResponse.json({ error: "Failed to save" }, { status: 500 });

@@ -7,7 +7,7 @@ import { ExternalLink, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, 
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
-import { safeExternalUrl } from "@/lib/utils";
+import { safeExternalUrl, formatRelativeTime } from "@/lib/utils";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 
@@ -22,6 +22,9 @@ interface OverviewCardProps {
   onRescan?: () => void;
   onCopyWallets?: () => void;
   onExport?: () => void;
+  /** When this result was produced (ISO). Shown so a cached result is
+      never mistaken for a live one. */
+  scannedAt?: string | null;
 }
 
 export function OverviewCard({
@@ -31,6 +34,7 @@ export function OverviewCard({
   onRescan,
   onCopyWallets,
   onExport,
+  scannedAt,
 }: OverviewCardProps) {
   const [showFirstFunders, setShowFirstFunders] = useState(false);
 
@@ -123,14 +127,34 @@ export function OverviewCard({
               <EthosScoreIcon size={9} className="ml-0.5" />)
             </span>
           )}
+          {scannedAt && (
+            <span title={new Date(scannedAt).toLocaleString()}>
+              &middot; Scanned {formatRelativeTime(scannedAt)}
+            </span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
-            <div className="text-xl font-bold">{Object.keys(result.networkStats).length}</div>
-            <div className="text-[10px] text-muted-foreground">Networks</div>
+            {(() => {
+              const total = Object.keys(result.networkStats).length;
+              const failed = Object.values(result.networkStats).filter((n) => n.failed).length;
+              return failed > 0 ? (
+                <>
+                  <div className="text-xl font-bold">
+                    {total - failed}<span className="text-muted-foreground font-normal">/{total}</span>
+                  </div>
+                  <div className="text-[10px] text-amber-500">Networks · {failed} failed</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xl font-bold">{total}</div>
+                  <div className="text-[10px] text-muted-foreground">Networks</div>
+                </>
+              );
+            })()}
           </div>
           <div className="rounded-lg border border-border bg-muted/30 p-2 text-center">
             <div className="text-xl font-bold">
