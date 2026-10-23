@@ -63,8 +63,13 @@ async function main() {
   let contracts = 0;
   let eoas = 0;
   let unresolved = 0; // RPC didn't answer on some chain — skipped, not written
-  const CHUNK = 500; // classify in chunks (each = 1 batchGetCode per chain)
+  // Each chunk is one batched eth_getCode per chain, all chains in
+  // parallel. Alchemy throttles sustained bursts (429 after ~1,500
+  // addresses at 500/chunk), so keep chunks modest and pause between them.
+  const CHUNK = 200;
+  const PACE_MS = 1000;
   for (let i = 0; i < list.length; i += CHUNK) {
+    if (i > 0) await new Promise((r) => setTimeout(r, PACE_MS));
     const chunk = list.slice(i, i + CHUNK);
     const flags = await classifyContractsOnChain(chunk);
     const chunkContracts = [...flags.values()].filter(Boolean).length;

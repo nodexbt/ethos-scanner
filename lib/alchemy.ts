@@ -270,7 +270,10 @@ export async function batchGetCode(
       }
 
       // Unresolved chunk: leave every address absent rather than guessing.
-      if (!resp || !resp.ok) continue;
+      if (!resp || !resp.ok) {
+        console.warn(`batchGetCode ${chain.name}: ${resp ? `HTTP ${resp.status}` : "no response"} for ${chunk.length} addresses`);
+        continue;
+      }
 
       const responses: { id: number; result?: unknown; error?: unknown }[] = await resp.json();
       for (const r of Array.isArray(responses) ? responses : [responses]) {
