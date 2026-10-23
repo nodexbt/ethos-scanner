@@ -209,6 +209,9 @@ export async function getAllTransactions(
     onFailure?: (reason: string) => void;
     /** Which transfer categories to fetch. Defaults to plain ETH. */
     scope?: TransferScope;
+    /** Called once if a direction stopped at maxPages/maxTxs with more
+        history remaining, so callers can report bounded coverage. */
+    onCapped?: () => void;
   } = {}
 ): Promise<AssetTransfer[]> {
   const maxPages = opts.maxPages ?? 50;
@@ -259,6 +262,10 @@ export async function getAllTransactions(
         pageKey = data.result?.pageKey;
         pages++;
         if (!pageKey) break;
+        if (pages >= maxPages || rows.length >= maxTxs) {
+          opts.onCapped?.();
+          break;
+        }
       } catch (err) {
         // Break pagination on error, return what we have
         opts.onFailure?.(`transfer fetch for ${addr.slice(0, 10)}… threw: ${err instanceof Error ? err.message : String(err)}`);

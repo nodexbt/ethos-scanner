@@ -52,8 +52,11 @@ async function fetchEthosCounterparties(addrs: string[]): Promise<Set<string>> {
 // --- Config ---
 
 const MAX_PAGES = 50;
-const CANDIDATE_MAX_PAGES = 6;
-const CANDIDATE_MAX_TXS = 4000;
+// Candidate history is fetched oldest-first (first funders live there);
+// a candidate that still has history past this cap is counted in the
+// result's coverageNotes so bounded coverage is visible, not silent.
+const CANDIDATE_MAX_PAGES = 15;
+const CANDIDATE_MAX_TXS = 15000;
 // Per-chain cap on counterparties whose history we fetch. Counterparties
 // are ranked by strength first (ETH moves with the target, then volume),
 // so the cap drops the weakest, and the result carries a coverage note
@@ -455,6 +458,29 @@ function confidenceFor(
   return "low";
 }
 
+/**
+ * Fold `from`'s signals into `into`. One instance per signal type is kept
+ * (the highest-scoring), so the same signal seen on two chains doesn't
+ * double count, while different signal types found on different chains
+ * or wallets add up — a profile linked on three chains should outscore
+ * one linked on one. Confidence is recomputed from the merged set.
+ */
+function mergeSignalsInto(into: ClusterCandidate, from: ClusterCandidate) {
+  const byType = new Map<string, Signal>();
+  for (const sig of [...into.signals, ...from.signals]) {
+    const cur = byType.get(sig.type);
+    if (!cur || sig.score > cur.score) byType.set(sig.type, sig);
+  }
+  into.signals = [...byType.values()];
+  into.signalTypes = new Set(into.signals.map((sg) => sg.type));
+  into.score = into.signals.reduce((sum, sg) => sum + sg.score, 0);
+  into.confidence = confidenceFor(
+    into.score,
+    into.signalTypes,
+    into.signals.some((sg) => sg.type === "funded_by_target" || sg.type === "funded_by_cluster")
+  );
+}
+
 /** Re-run the rule after signals were added post-scoring (social, CEX). */
 function recalcConfidence(c: ClusterCandidate) {
   const autoHigh = c.signals.some((s) => s.type === "funded_by_target" || s.type === "funded_by_cluster");
@@ -485,6 +511,8 @@ async function scanNetwork(
   targetFirstFunders: FirstFunderInfo[];
   /** Set when more Ethos-profile counterparties existed than were analyzed. */
   truncated: { analyzed: number; total: number } | null;
+  /** Candidate wallets whose history exceeded the per-candidate cap. */
+  cappedCandidates: number;
 }> {
   const network = chain.name;
   // Exclude every attested wallet from becoming a candidate, but only fetch
@@ -524,6 +552,7 @@ async function scanNetwork(
       txCount: 0,
       targetFirstFunders: [],
       truncated: null,
+      cappedCandidates: 0,
     };
   }
 
@@ -612,6 +641,7 @@ async function scanNetwork(
     candidateTxsMap.set(wallet, walletTxs);
   }
 
+  const cappedCandidates = new Set<string>();
   await parallel(
     allCandidateAddrs,
     async (addr) => {
@@ -619,11 +649,15 @@ async function scanNetwork(
         maxPages: CANDIDATE_MAX_PAGES,
         maxTxs: CANDIDATE_MAX_TXS,
         scope: "all",
+        onCapped: () => cappedCandidates.add(addr),
       });
       candidateTxsMap.set(addr, candTxs);
     },
     CONCURRENCY
   );
+  if (cappedCandidates.size > 0) {
+    log("info", `[${network}] ${cappedCandidates.size} candidate wallet(s) had more history than the ${CANDIDATE_MAX_TXS.toLocaleString()}-transfer cap`);
+  }
   stepDone?.(`${network}: Candidate transactions fetched`);
 
   // Step 8: Shared funding sources
@@ -764,7 +798,7 @@ async function scanNetwork(
   log("success", `[${network}] Scoring complete: ${strong} strong, ${possible} possible`);
   stepDone?.(`${network}: Scoring complete`);
 
-  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders, truncated };
+  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders, truncated, cappedCandidates: cappedCandidates.size };
 }
 
 // --- Shared CEX deposit address detection ---
@@ -1040,6 +1074,11 @@ async function runClusterScanInner(
         `${chain.name}: ${result.truncated.total} Ethos-profile counterparties found; the ${result.truncated.analyzed} strongest were analyzed`
       );
     }
+    if (result.cappedCandidates > 0) {
+      coverageNotes.push(
+        `${chain.name}: ${result.cappedCandidates} candidate wallet${result.cappedCandidates === 1 ? "" : "s"} had more than ${CANDIDATE_MAX_TXS.toLocaleString()} transfers per direction; only the oldest were analyzed`
+      );
+    }
 
     networkStats[chain.name] = {
       txCount: result.txCount,
@@ -1055,17 +1094,18 @@ async function runClusterScanInner(
     for (const [addr, candidate] of result.candidates) {
       const existing = mergedCandidates.get(addr);
       if (existing) {
-        // Merge: take highest score, combine signals, networks, and first funders
-        if (candidate.score > existing.score) {
-          const networks = [...new Set([...existing.networks, ...candidate.networks])];
-          const firstFunders = [...existing.firstFunders, ...candidate.firstFunders];
-          const sharedFF = existing.sharedFirstFunder || candidate.sharedFirstFunder;
-          mergedCandidates.set(addr, { ...candidate, networks, firstFunders, sharedFirstFunder: sharedFF });
-        } else {
-          existing.networks = [...new Set([...existing.networks, ...candidate.networks])];
-          existing.firstFunders = [...existing.firstFunders, ...candidate.firstFunders];
-          existing.sharedFirstFunder = existing.sharedFirstFunder || candidate.sharedFirstFunder;
-        }
+        // Merge across chains: union of networks and funders, signals
+        // combined by type so evidence on several chains adds up.
+        existing.networks = [...new Set([...existing.networks, ...candidate.networks])];
+        existing.firstFunders = [...existing.firstFunders, ...candidate.firstFunders];
+        existing.sharedFirstFunder = existing.sharedFirstFunder || candidate.sharedFirstFunder;
+        existing.sharedFundingSources = [...new Set([...existing.sharedFundingSources, ...candidate.sharedFundingSources])];
+        existing.directCount += candidate.directCount;
+        existing.incomingCount += candidate.incomingCount;
+        existing.outgoingCount += candidate.outgoingCount;
+        existing.bidirectional = existing.bidirectional || candidate.bidirectional;
+        existing.repeatTransfer = existing.repeatTransfer || candidate.repeatTransfer;
+        mergeSignalsInto(existing, candidate);
       } else {
         mergedCandidates.set(addr, candidate);
       }
@@ -1177,13 +1217,8 @@ async function runClusterScanInner(
         existing.outgoingCount += c.outgoingCount;
         existing.bidirectional = existing.bidirectional || c.bidirectional;
         existing.repeatTransfer = existing.repeatTransfer || c.repeatTransfer;
-        // Keep highest scoring signals
-        if (c.score > existing.score) {
-          existing.score = c.score;
-          existing.confidence = c.confidence;
-          existing.signals = c.signals;
-          existing.signalTypes = c.signalTypes;
-        }
+        // Signals from the profile's other wallets add up by type.
+        mergeSignalsInto(existing, c);
       } else {
         byProfileId.set(pid, { ...c });
       }
