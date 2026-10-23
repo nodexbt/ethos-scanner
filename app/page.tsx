@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search,
@@ -11,27 +10,18 @@ import {
   Shield,
   Wallet,
   ExternalLink,
-  ImagePlus,
-  X,
-  ClipboardPaste,
-  FileText,
-  Save,
   FolderOpen,
   Trash2,
   ChevronDown,
   ChevronRight,
-  Copy,
   Share2,
   History,
   Users,
   Activity,
   Network,
   ArrowRight,
-  LogOut,
   ShieldCheck,
-  LineChart,
 } from "lucide-react";
-import Link from "next/link";
 import {
   type ClusterScanResult,
   type ClusterCandidate,
@@ -43,7 +33,6 @@ import { getAddressLabel } from "@/lib/known-addresses";
 import { safeExternalUrl } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
-import DecryptedText from "@/components/ui/decrypted-text";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
 import { ConnectionsCard } from "@/components/results/connections-card";
@@ -139,7 +128,6 @@ export default function Home() {
   const [clusterResult, setClusterResult] = useState<ClusterScanResult | null>(null);
   const [clusterLogs, setClusterLogs] = useState<LogEntry[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
 
   // Screenshot state: address -> data URL
   const [screenshots, setScreenshots] = useState<Map<string, string>>(new Map());
@@ -166,7 +154,6 @@ export default function Home() {
   /** Bumped after each scan so the header refetches the daily quota. */
   const [quotaKey, setQuotaKey] = useState(0);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
-  const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
@@ -182,7 +169,6 @@ export default function Home() {
   const [sortValue, setSortValue] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [scoreBand, setScoreBand] = useState("");
-  const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
 
@@ -252,7 +238,6 @@ export default function Home() {
     }
   }, []);
 
-  const [logExpanded, setLogExpanded] = useState(true);
   const [loadingCached, setLoadingCached] = useState(false);
 
   // Auto-persist Twitter evidence after Scan-all (or per-row ⚡) so users
@@ -360,7 +345,6 @@ export default function Home() {
     setError(null);
     setScreenshots(new Map());
     setCurrentInvestigationId(null);
-    setLogExpanded(true);
 
     // Preserve any existing Twitter evidence for this target across rescans
     // so we don't burn API credits re-fetching tweets we already have. Falls
@@ -515,38 +499,6 @@ export default function Home() {
     if (resolved) await runFreshScan(resolved);
   };
 
-  const getScoreBorderColor = (score: number): string => {
-    if (score < 1200) return "ring-yellow-600";
-    if (score < 1400) return "ring-gray-400";
-    if (score < 1600) return "ring-sky-400";
-    if (score < 1800) return "ring-blue-500";
-    if (score < 2000) return "ring-blue-700";
-    return "ring-green-600";
-  };
-
-  const getLogColor = (level: LogEntry["level"]) => {
-    switch (level) {
-      case "success":
-        return "text-green-600 dark:text-green-400";
-      case "warn":
-        return "text-amber-600 dark:text-amber-400 font-medium";
-      case "error":
-        return "text-red-600 dark:text-red-400";
-      default:
-        return "text-muted-foreground";
-    }
-  };
-
-  const getExplorerAddressUrl = (address: string, chain?: string) => {
-    switch (chain) {
-      case "Base": return `https://basescan.org/address/${address}`;
-      case "Arbitrum": return `https://arbiscan.io/address/${address}`;
-      case "Optimism": return `https://optimistic.etherscan.io/address/${address}`;
-      case "Polygon": return `https://polygonscan.com/address/${address}`;
-      default: return `https://etherscan.io/address/${address}`;
-    }
-  };
-
   // Server-paginated fetch for the yours/all tabs — same { rows, total }
   // shape and load-more pattern as the verified tab below. scope=mine
   // filters to the caller's scans server-side; withStats piggybacks the
@@ -686,25 +638,6 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, debouncedSearch, sortValue, flaggedOnly, scoreBand]);
-
-  const handleSaveInvestigation = async () => {
-    if (!clusterResult) return;
-    const id = currentInvestigationId || investigationIdForResult(clusterResult);
-    await fetch("/api/investigations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        target: clusterResult.target,
-        targetName: clusterResult.targetEthos?.displayName ?? null,
-        clusterResult,
-        screenshots: Object.fromEntries(screenshots),
-        twitterEvidence,
-      }),
-    });
-    setCurrentInvestigationId(id);
-    refreshInvestigations();
-  };
 
   const handleLoadInvestigation = async (inv: InvestigationSummary) => {
     const resp = await fetch(`/api/investigations/${inv.id}`);
@@ -872,174 +805,12 @@ export default function Home() {
     }
   };
 
-  const formatTime = (ms: number): string => {
-    const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
-    if (totalSeconds < 60) return `${totalSeconds}s`;
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  };
-
-  const targetName = clusterResult?.targetEthos?.displayName || clusterResult?.target.slice(0, 10) + "...";
 
   // Collect all first funder addresses across all candidates to detect shared funders
-  const allCandidateFirstFunderAddrs = new Set<string>();
-  if (clusterResult) {
-    for (const c of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
-      for (const ff of c.firstFunders || []) {
-        allCandidateFirstFunderAddrs.add(ff.funder);
-      }
-    }
-  }
 
   // Resolve a wallet address to a display name (check target, candidates, then funder profiles)
-  const resolveAddressName = (addr: string): string => {
-    if (!clusterResult) return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-    if (addr === clusterResult.target) {
-      return clusterResult.targetEthos?.displayName || `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-    }
-    for (const c of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
-      if (c.wallets?.includes(addr) || c.address === addr) {
-        return c.ethosProfile?.displayName || `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-      }
-    }
-    const funderProfile = clusterResult.funderProfiles?.[addr];
-    if (funderProfile) return funderProfile.displayName;
-    const knownLabel = getAddressLabel(addr);
-    if (knownLabel) return knownLabel;
-    return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-  };
-
-  const buildConnectionSummary = (candidate: ClusterCandidate): string[] => {
-    const name = candidate.ethosProfile?.displayName || candidate.address.slice(0, 10) + "...";
-    const lines: string[] = [];
-
-    // First funder - show if meaningful
-    if (candidate.firstFunders && candidate.firstFunders.length > 0 && clusterResult) {
-      for (const ff of candidate.firstFunders) {
-        const funderName = resolveAddressName(ff.funder);
-        const isFundedByTarget = ff.funder === clusterResult.target;
-        const isFundedByResult = !isFundedByTarget && [...clusterResult.strongCluster, ...clusterResult.possibleCluster]
-          .some((c) => c.address !== candidate.address && (c.wallets?.includes(ff.funder) || c.address === ff.funder));
-
-        let fundedOthers = 0;
-        for (const other of [...clusterResult.strongCluster, ...clusterResult.possibleCluster]) {
-          if (other.address === candidate.address) continue;
-          if (other.firstFunders?.some((f) => f.funder === ff.funder)) fundedOthers++;
-        }
-
-        const exchangeLabel = ff.funderLabel || getAddressLabel(ff.funder);
-
-        if (isFundedByTarget) {
-          lines.push(`First funded by ${targetName} on ${ff.chain}.`);
-        } else if (isFundedByResult) {
-          lines.push(`First funded by ${funderName} (another result) on ${ff.chain}.`);
-        } else if (candidate.sharedFirstFunder && ff.funder === clusterResult.targetFirstFunders?.find((f) => f.funder === ff.funder)?.funder) {
-          if (exchangeLabel) {
-            lines.push(`Same ${exchangeLabel} withdrawal address as ${targetName} on ${ff.chain} (likely same ${exchangeLabel} account).`);
-          } else {
-            lines.push(`Same first funder as ${targetName} on ${ff.chain}.`);
-          }
-        } else if (fundedOthers > 0) {
-          if (exchangeLabel) {
-            lines.push(`First funded by the same ${exchangeLabel} address on ${ff.chain} as ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""} (likely same ${exchangeLabel} account).`);
-          } else {
-            lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
-          }
-        }
-      }
-    } else if (candidate.sharedFirstFunder) {
-      lines.push(`Same first funder as ${targetName} on at least one chain.`);
-    }
-
-    // Direct transfers
-    if (candidate.directCount > 0) {
-      const parts: string[] = [];
-      if (candidate.incomingCount > 0 && candidate.outgoingCount > 0) {
-        parts.push(`Sent ${candidate.outgoingCount} and received ${candidate.incomingCount} transaction${candidate.directCount > 1 ? "s" : ""} with ${targetName}`);
-      } else if (candidate.outgoingCount > 0) {
-        parts.push(`Sent ${candidate.outgoingCount} transaction${candidate.outgoingCount > 1 ? "s" : ""} to ${targetName}`);
-      } else {
-        parts.push(`Received ${candidate.incomingCount} transaction${candidate.incomingCount > 1 ? "s" : ""} from ${targetName}`);
-      }
-      if (candidate.bidirectional) parts.push("funds flow both ways");
-      if (candidate.repeatTransfer) parts.push("repeated pattern");
-      lines.push(parts.join(", ") + ".");
-    }
-
-    // Shared incoming senders
-    if (candidate.sharedFundingSources.length > 0) {
-      lines.push(`${candidate.sharedFundingSources.length} address${candidate.sharedFundingSources.length > 1 ? "es" : ""} sent tokens to both ${name} and ${targetName}.`);
-    }
-
-    // Shared CEX deposit addresses
-    if (candidate.sharedCexDeposits && candidate.sharedCexDeposits.length > 0) {
-      for (const dep of candidate.sharedCexDeposits) {
-        const others = dep.wallets
-          .filter((w) => !(candidate.wallets || [candidate.address]).includes(w))
-          .map((w) => resolveAddressName(w));
-        if (others.length > 0) {
-          lines.push(`Same ${dep.exchange} deposit address as ${others.slice(0, 3).join(", ")}${others.length > 3 ? ` and ${others.length - 3} more` : ""} (likely same ${dep.exchange} account).`);
-        }
-      }
-    }
-
-    // Multi-hop funding
-    if (candidate.signals.some((s) => s.type === "multi_hop_funding")) {
-      const detail = candidate.signals.find((s) => s.type === "multi_hop_funding")?.details || "";
-      lines.push(`Discovered via multi-hop funding analysis: ${detail}.`);
-    }
-
-    // Ethos social signals
-    if (candidate.invitedByTarget && candidate.invitedTarget) {
-      lines.push(`Mutual invitation: ${targetName} invited ${name} and ${name} invited ${targetName} on Ethos.`);
-    } else if (candidate.invitedByTarget) {
-      lines.push(`Invited by ${targetName} on Ethos.`);
-    } else if (candidate.invitedTarget) {
-      lines.push(`Invited ${targetName} on Ethos.`);
-    }
-
-    if (candidate.mutualReviews) {
-      lines.push(`${name} and ${targetName} reviewed each other on Ethos.`);
-    }
-
-    if (candidate.mutualVouches) {
-      lines.push(`${name} and ${targetName} vouched for each other on Ethos.`);
-    }
-
-    return lines;
-  };
 
   // Render a wallet address with its Ethos profile name if available
-  const renderAddress = (addr: string, chain?: string) => {
-    const name = resolveAddressName(addr);
-    const isResolved = name !== `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-    const funderProfile = clusterResult?.funderProfiles?.[addr];
-    const knownLabel = getAddressLabel(addr);
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        {isResolved && funderProfile && (
-          <a href={safeExternalUrl(funderProfile.profileUrl)} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">
-            {name}
-          </a>
-        )}
-        {isResolved && !funderProfile && knownLabel && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{knownLabel}</span>
-        )}
-        {isResolved && !funderProfile && !knownLabel && (
-          <span className="font-medium">{name}</span>
-        )}
-        <a
-          href={getExplorerAddressUrl(addr, chain)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-mono text-muted-foreground hover:underline"
-        >
-          {addr.slice(0, 8)}...{addr.slice(-4)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-        </a>
-      </span>
-    );
-  };
 
   const hasResults = clusterResult !== null && !scanning;
   const scanActive = scanning || hasResults || loadingCached;

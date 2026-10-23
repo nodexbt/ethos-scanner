@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
 import { checkFollowRelationship, TwitterSearchError } from "@/lib/twitter-search";
+import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 
 export type { FollowRelationship } from "@/lib/twitter-search";
 
@@ -10,6 +11,14 @@ export type { FollowRelationship } from "@/lib/twitter-search";
 export async function GET(req: NextRequest) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
+
+  // Same provider as tweet search; disabled while that account is unfunded.
+  if (!TWITTER_SEARCH_ENABLED) {
+    return NextResponse.json(
+      { error: "Follow checks are disabled while the X data provider is unfunded." },
+      { status: 503 }
+    );
+  }
 
   const source = req.nextUrl.searchParams.get("source") ?? "";
   const target = req.nextUrl.searchParams.get("target") ?? "";

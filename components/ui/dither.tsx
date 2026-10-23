@@ -158,10 +158,13 @@ class RetroEffectImpl extends Effect {
   }
 }
 
+// Wrapped once at module scope: creating a component type inside render
+// would remount it every frame.
+const WrappedRetroEffect = wrapEffect(RetroEffectImpl);
+
 const RetroEffect = forwardRef<RetroEffectImpl, { colorNum: number; pixelSize: number }>(
   (props, ref) => {
     const { colorNum, pixelSize } = props;
-    const WrappedRetroEffect = wrapEffect(RetroEffectImpl);
     return <WrappedRetroEffect ref={ref} colorNum={colorNum} pixelSize={pixelSize} />;
   }
 );
@@ -295,6 +298,10 @@ function DitheredWaves({
         <shaderMaterial
           vertexShader={waveVertexShader}
           fragmentShader={waveFragmentShader}
+          // Three.js needs one stable, mutable uniforms object that useFrame
+          // updates in place; a ref is the right home for it even though it
+          // is handed to the material during render.
+          // eslint-disable-next-line react-hooks/refs
           uniforms={waveUniformsRef.current}
         />
       </mesh>
@@ -332,15 +339,10 @@ export default function Dither({
   // When animation is disabled, we render the WebGL canvas once, capture
   // its output to a data URL, then unmount the Canvas and render a static
   // <img> instead — eliminating the per-frame RAF render loop entirely.
-  const [staticUrl, setStaticUrl] = useState<string | null>(null);
-
-  // Reset the captured image if animation is re-enabled (e.g. logout),
-  // so we go back to a live canvas.
-  useEffect(() => {
-    if (!disableAnimation && staticUrl) {
-      setStaticUrl(null);
-    }
-  }, [disableAnimation, staticUrl]);
+  const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
+  // While animation is enabled (e.g. after logout) the live canvas shows
+  // regardless of any earlier capture; disabling it again reuses the capture.
+  const staticUrl = disableAnimation ? capturedUrl : null;
 
   if (disableAnimation && staticUrl) {
     return (
@@ -371,7 +373,7 @@ export default function Dither({
         disableAnimation={disableAnimation}
         enableMouseInteraction={enableMouseInteraction}
         mouseRadius={mouseRadius}
-        onCapture={disableAnimation ? setStaticUrl : undefined}
+        onCapture={disableAnimation ? setCapturedUrl : undefined}
       />
     </Canvas>
   );

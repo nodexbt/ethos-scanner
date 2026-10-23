@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AppFooter } from "@/components/app-footer";
+import { TWITTER_SEARCH_ENABLED } from "@/lib/features";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +94,26 @@ export default function FollowsPage() {
             </CardContent>
           </Card>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (!TWITTER_SEARCH_ENABLED) {
+    return (
+      <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+        <AppHeader />
+        <div className="mx-auto mt-6 max-w-2xl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Follow check is disabled</CardTitle>
+              <CardDescription className="text-sm">
+                This page uses the same X data provider as tweet search, which is switched off until the
+                provider account is funded. Set NEXT_PUBLIC_TWITTER_SEARCH_ENABLED=true to re-enable it.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+        <AppFooter />
       </div>
     );
   }

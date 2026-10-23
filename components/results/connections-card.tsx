@@ -44,15 +44,17 @@ interface ConnectionsCardProps {
  * scan quota until the user explicitly clicks "Scan".
  */
 export function ConnectionsCard({ investigationId, onScanProfile, scanning }: ConnectionsCardProps) {
-  const [data, setData] = useState<ConnectionsResponse | null>(null);
+  // Store the response together with the id it belongs to, so switching
+  // investigations shows "loading" (null) without a synchronous reset.
+  const [loaded, setLoaded] = useState<{ id: string; data: ConnectionsResponse | null } | null>(null);
+  const data = loaded?.id === investigationId ? loaded.data : null;
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
     fetch(`/api/investigations/${investigationId}/connections`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!cancelled) setData(d);
+        if (!cancelled) setLoaded({ id: investigationId, data: d });
       })
       .catch(() => {});
     return () => {
