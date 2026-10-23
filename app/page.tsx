@@ -297,6 +297,40 @@ export default function Home() {
     }
   };
 
+  // A scan started earlier (other tab, or before a reload) keeps running
+  // on the server; pick it up so the user sees it finish.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch("/api/scan/jobs", { cache: "no-store" });
+        if (!resp.ok) return;
+        const { job } = await resp.json();
+        if (!job || cancelled) return;
+        setScanning(true);
+        setWalletInput(job.targetInput ?? "");
+        setClusterResult(null);
+        setError(null);
+        const done = await watchJob(job.id);
+        if (cancelled) return;
+        if (done) {
+          setCurrentInvestigationId(done.investigationId);
+          refreshInvestigations();
+        }
+        setScanning(false);
+        setScanProgress(null);
+        setQuotaKey((k) => k + 1);
+      } catch {
+        // No active job or not reachable — nothing to resume.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
   // Keep the active tab in sync when the user navigates history (back/forward).
   useEffect(() => {
     const onPop = () => setActiveTab(tabFromSearch(window.location.search));
@@ -327,6 +361,56 @@ export default function Home() {
     } catch {}
     setLoadingCached(false);
     return false;
+  };
+
+  /** Sets come over the wire as arrays. */
+  const hydrateResult = (raw: unknown): ClusterScanResult => {
+    const { scanDurationMs: _dur, ...rest } = raw as ClusterScanResult & { scanDurationMs?: number };
+    void _dur;
+    const result = rest as ClusterScanResult;
+    for (const c of [...result.strongCluster, ...result.possibleCluster]) {
+      c.signalTypes = new Set(c.signalTypes as unknown as string[]);
+    }
+    return result;
+  };
+
+  /** Turn the server's save outcome into the on-screen notice. */
+  const applySaved = (saved: { ok: boolean; code?: string } | null) => {
+    setResultScannedAt(new Date().toISOString());
+    if (!saved || saved.ok) setSaveNotice(null);
+    else if (saved.code === "DEGRADED_NOT_SAVED")
+      setSaveNotice("Not saved: this incomplete scan would have replaced a complete one. The previous result is kept; re-scan once the outage clears.");
+    else setSaveNotice("Not saved: the server could not store the result. Results are shown for this session only.");
+  };
+
+  /**
+   * Poll a background scan job until it finishes. Logs and progress are
+   * mirrored into the same state the streaming path uses, so the UI is
+   * identical. Resolves with the result (or null on failure).
+   */
+  const watchJob = async (jobId: string): Promise<{ result: ClusterScanResult; investigationId: string } | null> => {
+    const POLL_MS = 1500;
+    for (;;) {
+      const resp = await fetch(`/api/scan/jobs/${jobId}`, { cache: "no-store" });
+      if (!resp.ok) {
+        setError("Lost track of the running scan. Reload to check its status.");
+        return null;
+      }
+      const job = await resp.json();
+      setClusterLogs(job.logs ?? []);
+      if (job.progress) setScanProgress(job.progress);
+      if (job.status === "done") {
+        const result = hydrateResult(job.result);
+        setClusterResult(result);
+        applySaved(job.saved);
+        return { result, investigationId: job.investigationId as string };
+      }
+      if (job.status === "failed") {
+        setError(job.error || "Scan failed");
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
   };
 
   const runFreshScan = async (target: ResolvedScanTarget) => {
@@ -368,68 +452,47 @@ export default function Home() {
         body: JSON.stringify({ target: target.primaryWallet }),
       });
 
-      if (!resp.ok) {
+      if (!resp.ok && resp.status !== 202) {
         const data = await resp.json();
         setError(data.error || "Scan failed");
         return;
       }
 
-      const reader = resp.body?.getReader();
-      if (!reader) {
-        setError("Streaming not supported");
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const msg = JSON.parse(line);
-            if (msg.type === "log") {
-              setClusterLogs((prev) => [...prev, msg.data]);
-            } else if (msg.type === "progress") {
-              setScanProgress(msg.data);
-            } else if (msg.type === "result") {
-              // Pull off scanDurationMs before storing in state — it's
-              // metadata for the save call, not part of the cluster
-              // result that gets persisted/displayed.
-              // scanDurationMs is server metadata, not part of the result.
-              const { scanDurationMs: _dur, ...rest } = msg.data as ClusterScanResult & {
-                scanDurationMs?: number;
-              };
-              void _dur;
-              const result = rest as ClusterScanResult;
-              result.strongCluster.forEach((c) => {
-                c.signalTypes = new Set(c.signalTypes as unknown as string[]);
-              });
-              result.possibleCluster.forEach((c) => {
-                c.signalTypes = new Set(c.signalTypes as unknown as string[]);
-              });
-              setClusterResult(result);
-              scanResult = result;
-            } else if (msg.type === "saved") {
-              // The server persisted (or declined to persist) the result.
-              const saved = msg.data as { ok: boolean; code?: string };
-              setResultScannedAt(new Date().toISOString());
-              if (saved.ok) setSaveNotice(null);
-              else if (saved.code === "DEGRADED_NOT_SAVED")
-                setSaveNotice("Not saved: this incomplete scan would have replaced a complete one. The previous result is kept; re-scan once the outage clears.");
-              else setSaveNotice("Not saved: the server could not store the result. Results are shown for this session only.");
-            } else if (msg.type === "error") {
-              setError(msg.data);
+      if (resp.status === 202) {
+        // Background job: poll until it completes.
+        const { jobId } = await resp.json();
+        const done = await watchJob(jobId);
+        scanResult = done?.result ?? null;
+      } else {
+        // Streaming fallback (before the scan_jobs migration is applied).
+        const reader = resp.body?.getReader();
+        if (!reader) {
+          setError("Streaming not supported");
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.type === "log") setClusterLogs((prev) => [...prev, msg.data]);
+              else if (msg.type === "progress") setScanProgress(msg.data);
+              else if (msg.type === "result") {
+                const result = hydrateResult(msg.data);
+                setClusterResult(result);
+                scanResult = result;
+              } else if (msg.type === "saved") applySaved(msg.data);
+              else if (msg.type === "error") setError(msg.data);
+            } catch {
+              // Skip malformed lines
             }
-          } catch {
-            // Skip malformed lines
           }
         }
       }
