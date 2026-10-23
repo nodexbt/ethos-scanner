@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, ExternalLink, FolderOpen, Trash2, ChevronDown, ChevronRight, Share2, History, Users, Activity, Network, ArrowRight, ShieldCheck } from "lucide-react";
+import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, ChevronDown, ChevronRight, History, Users, Activity, Network, ArrowRight } from "lucide-react";
 import { ClusterScanResult, ClusterCandidate, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
 import type { ResolvedScanTarget } from "@/lib/scan-target";
 import { getAddressLabel } from "@/lib/known-addresses";
@@ -41,6 +40,7 @@ function investigationIdForResult(result: ClusterScanResult): string {
 /** Derive the active tab from a URL search string (?tab=...). Defaults to scanner. */
 function tabFromSearch(search: string): ActiveTab {
   const t = new URLSearchParams(search).get("tab");
+  if (t === "scans") return "all";
   return t === "yours" || t === "all" || t === "verified" ? t : "scanner";
 }
 
@@ -856,45 +856,17 @@ export default function Home() {
             Scanner
           </button>
           <button
-            onClick={() => selectTab("yours")}
+            onClick={() => selectTab(activeTab === "scanner" ? "all" : activeTab)}
             className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === "yours"
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <History className="h-4 w-4" />
-            Your Scans
-            {yourScansCount > 0 && (
-              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{yourScansCount}</span>
-            )}
-          </button>
-          <button
-            onClick={() => selectTab("all")}
-            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === "all"
+              activeTab !== "scanner"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
           >
             <FolderOpen className="h-4 w-4" />
-            All Scans
+            Scans
             {allTotal > 0 && (
               <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{allTotal}</span>
-            )}
-          </button>
-          <button
-            onClick={() => selectTab("verified")}
-            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === "verified"
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <ShieldCheck className="h-4 w-4" />
-            Human Verified
-            {verifiedTotal > 0 && (
-              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{verifiedTotal}</span>
             )}
           </button>
           <a
@@ -1347,6 +1319,9 @@ export default function Home() {
       ) : (
         <ScansList
           investigations={activeTab === "yours" ? yourInvestigations : allInvestigations}
+          scope={activeTab === "yours" ? "yours" : "all"}
+          onScopeChange={(sc) => selectTab(sc)}
+          counts={{ all: allTotal, yours: yourTotal, verified: verifiedTotal }}
           emptyLabel={
             activeTab === "yours"
               ? "You haven't run any scans yet."
@@ -1379,20 +1354,14 @@ export default function Home() {
           the server so the most-flagged accounts surface first. */}
       {activeTab === "verified" && (
         <div className="space-y-4">
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-card p-3 text-xs">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-            <div className="text-foreground/90">
-              <span className="font-medium">Heads up:</span> cluster signals can produce false
-              positives. A wallet appearing here doesn&apos;t prove sybil behaviour — it just means
-              the scanner found at least one shared funder, CEX deposit, or first-funder pattern.
-              Open a row and review the evidence before drawing conclusions.
-            </div>
-          </div>
           {verifiedLoading && verifiedInvestigations.length === 0 ? (
             <ScansListSkeleton />
           ) : (
             <ScansList
               investigations={verifiedInvestigations}
+              scope="verified"
+              onScopeChange={(sc) => selectTab(sc)}
+              counts={{ all: allTotal, yours: yourTotal, verified: verifiedTotal }}
               emptyLabel="No human-verified profiles scanned yet."
               search={investigationSearch}
               onSearchChange={setInvestigationSearch}

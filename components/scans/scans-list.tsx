@@ -2,7 +2,7 @@
 
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2 } from "lucide-react";
+import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 export interface InvestigationSummary {
@@ -93,8 +93,14 @@ export function ScansListSkeleton({ rows = 8 }: { rows?: number }) {
   );
 }
 
+export type ScanScope = "all" | "yours" | "verified";
+
 interface ScansListProps {
   investigations: InvestigationSummary[];
+  /** Which saved scans are listed; chips switch between them. */
+  scope: ScanScope;
+  onScopeChange: (scope: ScanScope) => void;
+  counts: Record<ScanScope, number>;
   emptyLabel: string;
   search: string;
   onSearchChange: (value: string) => void;
@@ -120,6 +126,9 @@ interface ScansListProps {
 
 export function ScansList({
   investigations,
+  scope,
+  onScopeChange,
+  counts,
   emptyLabel,
   search,
   onSearchChange,
@@ -157,6 +166,28 @@ export function ScansList({
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-9 h-9"
           />
+        </div>
+        <div className="inline-flex h-9 items-center rounded-md border border-border bg-card p-0.5">
+          {(
+            [
+              ["all", "All", FolderOpen],
+              ["yours", "Mine", History],
+              ["verified", "Human verified", ShieldCheck],
+            ] as const
+          ).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onScopeChange(key)}
+              className={`h-8 inline-flex items-center gap-1.5 rounded px-2.5 text-xs cursor-pointer transition-colors whitespace-nowrap ${
+                scope === key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+              {counts[key] > 0 && <span className="tabular-nums text-[10px] text-muted-foreground">{counts[key].toLocaleString()}</span>}
+            </button>
+          ))}
         </div>
         <Select value={sortValue || NONE} onValueChange={(v) => onSortChange(v === NONE ? "" : v)}>
           <SelectTrigger aria-label="Sort scans"><SelectValue /></SelectTrigger>
