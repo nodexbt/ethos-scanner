@@ -8,6 +8,7 @@ import { Shield, ShieldCheck, LogOut } from "lucide-react";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
+import { NotificationsBell } from "@/components/notifications-bell";
 
 interface AppHeaderProps {
   /**
@@ -131,6 +132,7 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
                 {quota.unlimited ? "∞ scans" : `${quota.remaining} scan${quota.remaining === 1 ? "" : "s"} left`}
               </span>
             )}
+            <NotificationsBell />
             {isAdmin && (
               <Link
                 href="/admin/users"

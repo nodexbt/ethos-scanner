@@ -4,7 +4,9 @@ import {
   edgesFromClusterResult,
   replaceEdgesForSource,
   deleteEdgesForInvestigation,
+  getEdgesTouching,
 } from "./investigation-edges";
+import { notifyNewLinks } from "./notifications";
 
 export interface InvestigationSummary {
   id: string;
@@ -536,10 +538,41 @@ export async function saveInvestigation(data: {
   // edge failure must not fail the save.
   if (data.profileId && !incomingDegraded) {
     try {
-      await replaceEdgesForSource(
-        data.profileId,
-        edgesFromClusterResult(data.profileId, data.id, data.clusterResult)
+      const next = edgesFromClusterResult(data.profileId, data.id, data.clusterResult);
+      // Links that weren't there before are what watchers care about.
+      const previous = new Set(
+        (await getEdgesTouching([data.profileId]))
+          .filter((e) => e.sourceProfileId === data.profileId)
+          .map((e) => e.candidateProfileId)
       );
+      await replaceEdgesForSource(data.profileId, next);
+
+      const added = next.filter((e) => !previous.has(e.candidateProfileId));
+      if (added.length > 0) {
+        const cr = data.clusterResult as {
+          targetEthos?: { displayName?: string; username?: string | null };
+          strongCluster?: { ethosProfile?: { profileId: number; displayName: string; username: string | null } }[];
+          possibleCluster?: { ethosProfile?: { profileId: number; displayName: string; username: string | null } }[];
+        };
+        const names = new Map<number, { displayName: string; username: string | null }>();
+        for (const c of [...(cr.strongCluster ?? []), ...(cr.possibleCluster ?? [])]) {
+          if (c.ethosProfile) names.set(c.ethosProfile.profileId, c.ethosProfile);
+        }
+        await notifyNewLinks({
+          investigationId: data.id,
+          target: {
+            profileId: data.profileId,
+            displayName: cr.targetEthos?.displayName ?? data.targetName ?? data.target.slice(0, 10),
+            username: cr.targetEthos?.username ?? null,
+          },
+          added: added.map((e) => ({
+            profileId: e.candidateProfileId,
+            displayName: names.get(e.candidateProfileId)?.displayName ?? `profile ${e.candidateProfileId}`,
+            username: names.get(e.candidateProfileId)?.username ?? null,
+            confidence: e.confidence,
+          })),
+        });
+      }
     } catch (err) {
       console.error("saveInvestigation edge refresh failed:", err);
     }

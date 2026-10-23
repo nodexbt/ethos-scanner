@@ -10,6 +10,7 @@ import { AddressDisplay } from "./address-display";
 import { safeExternalUrl, formatRelativeTime } from "@/lib/utils";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
+import { WatchButton } from "./watch-button";
 
 interface OverviewCardProps {
   result: ClusterScanResult;
@@ -71,6 +72,9 @@ export function OverviewCard({
           <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
           {(onShare || onRescan || result.targetEthos?.username) && (
             <div className="flex items-center gap-0.5">
+              {onRescan && result.targetEthos?.profileId && (
+                <WatchButton profileId={result.targetEthos.profileId} />
+              )}
               {result.targetEthos?.username && (
                 <a
                   href={`/p/${result.targetEthos.username}`}

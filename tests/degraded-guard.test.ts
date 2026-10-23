@@ -14,7 +14,13 @@ function builder(table: string) {
 }
 const from = vi.fn(builder);
 vi.mock("@/lib/db/supabase", () => ({ getSupabase: () => ({ from, rpc: vi.fn(async () => ({ data: 3, error: null })) }) }));
-vi.mock("@/lib/db/investigation-edges", () => ({ replaceEdgesForSource: vi.fn(async () => {}), edgesFromClusterResult: () => [] }));
+vi.mock("@/lib/db/investigation-edges", () => ({
+  replaceEdgesForSource: vi.fn(async () => {}),
+  edgesFromClusterResult: () => [],
+  getEdgesTouching: vi.fn(async () => []),
+  deleteEdgesForInvestigation: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/db/notifications", () => ({ notifyNewLinks: vi.fn(async () => {}) }));
 
 import { saveInvestigation, DegradedOverwriteError } from "@/lib/db/investigations";
 import { replaceEdgesForSource } from "@/lib/db/investigation-edges";
