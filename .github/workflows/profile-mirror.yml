@@ -1,0 +1,37 @@
+name: Profile mirror sync (daily)
+
+on:
+  schedule:
+    # 03:00 UTC daily. GitHub Actions cron is always UTC.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Refresh profile_latest + profile_addresses from the public Ethos API.
+      - name: Sync profile mirror
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: npx tsx scripts/sync/profile-mirror.ts
+
+      # Classify wallets the sync just added (is_contract IS NULL) so the
+      # next scan doesn't have to hit eth_getCode on the hot path.
+      - name: Classify new wallets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+        run: npx tsx scripts/backfill/classify-wallets.ts

@@ -7,7 +7,8 @@
 --
 -- is_contract: true if the address has bytecode on any scanned chain (a
 -- smart wallet), false if it's an EOA, null if not yet classified. Populated
--- by scripts/backfill/classify-wallets.ts and kept fresh by the nightly sync.
+-- by scripts/backfill/classify-wallets.ts, which the daily profile-mirror
+-- workflow runs after scripts/sync/profile-mirror.ts.
 --
 -- Idempotent — re-running is safe. Run via Supabase SQL editor.
 
