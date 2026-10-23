@@ -37,6 +37,7 @@ if (ALL && CONTRACTS_ONLY) {
   process.exit(1);
 }
 const DRY_RUN = process.argv.includes("--dry-run");
+const MODE = ALL ? "--all" : CONTRACTS_ONLY ? "flagged contracts only" : "unclassified only";
 
 async function main() {
   const supabase = getSupabase();
@@ -56,7 +57,7 @@ async function main() {
   }
 
   const list = [...addrs];
-  console.log(`[classify] ${list.length} address(es) to classify${ALL ? " (--all)" : CONTRACTS_ONLY ? " (flagged contracts only)" : " (unclassified only)"}${DRY_RUN ? " [DRY RUN]" : ""}`);
+  console.log(`[classify] ${list.length} address(es) to classify (${MODE})${DRY_RUN ? " [DRY RUN]" : ""}`);
   if (list.length === 0) return;
 
   let contracts = 0;
@@ -66,10 +67,9 @@ async function main() {
   for (let i = 0; i < list.length; i += CHUNK) {
     const chunk = list.slice(i, i + CHUNK);
     const flags = await classifyContractsOnChain(chunk);
-    for (const isC of flags.values()) {
-      if (isC) contracts++;
-      else eoas++;
-    }
+    const chunkContracts = [...flags.values()].filter(Boolean).length;
+    contracts += chunkContracts;
+    eoas += flags.size - chunkContracts;
     unresolved += chunk.length - flags.size;
 
     // Bulk-write grouped by value (address isn't unique — the .in() update

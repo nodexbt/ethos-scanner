@@ -13,10 +13,12 @@ const EIP7702_PREFIX = "0xef0100";
 const EIP7702_CODE_LEN = 2 + 23 * 2;
 
 /** Does this eth_getCode result mean "smart contract / smart wallet"? */
-export function hasContractCode(code: string | undefined | null): boolean {
-  const c = (code || "0x").toLowerCase();
-  if (c === "0x" || c === "0x0") return false;
-  if (c.length === EIP7702_CODE_LEN && c.startsWith(EIP7702_PREFIX)) return false;
+function hasContractCode(code: string): boolean {
+  if (code === "0x" || code === "0x0") return false;
+  // Only the prefix needs case-folding; avoid copying whole bytecode strings.
+  if (code.length === EIP7702_CODE_LEN && code.slice(0, 8).toLowerCase() === EIP7702_PREFIX) {
+    return false;
+  }
   return true;
 }
 
@@ -53,23 +55,19 @@ export async function classifyContractsOnChain(
   addresses: string[]
 ): Promise<Map<string, boolean>> {
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
-  const isContract = new Set<string>();
+  const result = new Map<string, boolean>(unique.map((a) => [a, false]));
   const unresolved = new Set<string>();
 
-  for (const chain of CHAINS) {
-    const flags = await batchIsContract(unique, chain);
+  const perChain = await Promise.all(CHAINS.map((chain) => batchIsContract(unique, chain)));
+  for (const flags of perChain) {
     for (const a of unique) {
       const f = flags.get(a);
       if (f === undefined) unresolved.add(a);
-      else if (f) isContract.add(a);
+      else if (f) result.set(a, true);
     }
   }
-
-  const result = new Map<string, boolean>();
-  for (const a of unique) {
-    if (isContract.has(a)) result.set(a, true);
-    else if (!unresolved.has(a)) result.set(a, false);
-  }
+  // Contract on any chain wins; otherwise an unanswered chain means unknown.
+  for (const a of unresolved) if (!result.get(a)) result.delete(a);
   return result;
 }
 
@@ -77,7 +75,9 @@ export async function classifyContractsOnChain(
  * Contract flags for the given addresses, reading the cached
  * profile_addresses.is_contract column first and falling back to a live
  * on-chain check only for addresses not yet classified (e.g. brand-new
- * attestations). Unknowns are cached back so the next scan is free.
+ * attestations). Resolved results are cached back so the next scan is free;
+ * addresses the RPC fails to answer for stay absent from the result (callers
+ * read absent as "scan it") and uncached, so they are re-checked next scan.
  */
 export async function getContractFlags(
   addresses: string[]
@@ -107,10 +107,7 @@ export async function getContractFlags(
   if (unknown.size > 0) {
     const live = await classifyContractsOnChain([...unknown]);
     for (const [addr, isContract] of live) flags.set(addr, isContract);
-    // Addresses the RPC couldn't classify stay absent from `flags`, which
-    // callers read as "scan it" (flags.get() → undefined → not a contract).
-    // They are not cached, so the next scan re-checks them.
-    // Best-effort cache write so the next scan doesn't re-check on-chain.
+    // Best-effort cache write of the resolved flags.
     try {
       await writeContractFlags(live);
     } catch {

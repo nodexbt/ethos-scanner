@@ -559,7 +559,7 @@ async function scanNetwork(
   );
 
   // Lazy contract check: instead of running eth_getCode across every
-  // counterparty (that's what batchGetCode used to do), we only check
+  // counterparty, we only check
   // the addresses that actually surface as a shared funder for some
   // Ethos-profile candidate. Typically 0-20 addresses per chain — a
   // few hundred CU instead of tens of thousands.
@@ -576,8 +576,7 @@ async function scanNetwork(
       "info",
       `[${network}] Checking contract status of ${unknownFunders.length} shared funder(s)…`
     );
-    const codeResult = await batchIsContract(unknownFunders, chain);
-    for (const [addr, isContract] of codeResult) {
+    for (const [addr, isContract] of await batchIsContract(unknownFunders, chain)) {
       contractCache.set(addr, isContract);
     }
   }
