@@ -115,7 +115,10 @@ export async function fetchProfile(
 
 /** Bulk lookup Ethos profiles by wallet addresses (up to 500 at a time) */
 export async function fetchProfilesByAddresses(
-  addresses: string[]
+  addresses: string[],
+  /** Called when a bulk batch fails (the per-address fallback still runs,
+      but may miss profiles). Lets the scanner mark the result degraded. */
+  onBatchError?: (reason: string) => void
 ): Promise<Map<string, EthosProfile>> {
   const result = new Map<string, EthosProfile>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
@@ -132,6 +135,7 @@ export async function fetchProfilesByAddresses(
       });
 
       if (!response.ok) {
+        onBatchError?.(`Ethos bulk lookup returned ${response.status} for ${chunk.length} addresses`);
         // Fallback: try individual lookups for this chunk
         for (const addr of chunk) {
           try {
@@ -163,8 +167,8 @@ export async function fetchProfilesByAddresses(
           result.set(w, profile);
         }
       }
-    } catch {
-      // Silently skip failed batches
+    } catch (err) {
+      onBatchError?.(`Ethos bulk lookup threw for ${chunk.length} addresses: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

@@ -33,8 +33,10 @@ async function fetchEthosCounterparties(addrs: string[]): Promise<Set<string>> {
       .select("address")
       .in("address", chunk);
     if (error) {
-      console.error("fetchEthosCounterparties failed:", error.message);
-      continue;
+      // Without the counterparty filter every candidate would be dropped
+      // and the chain would look clean. Fail the chain instead so the
+      // scan is marked degraded.
+      throw new Error(`profile_addresses lookup failed: ${error.message}`);
     }
     for (const row of (data ?? []) as { address: string }[]) {
       if (row.address) result.add(row.address.toLowerCase());
@@ -173,8 +175,20 @@ export interface ClusterScanResult {
   sharedCexDeposits: SharedCexDeposit[];
   strongCluster: ClusterCandidate[];
   possibleCluster: ClusterCandidate[];
-  networkStats: Record<string, { txCount: number; directWallets: number }>;
+  networkStats: Record<string, { txCount: number; directWallets: number; failed?: boolean }>;
   logs: LogEntry[];
+  /** Present when some data source failed mid-scan. Candidates may be
+      missing, so a result with this set must not be read as "clean" and
+      is never saved over a complete one. Absent on complete scans and on
+      results saved before this field existed. */
+  degraded?: DegradedInfo;
+}
+
+export interface DegradedInfo {
+  /** Chains whose data is missing or incomplete. */
+  failedNetworks: string[];
+  /** Human-readable reasons, one per failure. */
+  reasons: string[];
 }
 
 interface DirectWalletInfo {
@@ -416,7 +430,10 @@ async function scanNetwork(
   stepDone?: (phase: string) => void,
   /** Every attested wallet of the target (incl. smart wallets we don't
       fetch) for self-exclusion. Defaults to targetWallets. */
-  exclusionWallets: string[] = targetWallets
+  exclusionWallets: string[] = targetWallets,
+  /** Reports a partial target-transaction fetch so the scan can be
+      marked degraded for this chain. */
+  onPartial?: (reason: string) => void
 ): Promise<{
   directWallets: Map<string, DirectWalletInfo>;
   candidates: Map<string, ClusterCandidate>;
@@ -442,7 +459,7 @@ async function scanNetwork(
     async (wallet) => {
       txsByTargetWallet.set(
         wallet,
-        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES })
+        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES, onFailure: onPartial })
       );
     },
     CONCURRENCY
@@ -889,15 +906,34 @@ export async function runClusterScan(
   log("info", `Networks: ${CHAINS.map((c) => c.name).join(", ")}`);
   emitProgress("Starting...");
 
-  // Scan networks in parallel (2 at a time to avoid connection overload)
+  // Anything that makes the result incomplete lands here. A chain that
+  // threw, a chain whose target-transaction fetch was cut short, or an
+  // Ethos lookup that failed all mean candidates may be missing.
+  const failedNetworks = new Set<string>();
+  const degradedReasons: string[] = [];
+  function markDegraded(network: string | null, reason: string) {
+    if (network) failedNetworks.add(network);
+    const line = network ? `${network}: ${reason}` : reason;
+    // Both transfer directions of one wallet fail with the same message;
+    // one line per distinct failure is enough.
+    if (degradedReasons.includes(line)) return;
+    degradedReasons.push(line);
+    log("warn", `Degraded — ${network ? `[${network}] ` : ""}${reason}`);
+  }
+
+  // Scan all networks in parallel
   const networkResults = await parallel(
     [...CHAINS],
     async (chain) => {
       try {
-        const result = await scanNetwork(targetWallets, chain, log, stepDone, exclusionWallets);
+        const result = await scanNetwork(targetWallets, chain, log, stepDone, exclusionWallets, (reason) =>
+          markDegraded(chain.name, reason)
+        );
         return { chain, result, error: null };
       } catch (err) {
-        log("error", `[${chain.name}] Network scan failed: ${err instanceof Error ? err.message : String(err)}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        log("error", `[${chain.name}] Network scan failed: ${msg}`);
+        markDegraded(chain.name, `network scan failed: ${msg}`);
         // Ping the client with the failure phase label; the bar/ETA
         // are time-based now and don't need any per-network credit.
         stepDone(`${chain.name}: Network failed`);
@@ -916,13 +952,14 @@ export async function runClusterScan(
 
   for (const { chain, result } of networkResults) {
     if (!result) {
-      networkStats[chain.name] = { txCount: 0, directWallets: 0 };
+      networkStats[chain.name] = { txCount: 0, directWallets: 0, failed: true };
       continue;
     }
 
     networkStats[chain.name] = {
       txCount: result.txCount,
       directWallets: result.directWallets.size,
+      ...(failedNetworks.has(chain.name) && { failed: true }),
     };
 
     txsByNetwork.set(chain.name, result.candidateTxs);
@@ -969,7 +1006,9 @@ export async function runClusterScan(
   const ethosAddresses = [...new Set([...exclusionWallets, ...allCandidateAddrs, ...allFirstFunderAddrs])];
   log("info", `Checking ${ethosAddresses.length} addresses on Ethos Network (bulk)...`);
 
-  const ethosMap = await fetchProfilesByAddresses(ethosAddresses);
+  const ethosMap = await fetchProfilesByAddresses(ethosAddresses, (reason) =>
+    markDegraded(null, `${reason}; some candidates may be missing`)
+  );
   log("info", `Found ${ethosMap.size} Ethos profiles`);
 
   function toEthosData(profile: EthosProfile) {
@@ -1344,5 +1383,8 @@ export async function runClusterScan(
     possibleCluster: possibleWithEthos,
     networkStats,
     logs,
+    ...(degradedReasons.length > 0 && {
+      degraded: { failedNetworks: [...failedNetworks], reasons: degradedReasons },
+    }),
   };
 }

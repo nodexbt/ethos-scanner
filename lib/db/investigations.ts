@@ -113,6 +113,20 @@ export interface InvestigationRow {
   shareId: string | null;
   isPublic: boolean;
   twitterEvidence: Record<string, unknown> | null;
+  /** When the saved result was last (re)scanned, ISO string. */
+  updatedAt: string | null;
+}
+
+/**
+ * Thrown by saveInvestigation when a degraded (partial) scan would
+ * overwrite a complete one. The caller keeps the old result; the user
+ * is told to re-scan once the upstream failure clears.
+ */
+export class DegradedOverwriteError extends Error {
+  constructor() {
+    super("Scan was incomplete; existing complete results were kept");
+    this.name = "DegradedOverwriteError";
+  }
 }
 
 export async function listInvestigations(
@@ -381,6 +395,7 @@ export async function getInvestigation(id: string): Promise<InvestigationRow | n
       typeof data.twitter_evidence === "string"
         ? JSON.parse(data.twitter_evidence)
         : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
+    updatedAt: data.updated_at ?? null,
   };
 }
 
@@ -408,6 +423,7 @@ export async function getInvestigationByShareId(shareId: string): Promise<Invest
       typeof data.twitter_evidence === "string"
         ? JSON.parse(data.twitter_evidence)
         : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
+    updatedAt: data.updated_at ?? null,
   };
 }
 
@@ -443,6 +459,22 @@ export async function saveInvestigation(data: {
   // Prevent a non-owner from overwriting someone else's investigation.
   if (existingOwner !== null && existingOwner !== data.ownerProfileId) {
     throw new Error("Not authorized to modify this investigation");
+  }
+
+  // Never replace a complete result with a degraded one. A scan that lost
+  // a chain or an Ethos lookup can come back empty and would otherwise
+  // silently erase real findings. A degraded first scan is still saved
+  // (flagged) so the user sees something rather than nothing.
+  const incomingDegraded = Boolean((data.clusterResult as { degraded?: unknown } | null)?.degraded);
+  if (incomingDegraded) {
+    const { data: existingRow } = await supabase
+      .from("investigations")
+      .select("cluster_result->degraded")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (existingRow && !(existingRow as { degraded?: unknown }).degraded) {
+      throw new DegradedOverwriteError();
+    }
   }
 
   // Merge incoming twitter_evidence with what's already in the DB so a save
