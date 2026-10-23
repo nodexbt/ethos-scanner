@@ -1053,7 +1053,7 @@ export default function Home() {
               {/* Desktop: overview top-left, candidates on the right spanning
                   both rows, supporting cards below the overview. Narrow
                   screens get the same DOM order in one column. */}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:items-start">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:grid-rows-[auto_1fr] xl:items-start">
               <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
               {/* Overview */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
