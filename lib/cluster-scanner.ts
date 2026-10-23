@@ -9,6 +9,7 @@ import {
   parallel,
   getFirstFunder,
   getOutgoingTransfers,
+  getIncomingTransfers,
 } from "./alchemy";
 import { fetchProfilesByAddresses, fetchInvitationTree, fetchActivities, type EthosProfile, type Invitation, type ReviewActivity } from "./ethos";
 import { getAddressLabel, isExchangeAddress } from "./known-addresses";
@@ -550,10 +551,9 @@ async function scanNetwork(
 
   // Funder analysis still needs to filter out contracts (otherwise a
   // shared DEX router or token contract becomes a fake "shared funder"
-  // signal). Pre-populate the cache from known infrastructure labels
-  // for now — captures CEX hot wallets and the addresses already labeled
-  // in known-addresses.ts. Unknown contracts may slip through; we
-  // mitigate that with the "shared by many candidates" heuristic later.
+  // signal). Filled lazily below for the addresses that surface as shared
+  // funders; the multi-hop step separately drops funders that fan out to
+  // many Ethos profiles (faucets, distributors).
   const contractCache = new Map<string, boolean>();
 
   // Step 3: Direct transfer analysis (skips contracts via empty cache,
@@ -1314,34 +1314,38 @@ async function runClusterScanInner(
     }
   }
 
-  // Multi-hop funding: trace funder wallets to discover additional Ethos profiles
+  // Multi-hop funding: trace funder wallets to discover Ethos profiles that
+  // never transacted with the target directly. Each funder is traced on the
+  // chain it funded on. A discovered wallet whose own first funder is that
+  // same funder gets shared_first_funder (the funder bootstrapped both);
+  // otherwise it is a weaker multi_hop_funding hit.
   const knownAddresses = new Set([...exclusionWallets, ...allWithEthos.flatMap((c) => c.wallets || [c.address])]);
-  const uniqueFunderAddrs = new Set<string>();
-  for (const ff of allTargetFirstFunders) {
-    if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);
-  }
-  for (const c of allWithEthos) {
-    for (const ff of c.firstFunders || []) {
-      if (!knownAddresses.has(ff.funder) && !isExchangeAddress(ff.funder)) uniqueFunderAddrs.add(ff.funder);
-    }
-  }
+  const funderChains = new Map<string, Set<string>>();
+  const addFunder = (ff: FirstFunderInfo) => {
+    if (knownAddresses.has(ff.funder) || isExchangeAddress(ff.funder)) return;
+    let set = funderChains.get(ff.funder);
+    if (!set) funderChains.set(ff.funder, (set = new Set()));
+    set.add(ff.chain);
+  };
+  for (const ff of allTargetFirstFunders) addFunder(ff);
+  for (const c of allWithEthos) for (const ff of c.firstFunders || []) addFunder(ff);
+  const targetFunderSet = new Set(allTargetFirstFunders.map((f) => f.funder));
 
-  if (uniqueFunderAddrs.size > 0) {
-    log("info", `Multi-hop: tracing ${uniqueFunderAddrs.size} funder wallet(s) for additional Ethos profiles...`);
+  if (funderChains.size > 0) {
+    log("info", `Multi-hop: tracing ${funderChains.size} funder wallet(s) on their own chains...`);
 
     const discoveredWallets = new Map<string, { funderAddress: string; chain: string }>();
-
+    const traceJobs = [...funderChains].flatMap(([funder, chains]) => [...chains].map((chain) => ({ funder, chain })));
     await parallel(
-      [...uniqueFunderAddrs],
-      async (funderAddr) => {
-        // Check outgoing transfers on Base (most common for Ethos)
-        const chain = CHAINS[0]; // Base
+      traceJobs,
+      async ({ funder, chain: chainName }) => {
+        const chain = CHAINS.find((c) => c.name === chainName) ?? CHAINS[0];
         try {
-          const outgoing = await getOutgoingTransfers(funderAddr, chain, 50);
+          const outgoing = await getOutgoingTransfers(funder, chain, 200);
           for (const tx of outgoing) {
             const dest = tx.to.toLowerCase();
             if (!knownAddresses.has(dest) && !discoveredWallets.has(dest)) {
-              discoveredWallets.set(dest, { funderAddress: funderAddr, chain: chain.name });
+              discoveredWallets.set(dest, { funderAddress: funder, chain: chainName });
             }
           }
         } catch {}
@@ -1350,49 +1354,88 @@ async function runClusterScanInner(
     );
 
     if (discoveredWallets.size > 0) {
-      log("info", `Multi-hop: found ${discoveredWallets.size} new wallet(s), checking Ethos...`);
-      const newAddrs = [...discoveredWallets.keys()].slice(0, 200);
-      const newProfiles = await fetchProfilesByAddresses(newAddrs);
+      log("info", `Multi-hop: found ${discoveredWallets.size} wallet(s) funded by the same sources, checking Ethos...`);
+      // Cheap local filter first (profile_addresses), then the Ethos API
+      // only for actual profile wallets.
+      const ethosWallets = await fetchEthosCounterparties([...discoveredWallets.keys()]);
+      const newAddrs = [...ethosWallets].slice(0, 300);
+      const newProfiles = newAddrs.length > 0 ? await fetchProfilesByAddresses(newAddrs) : new Map<string, EthosProfile>();
+
+      // A funder that bootstrapped many Ethos profiles is a faucet, an
+      // onboarding distributor, or a popular OTC wallet — sharing it says
+      // nothing about two people being the same. Skip its discoveries.
+      const FUNDER_FANOUT_MAX = 5;
+      const profilesByFunder = new Map<string, Set<number>>();
+      for (const addr of newAddrs) {
+        const pid = newProfiles.get(addr)?.profileId;
+        const meta = discoveredWallets.get(addr);
+        if (!pid || !meta || pid === targetProfileId || candidateProfileIds.has(pid)) continue;
+        let set = profilesByFunder.get(meta.funderAddress);
+        if (!set) profilesByFunder.set(meta.funderAddress, (set = new Set()));
+        set.add(pid);
+      }
+      const distributors = new Set(
+        [...profilesByFunder].filter(([, pids]) => pids.size > FUNDER_FANOUT_MAX).map(([f]) => f)
+      );
+      for (const f of distributors) {
+        log("info", `Multi-hop: funder ${getAddressLabel(f) ?? f.slice(0, 10) + "…"} funded ${profilesByFunder.get(f)!.size} Ethos profiles — treated as a distributor, not a cluster link`);
+      }
 
       let discovered = 0;
-      for (const [addr, { funderAddress, chain }] of discoveredWallets) {
-        const profile = newProfiles.get(addr);
-        if (!profile || !profile.profileId) continue;
-        if (profile.profileId === targetProfileId) continue;
-        if (candidateProfileIds.has(profile.profileId)) continue;
+      await parallel(
+        newAddrs,
+        async (addr) => {
+          const meta = discoveredWallets.get(addr)!;
+          if (distributors.has(meta.funderAddress)) return;
+          const profile = newProfiles.get(addr);
+          if (!profile || !profile.profileId) return;
+          if (profile.profileId === targetProfileId) return;
+          if (candidateProfileIds.has(profile.profileId)) return;
 
-        discovered++;
-        const ethosData = toEthosData(profile);
-        log("warn", `Multi-hop: discovered ${profile.displayName} (@${profile.username || "?"}) via funder ${funderAddress.slice(0, 10)}...`);
+          const chain = CHAINS.find((c) => c.name === meta.chain) ?? CHAINS[0];
+          const ownFirst = await getFirstFunder(addr, chain);
+          const sameFirstFunder = ownFirst?.funder === meta.funderAddress;
+          const funderIsTargets = targetFunderSet.has(meta.funderAddress);
+          const label = getAddressLabel(meta.funderAddress) ?? `${meta.funderAddress.slice(0, 10)}…`;
 
-        // Add as a new possible candidate
-        const newCandidate: ClusterCandidate = {
-          address: addr,
-          wallets: [addr],
-          score: 6,
-          confidence: "medium",
-          signals: [{ type: "multi_hop_funding", score: 6, details: `discovered via shared funder ${funderAddress.slice(0, 10)}... on ${chain}` }],
-          signalTypes: new Set(["multi_hop_funding"]),
-          directCount: 0,
-          incomingCount: 0,
-          outgoingCount: 0,
-          bidirectional: false,
-          repeatTransfer: false,
-          sharedFundingSources: [],
-          sharedFirstFunder: false,
-          firstFunders: [{ chain, funder: funderAddress, funderLabel: getAddressLabel(funderAddress), txHash: "", value: 0 }],
-                sharedCexDeposits: [],
-          invitedByTarget: false,
-          invitedTarget: false,
-          mutualReviews: false,
-          mutualVouches: false,
-          ethosProfile: ethosData,
-          networks: [chain],
-        };
+          const signal: Signal = sameFirstFunder && funderIsTargets
+            ? { type: "shared_first_funder", score: W_SHARED_FIRST_FUNDER, details: `first funded by ${label} on ${meta.chain}, same as the target` }
+            : { type: "multi_hop_funding", score: 6, details: `received funds from ${label} on ${meta.chain}, which also funded ${funderIsTargets ? "the target" : "a cluster wallet"}` };
 
-        possibleWithEthos.push(newCandidate);
-        candidateProfileIds.add(profile.profileId);
-      }
+          discovered++;
+          const ethosData = toEthosData(profile);
+          log("warn", `Multi-hop: discovered ${profile.displayName} (@${profile.username || "?"}) via funder ${label} (${signal.type})`);
+
+          const newCandidate: ClusterCandidate = {
+            address: addr,
+            wallets: [addr],
+            score: signal.score,
+            confidence: "medium",
+            signals: [signal],
+            signalTypes: new Set([signal.type]),
+            directCount: 0,
+            incomingCount: 0,
+            outgoingCount: 0,
+            bidirectional: false,
+            repeatTransfer: false,
+            sharedFundingSources: [],
+            sharedFirstFunder: sameFirstFunder && funderIsTargets,
+            firstFunders: ownFirst
+              ? [{ chain: meta.chain, funder: ownFirst.funder, funderLabel: getAddressLabel(ownFirst.funder), txHash: ownFirst.txHash, value: ownFirst.value }]
+              : [{ chain: meta.chain, funder: meta.funderAddress, funderLabel: getAddressLabel(meta.funderAddress), txHash: "", value: 0 }],
+            sharedCexDeposits: [],
+            invitedByTarget: false,
+            invitedTarget: false,
+            mutualReviews: false,
+            mutualVouches: false,
+            ethosProfile: ethosData,
+            networks: [meta.chain],
+          };
+          possibleWithEthos.push(newCandidate);
+          candidateProfileIds.add(profile.profileId);
+        },
+        5
+      );
 
       log("info", `Multi-hop: discovered ${discovered} additional Ethos profile(s)`);
     }
@@ -1443,6 +1486,124 @@ async function runClusterScanInner(
     }
   } else {
     log("info", `No shared EOA destinations found between cluster members`);
+  }
+
+  // Exchange-deposit discovery: the target's own deposit addresses (EOAs
+  // it sent value to that forward to a known exchange) are unique per
+  // exchange customer. Any other Ethos profile that has ever sent to one
+  // of them shares that exchange account — found here even if it never
+  // transacted with the target.
+  {
+    const clusterWalletSet = new Set(allClusterWallets);
+    const targetDests = new Map<string, { network: string; count: number }>();
+    for (const [network, txsMap] of txsByNetwork) {
+      const contractCache = contractCacheByNetwork.get(network) ?? new Map<string, boolean>();
+      for (const wallet of targetWallets) {
+        for (const tx of txsMap.get(wallet) ?? []) {
+          if (!NATIVE_CATEGORIES.has(tx.category) && tx.category !== "erc20") continue;
+          const from = normalizeAddress(tx.from);
+          const to = normalizeAddress(tx.to);
+          if (from !== wallet || !to || to === ZERO_ADDRESS || clusterWalletSet.has(to)) continue;
+          // Contracts and known hot wallets aren't personal deposit addresses.
+          if (contractCache.get(to) || getAddressLabel(to)) continue;
+          const key = `${network}:${to}`;
+          const cur = targetDests.get(key);
+          if (cur) cur.count++;
+          else targetDests.set(key, { network, count: 1 });
+        }
+      }
+    }
+    const alreadyVerified = new Set(sharedCexDeposits.map((d) => `${d.network}:${d.depositAddress}`));
+    const toVerify = [...targetDests.entries()]
+      .filter(([key]) => !alreadyVerified.has(key))
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 40);
+    const deposits: SharedCexDeposit[] = [...sharedCexDeposits];
+    if (toVerify.length > 0) {
+      log("info", `Exchange deposits: verifying ${toVerify.length} destination(s) of the target...`);
+      await parallel(
+        toVerify,
+        async ([key, { network }]) => {
+          const dest = key.slice(network.length + 1);
+          const chain = CHAINS.find((c) => c.name === network) ?? CHAINS[0];
+          const outgoing = await getOutgoingTransfers(dest, chain, 20);
+          const hit = outgoing.map((t) => getAddressLabel(t.to)).find((l) => l && !l.includes("Bridge"));
+          if (hit) deposits.push({ depositAddress: dest, exchange: hit, wallets: [...targetWallets], network });
+        },
+        5
+      );
+    }
+    const targetDeposits = deposits.filter((d) => d.wallets.some((w) => targetWallets.includes(w)));
+    if (targetDeposits.length > 0) {
+      log("info", `Exchange deposits: ${targetDeposits.length} deposit address(es) belong to the target; looking for other senders...`);
+      // More senders than this is a shared custodian / OTC desk, not a
+      // personal deposit address.
+      const MAX_SENDERS = 25;
+      let discovered = 0;
+      await parallel(
+        targetDeposits,
+        async (dep) => {
+          const chain = CHAINS.find((c) => c.name === dep.network) ?? CHAINS[0];
+          const incoming = await getIncomingTransfers(dep.depositAddress, chain, 1000);
+          const senders = new Set(incoming.map((t) => t.from).filter((f) => !knownAddresses.has(f) && f !== ZERO_ADDRESS));
+          if (senders.size > MAX_SENDERS) {
+            log("info", `Exchange deposits: ${dep.depositAddress.slice(0, 10)}… has ${senders.size} senders — treating as a shared service, skipped`);
+            return;
+          }
+          if (senders.size === 0) return;
+          const ethosSenders = await fetchEthosCounterparties([...senders]);
+          if (ethosSenders.size === 0) return;
+          const profiles = await fetchProfilesByAddresses([...ethosSenders]);
+          for (const addr of ethosSenders) {
+            const profile = profiles.get(addr);
+            if (!profile || !profile.profileId || profile.profileId === targetProfileId) continue;
+            const existing = [...strongWithEthos, ...possibleWithEthos].find((c) => c.ethosProfile?.profileId === profile.profileId);
+            const depFor = { ...dep, wallets: [...new Set([...dep.wallets, addr])].sort() };
+            const details = `sent to the target's ${dep.exchange} deposit address on ${dep.network}`;
+            if (existing) {
+              if (!existing.signals.some((sg) => sg.type === "shared_cex_deposit")) {
+                existing.score += 8;
+                existing.signals.push({ type: "shared_cex_deposit", score: 8, details });
+                existing.signalTypes.add("shared_cex_deposit");
+                existing.sharedCexDeposits.push(depFor);
+                recalcConfidence(existing);
+                log("warn", `Exchange deposits: ${profile.displayName} also uses the target's ${dep.exchange} deposit address`);
+              }
+              continue;
+            }
+            discovered++;
+            log("warn", `Exchange deposits: discovered ${profile.displayName} (@${profile.username || "?"}) via the target's ${dep.exchange} deposit address`);
+            possibleWithEthos.push({
+              address: addr,
+              wallets: [addr],
+              score: 8,
+              confidence: "medium",
+              signals: [{ type: "shared_cex_deposit", score: 8, details }],
+              signalTypes: new Set(["shared_cex_deposit"]),
+              directCount: 0,
+              incomingCount: 0,
+              outgoingCount: 0,
+              bidirectional: false,
+              repeatTransfer: false,
+              sharedFundingSources: [],
+              sharedFirstFunder: false,
+              firstFunders: [],
+              sharedCexDeposits: [depFor],
+              invitedByTarget: false,
+              invitedTarget: false,
+              mutualReviews: false,
+              mutualVouches: false,
+              ethosProfile: toEthosData(profile),
+              networks: [dep.network],
+            });
+            candidateProfileIds.add(profile.profileId);
+          }
+        },
+        3
+      );
+      if (discovered > 0) log("warn", `Exchange deposits: discovered ${discovered} additional profile(s)`);
+      sharedCexDeposits = deposits;
+    }
   }
 
   const totalElapsed = Date.now() - start;

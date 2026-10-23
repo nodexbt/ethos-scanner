@@ -286,6 +286,35 @@ export async function getAllTransactions(
   return all;
 }
 
+/** Incoming value transfers (ETH + ERC-20) to an address — who has ever
+    sent to it. Used to find other senders to an exchange deposit address. */
+export async function getIncomingTransfers(
+  wallet: string,
+  chain: (typeof CHAINS)[number],
+  maxCount: number = 1000
+): Promise<{ from: string; value: number; txHash: string }[]> {
+  try {
+    const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
+      {
+        fromBlock: "0x0",
+        toAddress: wallet.toLowerCase(),
+        category: transferCategories(chain, "value"),
+        order: "asc",
+        maxCount: `0x${maxCount.toString(16)}`,
+        withMetadata: false,
+        excludeZeroValue: true,
+      },
+    ])) as AssetTransfersResponse | null;
+    const transfers = data?.result?.transfers;
+    if (!transfers) return [];
+    return transfers
+      .filter((t) => t.from)
+      .map((t) => ({ from: t.from.toLowerCase(), value: t.value || 0, txHash: t.hash }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Batch eth_getCode. Returns the raw code hex for every address the RPC
  * answered for; addresses whose request failed (HTTP error past retries,
