@@ -1,7 +1,8 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2, ChevronDown } from "lucide-react";
+import { Select } from "@/components/ui/select";
+import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2 } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 export interface InvestigationSummary {
@@ -59,16 +60,6 @@ export function listControlParams(c: {
 
 /** Investigation id for a scan result: per-profile when the target has an
     Ethos profile, legacy per-address otherwise. Mirrors lib/scan-target. */
-
-/** Native select with its arrow hidden and a chevron drawn inside the padding. */
-function SelectWrap({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="relative inline-flex">
-      {children}
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-    </div>
-  );
-}
 
 export function ScansListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
@@ -150,10 +141,6 @@ export function ScansList({
   const hasRemoteMore =
     onLoadMore != null && totalCount != null && investigations.length < totalCount;
   const filtersActive = flaggedOnly || scoreBand !== "" || search.trim() !== "";
-  // Native select arrow hidden; a chevron is drawn inside the right
-  // padding so it never sits on the border.
-  const selectClass =
-    "h-9 appearance-none rounded-md border border-border bg-card pl-3 pr-8 text-xs text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary";
 
   return (
     <div className="space-y-4">
@@ -168,30 +155,8 @@ export function ScansList({
             className="pl-9 h-9"
           />
         </div>
-        <SelectWrap>
-        <select
-          aria-label="Sort scans"
-          value={sortValue}
-          onChange={(e) => onSortChange(e.target.value)}
-          className={selectClass}
-        >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-        </SelectWrap>
-        <SelectWrap>
-        <select
-          aria-label="Filter by score"
-          value={scoreBand}
-          onChange={(e) => onScoreBandChange(e.target.value)}
-          className={selectClass}
-        >
-          {SCORE_BANDS.map((b) => (
-            <option key={b.value} value={b.value}>{b.label}</option>
-          ))}
-        </select>
-        </SelectWrap>
+        <Select label="Sort scans" value={sortValue} options={SORT_OPTIONS} onChange={onSortChange} />
+        <Select label="Filter by score" value={scoreBand} options={SCORE_BANDS} onChange={onScoreBandChange} />
         <button
           onClick={() => onFlaggedChange(!flaggedOnly)}
           className={`h-9 rounded-md border px-2.5 text-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors ${
