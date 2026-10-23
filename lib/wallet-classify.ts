@@ -13,7 +13,7 @@ const EIP7702_PREFIX = "0xef0100";
 const EIP7702_CODE_LEN = 2 + 23 * 2;
 
 /** Does this eth_getCode result mean "smart contract / smart wallet"? */
-function hasContractCode(code: string): boolean {
+export function hasContractCode(code: string): boolean {
   if (code === "0x" || code === "0x0") return false;
   // Only the prefix needs case-folding; avoid copying whole bytecode strings.
   if (code.length === EIP7702_CODE_LEN && code.slice(0, 8).toLowerCase() === EIP7702_PREFIX) {

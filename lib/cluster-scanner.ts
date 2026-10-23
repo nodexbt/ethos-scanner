@@ -69,8 +69,8 @@ const W_DIRECT = 4;
 const W_REPEAT = 4;
 const W_BIDIRECTIONAL = 3;
 const W_SHARED_FUNDER = 5;
-const FINAL_SCORE_THRESHOLD = 15;
-const POSSIBLE_SCORE_THRESHOLD = 8;
+export const FINAL_SCORE_THRESHOLD = 15;
+export const POSSIBLE_SCORE_THRESHOLD = 8;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -208,7 +208,7 @@ export interface DegradedInfo {
   reasons: string[];
 }
 
-interface DirectWalletInfo {
+export interface DirectWalletInfo {
   address: string;
   count: number;
   incomingCount: number;
@@ -246,7 +246,7 @@ function transferValue(tx: AssetTransfer): number {
 
 // --- Core Analysis Functions ---
 
-function analyzeDirectTransfers(
+export function analyzeDirectTransfers(
   targetSet: Set<string>,
   txs: AssetTransfer[],
   contractCache: Map<string, boolean>
@@ -304,7 +304,7 @@ function analyzeDirectTransfers(
 }
 
 
-function findSharedFundingSources(
+export function findSharedFundingSources(
   targetSet: Set<string>,
   targetTxs: AssetTransfer[],
   candidateWallets: string[],
@@ -360,7 +360,7 @@ const W_SHARED_EXCHANGE_FUNDER = 5; // same exact exchange hot wallet funded bot
 const W_FUNDED_BY_TARGET = 10;
 const W_FUNDED_BY_CLUSTER = 10;
 
-function scoreCandidate(
+export function scoreCandidate(
   address: string,
   directInfo: DirectWalletInfo | undefined,
   sharedFunders: string[],
@@ -447,7 +447,7 @@ function scoreCandidate(
  * across at least two signal types. Possible = POSSIBLE_SCORE_THRESHOLD+.
  * Mirrored in plain words by STRONG_RULE in lib/scan-utils.ts.
  */
-function confidenceFor(
+export function confidenceFor(
   score: number,
   signalTypes: Set<string>,
   autoHigh: boolean
@@ -465,7 +465,7 @@ function confidenceFor(
  * or wallets add up — a profile linked on three chains should outscore
  * one linked on one. Confidence is recomputed from the merged set.
  */
-function mergeSignalsInto(into: ClusterCandidate, from: ClusterCandidate) {
+export function mergeSignalsInto(into: ClusterCandidate, from: ClusterCandidate) {
   const byType = new Map<string, Signal>();
   for (const sig of [...into.signals, ...from.signals]) {
     const cur = byType.get(sig.type);
@@ -482,7 +482,7 @@ function mergeSignalsInto(into: ClusterCandidate, from: ClusterCandidate) {
 }
 
 /** Re-run the rule after signals were added post-scoring (social, CEX). */
-function recalcConfidence(c: ClusterCandidate) {
+export function recalcConfidence(c: ClusterCandidate) {
   const autoHigh = c.signals.some((s) => s.type === "funded_by_target" || s.type === "funded_by_cluster");
   const next = confidenceFor(c.score, c.signalTypes, autoHigh);
   // Never drop below the tier the candidate already earned.
