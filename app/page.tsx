@@ -222,16 +222,20 @@ export default function Home() {
   };
 
   // A scan started earlier (other tab, or before a reload) keeps running
-  // on the server; pick it up so the user sees it finish.
+  // on the server; pick it up so the user sees it finish. Keyed on the
+  // auth status, not the session object: next-auth hands out a new
+  // session object on every window focus, which would re-run this and
+  // clobber a scan this page is already watching.
+  const watchingRef = useRef(false);
   useEffect(() => {
-    if (!session) return;
+    if (sessionStatus !== "authenticated") return;
     let cancelled = false;
     (async () => {
       try {
         const resp = await fetch("/api/scan/jobs", { cache: "no-store" });
         if (!resp.ok) return;
         const { job } = await resp.json();
-        if (!job || cancelled) return;
+        if (!job || cancelled || watchingRef.current) return;
         setScanning(true);
         setWalletInput(job.targetInput ?? "");
         setClusterResult(null);
@@ -253,7 +257,7 @@ export default function Home() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [sessionStatus]);
 
   // Keep the active tab in sync when the user navigates history (back/forward).
   useEffect(() => {
@@ -314,12 +318,29 @@ export default function Home() {
    */
   const watchJob = async (jobId: string): Promise<{ result: ClusterScanResult; investigationId: string } | null> => {
     const POLL_MS = 1500;
+    const MAX_CONSECUTIVE_FAILURES = 5;
+    let failures = 0;
+    watchingRef.current = true;
+    try {
     for (;;) {
-      const resp = await fetch(`/api/scan/jobs/${jobId}`, { cache: "no-store" });
-      if (!resp.ok) {
-        setError("Lost track of the running scan. Reload to check its status.");
-        return null;
+      let resp: Response | null = null;
+      try {
+        resp = await fetch(`/api/scan/jobs/${jobId}`, { cache: "no-store" });
+      } catch {
+        resp = null;
       }
+      if (!resp || !resp.ok) {
+        // A blip (deploy, network) shouldn't abandon a scan that is still
+        // running on the server; give up only after several in a row.
+        failures++;
+        if (resp?.status === 404 || failures >= MAX_CONSECUTIVE_FAILURES) {
+          setError(resp?.status === 404 ? "The scan job could not be found. Reload to check its status." : "Lost contact with the running scan. Reload to check its status.");
+          return null;
+        }
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        continue;
+      }
+      failures = 0;
       const job = await resp.json();
       setClusterLogs(job.logs ?? []);
       if (job.progress) setScanProgress(job.progress);
@@ -334,6 +355,9 @@ export default function Home() {
         return null;
       }
       await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+    } finally {
+      watchingRef.current = false;
     }
   };
 
@@ -384,7 +408,11 @@ export default function Home() {
 
       if (resp.status === 202) {
         // Background job: poll until it completes.
-        const { jobId } = await resp.json();
+        const { jobId } = (await resp.json().catch(() => ({}))) as { jobId?: string };
+        if (!jobId) {
+          setError("The server accepted the scan but returned no job id.");
+          return;
+        }
         const done = await watchJob(jobId);
         scanResult = done?.result ?? null;
       } else {
@@ -959,6 +987,24 @@ export default function Home() {
 
         {/* Right column: Results */}
         <div className="space-y-4">
+          {/* Queued: the job is accepted but hasn't reported yet */}
+          {scanning && clusterLogs.length === 0 && (
+            <Card>
+              <CardContent className="p-4 flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Scan queued — waiting for the first update from the server…
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Errors that end a scan, shown where the results would be */}
+          {!scanning && !hasResults && error && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Loading skeleton */}
           {loadingCached && (
             <motion.div
