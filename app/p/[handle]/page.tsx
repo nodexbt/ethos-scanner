@@ -9,7 +9,8 @@ import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { getPublicProfileSummary } from "@/lib/public-profile";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, scanHref } from "@/lib/utils";
+import { ConfidencePill } from "@/components/ui/confidence-pill";
 
 // Public, summary-only. Re-rendered at most every 2 minutes per handle so
 // a shared link can't hammer the Ethos API or the database.
@@ -43,7 +44,7 @@ export default async function PublicProfilePage({ params }: Params) {
   const ethosUrl = profile.username
     ? `https://app.ethos.network/profile/x/${profile.username}`
     : `https://app.ethos.network/profile/${profile.profileId}`;
-  const scanHref = `/scan/x/${profile.username ?? profile.profileId}`;
+  const scanPath = scanHref(profile);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
@@ -137,13 +138,7 @@ export default async function PublicProfilePage({ params }: Params) {
                         {l.username ? `@${l.username} · ` : ""}Ethos score {l.ethosScore}
                       </div>
                     </div>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium text-white ${
-                        l.confidence === "high" ? "bg-red-500" : "bg-amber-500"
-                      }`}
-                    >
-                      {l.confidence === "high" ? "strong" : "possible"} · {l.linkStrength}
-                    </span>
+                    <ConfidencePill confidence={l.confidence} score={l.linkStrength} />
                   </Link>
                 ))}
               </CardContent>
@@ -156,7 +151,7 @@ export default async function PublicProfilePage({ params }: Params) {
               <span className="flex-1">
                 The full result shows every signal, first funders, shared exchange deposits and Ethos social ties.
               </span>
-              <Link href={scanHref} className="shrink-0 text-xs font-medium border border-border rounded-md px-3 py-1.5 hover:bg-muted/50 transition-colors">
+              <Link href={scanPath} className="shrink-0 text-xs font-medium border border-border rounded-md px-3 py-1.5 hover:bg-muted/50 transition-colors">
                 Sign in to view
               </Link>
             </CardContent>
@@ -171,7 +166,7 @@ export default async function PublicProfilePage({ params }: Params) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href={scanHref} className="inline-flex text-xs font-medium border border-border rounded-md px-3 py-1.5 hover:bg-muted/50 transition-colors">
+            <Link href={scanPath} className="inline-flex text-xs font-medium border border-border rounded-md px-3 py-1.5 hover:bg-muted/50 transition-colors">
               Sign in to scan {profile.displayName}
             </Link>
           </CardContent>

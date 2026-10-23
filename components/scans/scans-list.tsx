@@ -2,6 +2,7 @@
 
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
 import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
@@ -20,11 +21,18 @@ export interface InvestigationSummary {
   lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
 }
 
-/** Radix Select rejects "" as an item value; the "no filter" option maps to this. */
-const NONE = "__none";
+export const DEFAULT_SORT = "default";
+export const DEFAULT_SCORE_BAND = "any";
 
-export const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: string }[] = [
-  { value: "", label: "Default sort" },
+/** Scope chips: which saved scans are listed. */
+const SCOPES = [
+  ["all", "All", FolderOpen],
+  ["yours", "Mine", History],
+  ["verified", "Human verified", ShieldCheck],
+] as const;
+
+const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: string }[] = [
+  { value: "default", label: "Default sort" },
   { value: "recent-desc", label: "Newest first", sort: "recent", dir: "desc" },
   { value: "recent-asc", label: "Oldest first", sort: "recent", dir: "asc" },
   { value: "strong-desc", label: "Most strong", sort: "strong", dir: "desc" },
@@ -33,8 +41,8 @@ export const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: 
   { value: "score-asc", label: "Lowest Ethos score", sort: "score", dir: "asc" },
 ];
 
-export const SCORE_BANDS: { value: string; label: string; min?: number }[] = [
-  { value: "", label: "Any score" },
+const SCORE_BANDS: { value: string; label: string; min?: number }[] = [
+  { value: "any", label: "Any score" },
   { value: "1400", label: "Ethos score > 1400", min: 1400 },
   { value: "1600", label: "Ethos score > 1600", min: 1600 },
   { value: "1800", label: "Ethos score > 1800", min: 1800 },
@@ -61,8 +69,18 @@ export function listControlParams(c: {
   return p;
 }
 
-/** Investigation id for a scan result: per-profile when the target has an
-    Ethos profile, legacy per-address otherwise. Mirrors lib/scan-target. */
+function OptionSelect({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 export function ScansListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
@@ -152,7 +170,7 @@ export function ScansList({
   const displayedTotal = totalCount ?? investigations.length;
   const hasRemoteMore =
     onLoadMore != null && totalCount != null && investigations.length < totalCount;
-  const filtersActive = flaggedOnly || scoreBand !== "" || search.trim() !== "";
+  const filtersActive = flaggedOnly || scoreBand !== DEFAULT_SCORE_BAND || search.trim() !== "";
 
   return (
     <div className="space-y-4">
@@ -168,43 +186,15 @@ export function ScansList({
           />
         </div>
         <div className="inline-flex h-9 items-center rounded-md border border-border bg-card p-0.5">
-          {(
-            [
-              ["all", "All", FolderOpen],
-              ["yours", "Mine", History],
-              ["verified", "Human verified", ShieldCheck],
-            ] as const
-          ).map(([key, label, Icon]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onScopeChange(key)}
-              className={`h-8 inline-flex items-center gap-1.5 rounded px-2.5 text-xs cursor-pointer transition-colors whitespace-nowrap ${
-                scope === key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
+          {SCOPES.map(([key, label, Icon]) => (
+            <SegmentedTab key={key} size="sm" icon={Icon} active={scope === key} onClick={() => onScopeChange(key)}>
               {label}
-              {counts[key] > 0 && <span className="tabular-nums text-[10px] text-muted-foreground">{counts[key].toLocaleString()}</span>}
-            </button>
+              <SegmentedCount size="sm" value={counts[key]} />
+            </SegmentedTab>
           ))}
         </div>
-        <Select value={sortValue || NONE} onValueChange={(v) => onSortChange(v === NONE ? "" : v)}>
-          <SelectTrigger aria-label="Sort scans"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {SORT_OPTIONS.map((o) => (
-              <SelectItem key={o.value || NONE} value={o.value || NONE}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={scoreBand || NONE} onValueChange={(v) => onScoreBandChange(v === NONE ? "" : v)}>
-          <SelectTrigger aria-label="Filter by score"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {SCORE_BANDS.map((b) => (
-              <SelectItem key={b.value || NONE} value={b.value || NONE}>{b.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect label="Sort scans" value={sortValue} options={SORT_OPTIONS} onChange={onSortChange} />
+        <OptionSelect label="Filter by score" value={scoreBand} options={SCORE_BANDS} onChange={onScoreBandChange} />
         <button
           onClick={() => onFlaggedChange(!flaggedOnly)}
           className={`h-9 rounded-md border px-2.5 text-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors ${
@@ -323,18 +313,18 @@ export function ScansList({
                   {new Date(inv.savedAt).toLocaleDateString()}
                 </span>
               </div>
-              {canDelete(inv) ? (
-                <button
-                  onClick={() => onDelete(inv.id)}
-                  className="shrink-0 h-7 w-7 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
-                  title="Delete scan"
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
-              ) : (
-                // Reserve the slot so columns line up with rows that can be deleted.
-                <span className="shrink-0 h-7 w-7 hidden md:block" aria-hidden />
-              )}
+              {/* Fixed trailing slot so columns line up whether or not a row is deletable. */}
+              <div className="shrink-0 h-7 w-7 hidden md:flex items-center justify-center">
+                {canDelete(inv) && (
+                  <button
+                    onClick={() => onDelete(inv.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                    title="Delete scan"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {hasRemoteMore && (

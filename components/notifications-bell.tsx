@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, scanHref } from "@/lib/utils";
 
 interface Item {
   id: number;
@@ -19,11 +19,6 @@ interface Item {
 }
 
 const POLL_MS = 60_000;
-
-function scanHref(target?: { username: string | null; profileId: number }) {
-  if (!target) return "/";
-  return `/scan/x/${target.username ?? target.profileId}`;
-}
 
 function describe(n: Item): string {
   const t = n.payload.target?.displayName ?? "a profile";

@@ -9,6 +9,9 @@ export function SmoothScroll() {
       duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       touchMultiplier: 2,
+      // Elements that can scroll themselves (dialogs, menus, log panes) get
+      // the wheel instead of the page — no per-component opt-out needed.
+      allowNestedScroll: true,
     });
 
     function raf(time: number) {

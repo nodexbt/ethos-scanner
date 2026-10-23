@@ -85,7 +85,6 @@ const SelectContent = React.forwardRef<
     >
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport
-        data-lenis-prevent=""
         className={cn(
           "p-1",
           position === "popper" &&

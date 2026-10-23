@@ -7,16 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, scanHref } from "@/lib/utils";
+import { ConfidencePill } from "@/components/ui/confidence-pill";
 import type { NetworkOverview, NetworkProfile } from "@/lib/db/network";
 
-function scanHref(p: NetworkProfile) {
-  return `/scan/x/${p.username ?? p.profileId}`;
-}
-
-function ProfileRow({ p, right, href }: { p: NetworkProfile; right: React.ReactNode; href: string }) {
+function ProfileRow({ p, right }: { p: NetworkProfile; right: React.ReactNode }) {
   return (
-    <Link href={href} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 hover:bg-muted/30 transition-colors">
+    <Link href={scanHref(p)} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 hover:bg-muted/30 transition-colors">
       {p.avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={p.avatarUrl} alt="" className="h-8 w-8 rounded-full shrink-0" loading="lazy" />
@@ -43,8 +40,12 @@ function ProfileRow({ p, right, href }: { p: NetworkProfile; right: React.ReactN
   );
 }
 
+// Last overview seen this session: re-entering the tab shows it at once
+// while a fresh copy loads (the API itself is cached a minute).
+let lastOverview: NetworkOverview | null = null;
+
 export function NetworkView() {
-  const [data, setData] = useState<NetworkOverview | null>(null);
+  const [data, setData] = useState<NetworkOverview | null>(lastOverview);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export function NetworkView() {
     fetch("/api/network")
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json()).error ?? "Failed to load"))))
       .then((d) => {
+        lastOverview = d;
         if (!cancelled) setData(d);
       })
       .catch((e) => {
@@ -114,7 +116,6 @@ export function NetworkView() {
                   <ProfileRow
                     key={p.profileId}
                     p={p}
-                    href={scanHref(p)}
                     right={
                       <>
                         <div className="text-foreground font-medium">{p.linkedBy} scans</div>
@@ -136,7 +137,6 @@ export function NetworkView() {
                   <ProfileRow
                     key={p.profileId}
                     p={p}
-                    href={scanHref(p)}
                     right={
                       <>
                         <div className="text-foreground font-medium">{p.links} links</div>
@@ -160,9 +160,7 @@ export function NetworkView() {
                       <span className="font-medium text-sm">{e.source.displayName ?? e.source.profileId}</span>
                       <span className="text-muted-foreground">→</span>
                       <span className="font-medium text-sm">{e.candidate.displayName ?? e.candidate.profileId}</span>
-                      <span className={`ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-medium text-white ${e.confidence === "high" ? "bg-red-500" : "bg-amber-500"}`}>
-                        {e.confidence === "high" ? "strong" : "possible"} · {e.score}
-                      </span>
+                      <ConfidencePill confidence={e.confidence} score={e.score} className="ml-auto" />
                     </div>
                     <div className="text-muted-foreground mt-0.5">{formatRelativeTime(e.updatedAt)}</div>
                   </Link>

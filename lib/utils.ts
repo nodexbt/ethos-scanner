@@ -51,3 +51,9 @@ export function formatRelativeTime(input: string | number | Date): string {
   const years = Math.floor(days / 365);
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
+
+/** In-app scan page for a profile: by X handle when known, else by id. */
+export function scanHref(p: { username: string | null; profileId: number } | null | undefined): string {
+  if (!p) return "/";
+  return `/scan/x/${p.username ?? p.profileId}`;
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { X, ExternalLink } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
 import {
   getScoreBorderColor,
@@ -17,8 +17,8 @@ import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
 interface CandidateModalProps {
-  /** The candidate to show; keep passing the last one while closing so
-      the exit animation has content to render. */
+  /** The candidate to show. Stays the last opened one while `open` is
+      false so the close animation has content to render. */
   candidate: ClusterCandidate;
   open: boolean;
   result: ClusterScanResult;
@@ -29,7 +29,7 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent
-        hideClose
+        showCloseButton={false}
         className="w-[calc(100%-2rem)] max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-xl sm:rounded-xl"
       >
         <DialogDescription className="sr-only">Evidence behind this profile&apos;s link to the scanned target.</DialogDescription>
@@ -54,12 +54,9 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
               {candidate.confidence === "high" ? "Strong" : "Possible"} match · Link strength {candidate.score}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer"
-          >
+          <DialogClose className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer" aria-label="Close">
             <X className="h-5 w-5" />
-          </button>
+          </DialogClose>
         </div>
 
         <div className="p-5 space-y-5">

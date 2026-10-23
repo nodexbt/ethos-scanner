@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, ChevronDown, ChevronRight, History, Users, Activity, Network, ArrowRight } from "lucide-react";
 import { ClusterScanResult, ClusterCandidate, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
@@ -20,15 +20,14 @@ import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 import { AppHeader } from "@/components/app-header";
 import { NetworkView } from "@/components/network/network-view";
 import { LandingPage } from "@/components/landing/landing-page";
-import { ScansList, ScansListSkeleton, listControlParams, type InvestigationSummary } from "@/components/scans/scans-list";
+import { ScansList, ScansListSkeleton, listControlParams, DEFAULT_SORT, DEFAULT_SCORE_BAND, type InvestigationSummary, type ScanScope } from "@/components/scans/scans-list";
+import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
 
 // --- Saved Investigations ---
 
 
-type ActiveTab = "scanner" | "yours" | "all" | "verified" | "network";
+type ActiveTab = "scanner" | "scans" | "network";
 
-// Sort options for the scan-list tabs. "" = the tab's natural default (recent
-// for yours/all, most-flagged for verified) — sent as no sort param.
 function investigationIdForResult(result: ClusterScanResult): string {
   return result.targetProfileId != null
     ? `scan-p${result.targetProfileId}`
@@ -36,10 +35,15 @@ function investigationIdForResult(result: ClusterScanResult): string {
 }
 
 /** Derive the active tab from a URL search string (?tab=...). Defaults to scanner. */
-function tabFromSearch(search: string): ActiveTab {
-  const t = new URLSearchParams(search).get("tab");
-  if (t === "scans") return "all";
-  return t === "yours" || t === "all" || t === "verified" || t === "network" ? t : "scanner";
+/** Derive (tab, scope) from the URL. Legacy ?tab=yours|all|verified map to
+    the Scans tab with that scope so old links keep working. */
+function tabFromSearch(search: string): { tab: ActiveTab; scope: ScanScope } {
+  const q = new URLSearchParams(search);
+  const t = q.get("tab");
+  if (t === "yours" || t === "all" || t === "verified") return { tab: "scans", scope: t };
+  const sc = q.get("scope");
+  const scope: ScanScope = sc === "yours" || sc === "verified" ? sc : "all";
+  return { tab: t === "scans" || t === "network" ? t : "scanner", scope };
 }
 
 export default function Home() {
@@ -75,15 +79,20 @@ export default function Home() {
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   /** Bumped after each scan so the header refetches the daily quota. */
   const [quotaKey, setQuotaKey] = useState(0);
-  const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
-  /** Last opened candidate, kept while the dialog animates closed. */
+  /** Last opened candidate (kept while the dialog animates closed) and
+      whether the dialog is open. Stable callbacks so memo()'d cards skip
+      re-rendering on open/close. */
   const [modalCandidate, setModalCandidate] = useState<ClusterCandidate | null>(null);
-  const openCandidate = (c: ClusterCandidate) => {
+  const [modalOpen, setModalOpen] = useState(false);
+  const openCandidate = useCallback((c: ClusterCandidate) => {
     setModalCandidate(c);
-    setSelectedCandidate(c);
-  };
+    setModalOpen(true);
+  }, []);
+  const closeCandidate = useCallback(() => setModalOpen(false), []);
   const [showPossible, setShowPossible] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
+  /** Which saved scans the Scans tab lists. Survives switching tabs. */
+    const [scope, setScope] = useState<ScanScope>("all");
   const [verifiedInvestigations, setVerifiedInvestigations] = useState<InvestigationSummary[]>([]);
   const [verifiedTotal, setVerifiedTotal] = useState<number>(0);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
@@ -94,9 +103,9 @@ export default function Home() {
   const [investigationSearch, setInvestigationSearch] = useState("");
   // Server-side search/sort/filter controls, shared across the scan-list tabs.
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sortValue, setSortValue] = useState("");
+  const [sortValue, setSortValue] = useState(DEFAULT_SORT);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
-  const [scoreBand, setScoreBand] = useState("");
+  const [scoreBand, setScoreBand] = useState(DEFAULT_SCORE_BAND);
 
   const [twitterAuthError, setTwitterAuthError] = useState<string | null>(null);
 
@@ -143,7 +152,9 @@ export default function Home() {
     }
 
     // Restore the active tab from the URL (?tab=yours|all|verified).
-    setActiveTab(tabFromSearch(window.location.search));
+    const initial = tabFromSearch(window.location.search);
+    setActiveTab(initial.tab);
+    setScope(initial.scope);
 
     // Check for auth error in query string
     const params = new URLSearchParams(window.location.search);
@@ -214,12 +225,16 @@ export default function Home() {
   // Switch tabs and reflect it in the URL so browser back/forward moves
   // between tabs. The scanner tab keeps any active /scan/:addr path; the
   // others live at /?tab=... on the root.
-  const selectTab = (tab: ActiveTab) => {
+  const selectTab = (tab: ActiveTab, nextScope: ScanScope = scope) => {
     setActiveTab(tab);
+    setScope(nextScope);
     const scannerUrl = window.location.pathname.startsWith("/scan/")
       ? window.location.pathname
       : "/";
-    const url = tab === "scanner" ? scannerUrl : `/?tab=${tab}`;
+    const url =
+      tab === "scanner" ? scannerUrl
+      : tab === "scans" ? `/?tab=scans${nextScope === "all" ? "" : `&scope=${nextScope}`}`
+      : "/?tab=network";
     if (window.location.pathname + window.location.search !== url) {
       window.history.pushState({}, "", url);
     }
@@ -265,7 +280,11 @@ export default function Home() {
 
   // Keep the active tab in sync when the user navigates history (back/forward).
   useEffect(() => {
-    const onPop = () => setActiveTab(tabFromSearch(window.location.search));
+    const onPop = () => {
+      const parsed = tabFromSearch(window.location.search);
+      setActiveTab(parsed.tab);
+      setScope(parsed.scope);
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -608,7 +627,8 @@ export default function Home() {
       didMountRef.current = true;
       return;
     }
-    if (activeTab === "all") {
+    if (activeTab !== "scans") return;
+    if (scope === "all") {
       loadScansPage("all", 0, true).then((page) => {
         if (page) {
           setAllInvestigations(page.rows);
@@ -616,14 +636,14 @@ export default function Home() {
           if (page.stats) setScanStats(page.stats);
         }
       });
-    } else if (activeTab === "yours") {
+    } else if (scope === "yours") {
       loadScansPage("mine", 0).then((page) => {
         if (page) {
           setYourInvestigations(page.rows);
           setYourTotal(page.total);
         }
       });
-    } else if (activeTab === "verified") {
+    } else {
       setVerifiedLoading(true);
       loadVerifiedPage(0)
         .then((page) => {
@@ -635,7 +655,7 @@ export default function Home() {
         .finally(() => setVerifiedLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, debouncedSearch, sortValue, flaggedOnly, scoreBand]);
+  }, [activeTab, scope, debouncedSearch, sortValue, flaggedOnly, scoreBand]);
 
   const handleLoadInvestigation = async (inv: InvestigationSummary) => {
     const resp = await fetch(`/api/investigations/${inv.id}`);
@@ -817,7 +837,6 @@ export default function Home() {
   const currentProfileId = (session?.user?.ethos?.profileId as number | undefined) ?? null;
   // @ts-expect-error - isAdmin field added in session callback
   const isAdmin = Boolean(session?.user?.isAdmin);
-  const yourScansCount = yourTotal;
   const canDelete = (inv: InvestigationSummary) =>
     isAdmin || inv.ownerProfileId === null || inv.ownerProfileId === currentProfileId;
 
@@ -842,42 +861,16 @@ export default function Home() {
         quotaKey={quotaKey}
         nav={
         <div className="h-10 inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
-          <button
-            onClick={() => selectTab("scanner")}
-            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === "scanner"
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <Search className="h-4 w-4" />
+          <SegmentedTab icon={Search} active={activeTab === "scanner"} onClick={() => selectTab("scanner")}>
             Scanner
-          </button>
-          <button
-            onClick={() => selectTab(activeTab === "scanner" || activeTab === "network" ? "all" : activeTab)}
-            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab !== "scanner" && activeTab !== "network"
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <FolderOpen className="h-4 w-4" />
+          </SegmentedTab>
+          <SegmentedTab icon={FolderOpen} active={activeTab === "scans"} onClick={() => selectTab("scans")}>
             Scans
-            {allTotal > 0 && (
-              <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full">{allTotal}</span>
-            )}
-          </button>
-          <button
-            onClick={() => selectTab("network")}
-            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === "network"
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <Network className="h-4 w-4" />
+            <SegmentedCount value={allTotal} />
+          </SegmentedTab>
+          <SegmentedTab icon={Network} active={activeTab === "network"} onClick={() => selectTab("network")}>
             Network
-          </button>
+          </SegmentedTab>
         </div>
         }
         onLogoClick={() => {
@@ -1245,7 +1238,7 @@ export default function Home() {
                       Recent Scans
                     </CardTitle>
                     <button
-                      onClick={() => selectTab("all")}
+                      onClick={() => selectTab("scans", "all")}
                       className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       View all
@@ -1315,87 +1308,52 @@ export default function Home() {
       </div>
       )}
 
-      {/* Your Scans / All Scans Tab */}
-      {(activeTab === "yours" || activeTab === "all") && (scansLoading && allInvestigations.length === 0 ? (
-        <ScansListSkeleton />
-      ) : (
-        <ScansList
-          investigations={activeTab === "yours" ? yourInvestigations : allInvestigations}
-          scope={activeTab === "yours" ? "yours" : "all"}
-          onScopeChange={(sc) => selectTab(sc)}
-          counts={{ all: allTotal, yours: yourTotal, verified: verifiedTotal }}
-          emptyLabel={
-            activeTab === "yours"
-              ? "You haven't run any scans yet."
-              : "No scans yet. Run one to get started."
-          }
-          search={investigationSearch}
-          onSearchChange={setInvestigationSearch}
-          sortValue={sortValue}
-          onSortChange={setSortValue}
-          flaggedOnly={flaggedOnly}
-          onFlaggedChange={setFlaggedOnly}
-          scoreBand={scoreBand}
-          onScoreBandChange={setScoreBand}
-          currentInvestigationId={currentInvestigationId}
-          canDelete={canDelete}
-          onLoad={(inv) => {
-            handleLoadInvestigation(inv);
-            setActiveTab("scanner");
-          }}
-          onDelete={handleDeleteInvestigation}
-          totalCount={activeTab === "yours" ? yourTotal : allTotal}
-          onLoadMore={activeTab === "yours" ? loadMoreYours : loadMoreAll}
-          loadingMore={activeTab === "yours" ? yourLoadingMore : allLoadingMore}
-          loadMoreBatchSize={SCANS_PAGE_SIZE}
-        />
-      ))}
-
-      {/* Human Verified Tab — scans whose target is the primary wallet of an
-          Ethos human-verified profile. Sorted by strong-cluster count desc on
-          the server so the most-flagged accounts surface first. */}
-      {activeTab === "verified" && (
-        <div className="space-y-4">
-          {verifiedLoading && verifiedInvestigations.length === 0 ? (
-            <ScansListSkeleton />
-          ) : (
-            <ScansList
-              investigations={verifiedInvestigations}
-              scope="verified"
-              onScopeChange={(sc) => selectTab(sc)}
-              counts={{ all: allTotal, yours: yourTotal, verified: verifiedTotal }}
-              emptyLabel="No human-verified profiles scanned yet."
-              search={investigationSearch}
-              onSearchChange={setInvestigationSearch}
-              sortValue={sortValue}
-              onSortChange={setSortValue}
-              flaggedOnly={flaggedOnly}
-              onFlaggedChange={setFlaggedOnly}
-              scoreBand={scoreBand}
-              onScoreBandChange={setScoreBand}
-              currentInvestigationId={currentInvestigationId}
-              canDelete={canDelete}
-              onLoad={(inv) => {
-                handleLoadInvestigation(inv);
-                setActiveTab("scanner");
-              }}
-              onDelete={handleDeleteInvestigation}
-              totalCount={verifiedTotal}
-              onLoadMore={loadMoreVerified}
-              loadingMore={verifiedLoadingMore}
-              loadMoreBatchSize={VERIFIED_PAGE_SIZE}
-            />
-          )}
-        </div>
-      )}
+      {/* Scans tab: one list, fed by whichever scope is selected */}
+      {activeTab === "scans" && (() => {
+        const byScope = {
+          all: { rows: allInvestigations, total: allTotal, loadMore: loadMoreAll, loadingMore: allLoadingMore, pageSize: SCANS_PAGE_SIZE, loading: scansLoading, emptyLabel: "No scans yet. Run one to get started." },
+          yours: { rows: yourInvestigations, total: yourTotal, loadMore: loadMoreYours, loadingMore: yourLoadingMore, pageSize: SCANS_PAGE_SIZE, loading: scansLoading, emptyLabel: "You haven't run any scans yet." },
+          verified: { rows: verifiedInvestigations, total: verifiedTotal, loadMore: loadMoreVerified, loadingMore: verifiedLoadingMore, pageSize: VERIFIED_PAGE_SIZE, loading: verifiedLoading, emptyLabel: "No human-verified profiles scanned yet." },
+        }[scope];
+        return byScope.loading && byScope.rows.length === 0 ? (
+          <ScansListSkeleton />
+        ) : (
+          <ScansList
+            investigations={byScope.rows}
+            scope={scope}
+            onScopeChange={(sc) => selectTab("scans", sc)}
+            counts={{ all: allTotal, yours: yourTotal, verified: verifiedTotal }}
+            emptyLabel={byScope.emptyLabel}
+            search={investigationSearch}
+            onSearchChange={setInvestigationSearch}
+            sortValue={sortValue}
+            onSortChange={setSortValue}
+            flaggedOnly={flaggedOnly}
+            onFlaggedChange={setFlaggedOnly}
+            scoreBand={scoreBand}
+            onScoreBandChange={setScoreBand}
+            currentInvestigationId={currentInvestigationId}
+            canDelete={canDelete}
+            onLoad={(inv) => {
+              handleLoadInvestigation(inv);
+              selectTab("scanner");
+            }}
+            onDelete={handleDeleteInvestigation}
+            totalCount={byScope.total}
+            onLoadMore={byScope.loadMore}
+            loadingMore={byScope.loadingMore}
+            loadMoreBatchSize={byScope.pageSize}
+          />
+        );
+      })()}
 
       {/* Candidate Detail Modal — stays mounted so Radix can animate it closed */}
       {modalCandidate && clusterResult && (
         <CandidateModal
           candidate={modalCandidate}
-          open={selectedCandidate !== null}
+          open={modalOpen}
           result={clusterResult}
-          onClose={() => setSelectedCandidate(null)}
+          onClose={closeCandidate}
         />
       )}
 
