@@ -1039,6 +1039,7 @@ export default function Home() {
   };
 
   const hasResults = clusterResult !== null && !scanning;
+  const scanActive = scanning || hasResults || loadingCached;
 
   // @ts-expect-error - ethos field added in session callback
   const currentProfileId = (session?.user?.ethos?.profileId as number | undefined) ?? null;
@@ -1066,22 +1067,7 @@ export default function Home() {
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
       <AppHeader
-        onLogoClick={() => {
-          setActiveTab("scanner");
-          setClusterResult(null);
-          setClusterLogs([]);
-          setScanProgress(null);
-          setWalletInput("");
-          setError(null);
-          setCurrentInvestigationId(null);
-          setScreenshots(new Map());
-        setTwitterEvidence({});
-          window.history.pushState({}, "", "/");
-        }}
-      />
-
-      {/* Tabs */}
-      <div className="mb-4 -mx-1 px-1 overflow-x-auto scrollbar-hide">
+        nav={
         <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
           <button
             onClick={() => selectTab("scanner")}
@@ -1137,12 +1123,33 @@ export default function Home() {
             )}
           </button>
         </div>
-      </div>
+        }
+        onLogoClick={() => {
+          setActiveTab("scanner");
+          setClusterResult(null);
+          setClusterLogs([]);
+          setScanProgress(null);
+          setWalletInput("");
+          setError(null);
+          setCurrentInvestigationId(null);
+          setScreenshots(new Map());
+        setTwitterEvidence({});
+          window.history.pushState({}, "", "/");
+        }}
+      />
 
       {/* Scanner Tab */}
       {activeTab === "scanner" && (
-      <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4">
-        {/* Left column: How it works (empty state) + Input + Log */}
+      <div
+        className={
+          scanActive
+            ? // Once a scan is running or results are showing, the input is a
+              // slim bar above full-width results instead of an empty column.
+              "flex flex-col gap-4"
+            : "flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4"
+        }
+      >
+        {/* Left column (empty state) / top bar (active): How it works + Input + Log */}
         <div className="space-y-4">
           {/* "How it works" lives above the scan input as the explainer
               for the tool. Hidden once a scan starts or results exist —
@@ -1187,6 +1194,7 @@ export default function Home() {
             scanning={scanning}
             error={error}
             onSubmit={startScan}
+            compact={scanActive}
           />
 
           <ScanLog

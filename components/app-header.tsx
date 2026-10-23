@@ -15,9 +15,12 @@ interface AppHeaderProps {
    * state; other pages leave it undefined so the logo just links back to "/".
    */
   onLogoClick?: () => void;
+  /** Primary navigation (tabs) rendered inline between the logo and the
+      account controls. Wraps to its own row on narrow screens. */
+  nav?: React.ReactNode;
 }
 
-export function AppHeader({ onLogoClick }: AppHeaderProps) {
+export function AppHeader({ onLogoClick, nav }: AppHeaderProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
   // @ts-expect-error - isAdmin field added in session callback
@@ -46,7 +49,7 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
     "group h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 hover:bg-card/90 hover:border-foreground/30 transition-colors cursor-pointer min-w-0 shrink-0";
 
   return (
-    <div className="flex items-center justify-between gap-3 pb-4">
+    <div className="flex items-center gap-3 pb-4 flex-wrap">
       {onLogoClick ? (
         <button onClick={onLogoClick} className={logoClasses}>
           {logoContent}
@@ -57,7 +60,13 @@ export function AppHeader({ onLogoClick }: AppHeaderProps) {
         </Link>
       )}
 
-      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
+      {nav && (
+        <div className="order-last basis-full lg:order-none lg:basis-auto min-w-0 overflow-x-auto scrollbar-hide">
+          {nav}
+        </div>
+      )}
+
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end shrink-0">
         {session && (
           <div className="h-10 flex items-center gap-2 bg-card/70 backdrop-blur-sm border border-border rounded-lg pl-1 pr-1 sm:pr-2">
             {session.user?.image ? (

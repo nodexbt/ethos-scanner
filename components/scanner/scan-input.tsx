@@ -11,9 +11,38 @@ interface ScanInputProps {
   scanning: boolean;
   error: string | null;
   onSubmit: (e: React.FormEvent) => void;
+  /** One-line bar without title or hints — used above results so the
+      input doesn't take a whole column once there's something to show. */
+  compact?: boolean;
 }
 
-export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubmit }: ScanInputProps) {
+export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubmit, compact }: ScanInputProps) {
+  if (compact) {
+    return (
+      <Card>
+        <CardContent className="p-3 space-y-2">
+          <form onSubmit={onSubmit} className="flex gap-2">
+            <div className="relative flex-1">
+              <Wallet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Scan another: 0x address or @handle"
+                value={walletInput}
+                onChange={(e) => setWalletInput(e.target.value)}
+                className="pl-10 h-9 font-mono"
+                disabled={scanning}
+              />
+            </div>
+            <Button type="submit" size="sm" disabled={scanning || !walletInput.trim()}>
+              {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            </Button>
+          </form>
+          {error && <div className="text-xs text-red-500">{error}</div>}
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
