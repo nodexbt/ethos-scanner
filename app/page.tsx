@@ -1557,6 +1557,17 @@ function ScansList({
         </div>
       ) : (
         <div className="grid gap-2 min-w-0">
+          <div className="hidden md:flex items-center gap-4 px-4 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+            <span className="w-10 shrink-0" />
+            <span className="flex-1">Profile</span>
+            <div className="grid grid-cols-[4.5rem_8.5rem_10rem_5.5rem] gap-3 shrink-0">
+              <span>Ethos</span>
+              <span>Links</span>
+              <span>Scanned by</span>
+              <span>Date</span>
+            </div>
+            <span className="w-7 shrink-0" />
+          </div>
           {investigations.map((inv) => (
             <div
               key={inv.id}
@@ -1586,54 +1597,58 @@ function ScansList({
                   {inv.target}
                 </div>
               </button>
-              <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                {inv.score != null && (
-                  <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
-                    {inv.score}
-                    <EthosScoreIcon size={9} className="ml-0.5" />
-                  </span>
-                )}
-                {inv.strongCount > 0 && (
-                  <span className="flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 text-red-500" />
-                    {inv.strongCount} strong
-                  </span>
-                )}
-                {inv.possibleCount > 0 && (
-                  <span className="flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 text-amber-500" />
-                    {inv.possibleCount} possible
-                  </span>
-                )}
-                {inv.strongCount === 0 && inv.possibleCount === 0 && (
-                  <span className="flex items-center gap-1 text-muted-foreground" title="The scan found no on-chain links. That is not proof of innocence.">
-                    <Shield className="h-3 w-3" />
-                    No links found
-                  </span>
-                )}
-                {inv.isPublic && (
-                  <span className="flex items-center gap-1">
-                    <Share2 className="h-3 w-3" />
-                    Shared
-                  </span>
-                )}
-                {inv.lastScannedBy && (
-                  <span
-                    className="flex items-center gap-1.5"
-                    title={`Scanned by ${inv.lastScannedBy.displayName}`}
-                  >
-                    <span className="hidden lg:inline">scanned by</span>
-                    <img loading="lazy" decoding="async"
-                      src={inv.lastScannedBy.avatarUrl}
-                      alt=""
-                      className="h-4 w-4 rounded-full"
-                    />
-                    <span className="hidden lg:inline truncate max-w-24 text-foreground">
-                      {inv.lastScannedBy.displayName}
+              {/* Fixed-width columns so values line up down the list. */}
+              <div className="hidden md:grid md:grid-cols-[4.5rem_8.5rem_10rem_5.5rem] items-center gap-3 text-xs text-muted-foreground shrink-0">
+                <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
+                  {inv.score != null ? (
+                    <>
+                      {inv.score}
+                      <EthosScoreIcon size={9} className="ml-0.5" />
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  {inv.strongCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 text-red-500" />
+                      {inv.strongCount}
                     </span>
-                  </span>
-                )}
-                <span>{new Date(inv.savedAt).toLocaleDateString()}</span>
+                  )}
+                  {inv.possibleCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                      {inv.possibleCount}
+                    </span>
+                  )}
+                  {inv.strongCount === 0 && inv.possibleCount === 0 && (
+                    <span className="flex items-center gap-1" title="The scan found no on-chain links. That is not proof of innocence.">
+                      <Shield className="h-3 w-3" />
+                      No links
+                    </span>
+                  )}
+                </span>
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {inv.lastScannedBy ? (
+                    <>
+                      <img loading="lazy" decoding="async"
+                        src={inv.lastScannedBy.avatarUrl}
+                        alt=""
+                        className="h-4 w-4 rounded-full shrink-0"
+                      />
+                      <span className="truncate text-foreground" title={`Scanned by ${inv.lastScannedBy.displayName}`}>
+                        {inv.lastScannedBy.displayName}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground/70">automated</span>
+                  )}
+                </span>
+                <span className="flex items-center gap-1.5 tabular-nums whitespace-nowrap">
+                  {inv.isPublic && <Share2 className="h-3 w-3" aria-label="Shared" />}
+                  {new Date(inv.savedAt).toLocaleDateString()}
+                </span>
               </div>
               {canDelete(inv) && (
                 <button

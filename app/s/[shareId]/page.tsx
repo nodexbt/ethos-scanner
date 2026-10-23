@@ -156,7 +156,7 @@ export default function SharedInvestigation() {
   };
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       <ShareHeader />
 
       <div className="bg-card/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3 mb-4 space-y-1">
@@ -171,6 +171,8 @@ export default function SharedInvestigation() {
 
       <div className="space-y-4">
         <DegradedBanner degraded={result.degraded} coverage={result.coverageNotes} />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:grid-rows-[auto_1fr] xl:items-start">
+        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
         <OverviewCard
           result={result}
           scanning={false}
@@ -178,6 +180,8 @@ export default function SharedInvestigation() {
           scannedAt={scannedAt}
         />
 
+        </div>
+        <div className="min-w-0 space-y-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
         {result.strongCluster.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
@@ -235,7 +239,11 @@ export default function SharedInvestigation() {
           </Card>
         )}
 
+        </div>
+        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
         <ResearchDisclaimer />
+        </div>
+        </div>
       </div>
 
       <AppFooter />

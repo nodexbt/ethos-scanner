@@ -858,12 +858,18 @@ function findSharedEoaDestinations(
   return sharedDests;
 }
 
+const MAX_SHARED_DESTS_TO_VERIFY = 60;
+
 async function verifyCexDepositAddresses(
   sharedDests: Map<string, { wallets: Set<string>; network: string }>,
   log: (level: LogLevel, message: string) => void,
-): Promise<SharedCexDeposit[]> {
+): Promise<{ results: SharedCexDeposit[]; checked: number; total: number }> {
   const results: SharedCexDeposit[] = [];
-  const destsToCheck = [...sharedDests.entries()].slice(0, 30); // limit API calls
+  // Destinations shared by the most cluster wallets are the most telling;
+  // verify those first and report if the cap cuts the list.
+  const destsToCheck = [...sharedDests.entries()]
+    .sort((a, b) => b[1].wallets.size - a[1].wallets.size)
+    .slice(0, MAX_SHARED_DESTS_TO_VERIFY);
 
   await parallel(
     destsToCheck,
@@ -902,7 +908,7 @@ async function verifyCexDepositAddresses(
     5
   );
 
-  return results;
+  return { results, checked: destsToCheck.length, total: sharedDests.size };
 }
 
 // --- Main Entry Point ---
@@ -1488,7 +1494,13 @@ async function runClusterScanInner(
 
   if (sharedEoaDests.size > 0) {
     log("info", `Found ${sharedEoaDests.size} shared EOA destination(s), verifying CEX connections...`);
-    sharedCexDeposits = await verifyCexDepositAddresses(sharedEoaDests, log);
+    const verified = await verifyCexDepositAddresses(sharedEoaDests, log);
+    sharedCexDeposits = verified.results;
+    if (verified.checked < verified.total) {
+      coverageNotes.push(
+        `${verified.total} addresses are shared destinations of cluster wallets; the ${verified.checked} most-shared were checked for exchange forwarding`
+      );
+    }
 
     if (sharedCexDeposits.length > 0) {
       log("warn", `Found ${sharedCexDeposits.length} shared CEX deposit address(es)!`);
