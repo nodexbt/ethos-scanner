@@ -394,7 +394,7 @@ export default function Home() {
     try {
       const resp = await fetch("/api/scan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Scan-Mode": "job" },
         // The server re-resolves the target itself; the primary wallet is
         // enough to identify the profile.
         body: JSON.stringify({ target: target.primaryWallet }),

@@ -34,9 +34,14 @@ export async function POST(req: NextRequest) {
     return json({ error: "No Ethos profile or valid address found for that input" }, 400);
   }
 
+  // A browser tab loaded before the job system shipped still expects the
+  // NDJSON stream. Only clients that declare job support get a job id;
+  // everyone else gets the stream, which is also saved server-side.
+  const clientSupportsJobs = req.headers.get("x-scan-mode") === "job";
+
   // One active scan per user: hand back the running job instead of
   // starting (and charging for) a second one.
-  let jobsAvailable = true;
+  let jobsAvailable = clientSupportsJobs;
   try {
     const active = await getActiveScanJob(auth.profileId);
     if (active) return json({ jobId: active.id, reused: true }, 202);
