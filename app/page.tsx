@@ -843,10 +843,10 @@ export default function Home() {
       <AppHeader
         quotaKey={quotaKey}
         nav={
-        <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
+        <div className="h-10 inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
           <button
             onClick={() => selectTab("scanner")}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "scanner"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -857,7 +857,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => selectTab("yours")}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "yours"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -871,7 +871,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => selectTab("all")}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "all"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -885,7 +885,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => selectTab("verified")}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-8 flex items-center gap-2 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === "verified"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
