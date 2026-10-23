@@ -125,7 +125,7 @@ Ethos Scanner is the tool for looking hard.
 
 ## Detection signals
 
-The scanner looks for **fourteen distinct signal types** across two categories: on-chain (transaction-derived) and social (Ethos-derived). Each signal contributes a weighted score to its candidate wallet. Weights were chosen empirically based on how much each signal *individually* discriminates real coordination from coincidence.
+The scanner records **fourteen signal types** across two categories: on-chain (transaction-derived) and social (Ethos-derived). Seven of them carry weight and add up to a candidate's **link strength**; the other seven score 0 and are shown for context. Weights were chosen empirically based on how much each signal *individually* discriminates real coordination from coincidence.
 
 ### On-chain signals
 
@@ -138,20 +138,20 @@ The scanner looks for **fourteen distinct signal types** across two categories: 
 | `multi_hop_funding` | **6** | A funder of the target also funded this wallet (one hop deeper than direct first-funder analysis) |
 | `shared_incoming_sender` | **5** | Target and candidate share at least one incoming transfer source (EOA, not contract, not exchange) |
 | `shared_exchange_funder` | **5** | Target and candidate share a first funder, but it's a known exchange withdrawal address — weaker than `shared_first_funder` because the same exchange hot wallet funds many unrelated users |
-| `direct_transfer` | **4** | Target and candidate have transacted directly at least once |
-| `repeat_transfer` | **4** | They've transacted directly more than once |
-| `bidirectional` | **3** | They've sent funds to *each other* (in both directions) |
+| `direct_transfer` | 0 (context) | Target and candidate have transacted directly at least once. Direct transfers are how candidates are *discovered*; they don't add points |
+| `repeat_transfer` | 0 (context) | They've transacted directly more than once |
+| `bidirectional` | 0 (context) | They've sent funds to *each other* (in both directions) |
 
 ### Social signals (Ethos API)
 
 | Signal | Weight | What it observes |
 | --- | --- | --- |
-| `invited_by_target` | **2** | The target invited this profile to Ethos |
-| `invited_target` | **2** | This profile invited the target to Ethos |
-| `mutual_reviews` | **2** | Target and candidate have reviewed each other on Ethos |
-| `mutual_vouches` | **2** | Target and candidate have vouched for each other on Ethos |
+| `invited_by_target` | 0 (context) | The target invited this profile to Ethos |
+| `invited_target` | 0 (context) | This profile invited the target to Ethos |
+| `mutual_reviews` | 0 (context) | Target and candidate have reviewed each other on Ethos |
+| `mutual_vouches` | 0 (context) | Target and candidate have vouched for each other on Ethos |
 
-Social signals are weighted lower than on-chain signals because they're individually weak (people legitimately invite, review, and vouch for each other all the time) but they're additive — a wallet that already has on-chain ties *and* social ties is much more likely to be coordinated than one with either alone.
+Social signals carry no weight. They used to add 2 points each, which drove false positives: people legitimately invite, review, and vouch for each other all the time. They are still recorded and shown in the candidate's breakdown so an investigator can read the on-chain link in its social context.
 
 ---
 
@@ -185,21 +185,19 @@ But if the shared first funder is a known exchange hot wallet (e.g. Binance's ma
 
 **False positive risk:** medium for the exchange variant, low for the non-exchange variant.
 
-### Why bidirectional + repeat + direct are weighted modestly
+### Why direct transfers and social signals score 0
 
-Direct transfers between two wallets prove they know each other but say nothing about *who they are*. Lots of legitimate users send ETH to friends. Even bidirectional repeat transfers can be totally normal between trading buddies. So these signals are individually weak — they're worth surfacing because they accumulate in coordination patterns, but no single direct-transfer signal pushes a candidate over the threshold by itself.
+Direct transfers between two wallets prove they know each other but say nothing about *who they are*. Lots of legitimate users send ETH to friends, and even bidirectional repeat transfers are normal between trading buddies. Direct transfers are therefore how the scanner *finds* candidates, not how it scores them.
 
-The scoring model relies on the principle that **multiple weak signals stacking is much stronger than any one strong signal alone**. A wallet with `direct_transfer + repeat + bidirectional + shared_first_funder + mutual_vouches` (4+4+3+8+2 = 21) is far more confidently flagged than one with just `funded_by_target` alone (10), even though `funded_by_target` is a stronger individual signal.
+The same goes for Ethos social ties: people invite, review, and vouch for each other all the time — that's the entire point of the protocol. Both groups used to carry small weights, and in practice they pushed unrelated profiles over the Possible threshold. They now score 0 and appear in the breakdown as context, so a shared first funder *plus* a mutual vouch still reads differently to a human than a shared first funder alone.
 
-### Why social signals only get 2 points each
-
-People legitimately invite each other to Ethos, review each other, and vouch for each other all the time — that's the entire point of the protocol. A single mutual vouch between two profiles is nothing. A mutual vouch between two profiles that *also* share a first funder, *also* transact directly, *and also* share a CEX deposit address is something completely different. The low individual weight reflects the high individual base rate; the additive scoring model captures the corroboration value.
+The scoring model relies on the principle that **multiple independent signals stacking is much stronger than any one signal alone**: a wallet with `shared_first_funder + shared_cex_deposit` (8+8 = 16, two types) is flagged Strong, while either on its own is only Possible.
 
 ---
 
 ## Scoring & confidence model
 
-Once all signals are computed, each candidate has a total score (sum of signal weights). The candidate is then bucketed into one of three confidence tiers:
+Once all signals are computed, each candidate has a **link strength** (sum of signal weights; shown as such in the UI to keep it distinct from the Ethos credibility score). The candidate is then bucketed into one of three confidence tiers:
 
 | Confidence | Criteria |
 | --- | --- |

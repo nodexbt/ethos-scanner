@@ -161,3 +161,26 @@ export function getLogColor(level: string): string {
       return "text-muted-foreground";
   }
 }
+
+
+/** Plain-language names for signal types, for the breakdown in the UI. */
+export const SIGNAL_LABELS: Record<string, string> = {
+  funded_by_target: "First funded by the target",
+  funded_by_cluster: "First funded by a cluster wallet",
+  shared_first_funder: "Same first funder as the target",
+  shared_exchange_funder: "Same exchange withdrawal address",
+  shared_cex_deposit: "Shared exchange deposit address",
+  multi_hop_funding: "Funded by one of the target's funders",
+  shared_incoming_sender: "Shared incoming sender",
+  direct_transfer: "Direct transfer with the target",
+  repeat_transfer: "Repeated transfers",
+  bidirectional: "Funds flow both ways",
+  invited_by_target: "Invited by the target on Ethos",
+  invited_target: "Invited the target on Ethos",
+  mutual_reviews: "Mutual Ethos reviews",
+  mutual_vouches: "Mutual Ethos vouches",
+};
+
+/** Mirrors confidenceFor() in lib/cluster-scanner.ts. Keep in sync. */
+export const STRONG_RULE =
+  "Strong: first funded by the target or its cluster, or 15+ points across two or more signal types. Possible: 8+ points. Signals at 0 points are shown for context and do not change the total.";

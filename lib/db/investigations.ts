@@ -113,6 +113,20 @@ export interface InvestigationRow {
   shareId: string | null;
   isPublic: boolean;
   twitterEvidence: Record<string, unknown> | null;
+  /** When the saved result was last (re)scanned, ISO string. */
+  updatedAt: string | null;
+}
+
+/**
+ * Thrown by saveInvestigation when a degraded (partial) scan would
+ * overwrite a complete one. The caller keeps the old result; the user
+ * is told to re-scan once the upstream failure clears.
+ */
+export class DegradedOverwriteError extends Error {
+  constructor() {
+    super("Scan was incomplete; existing complete results were kept");
+    this.name = "DegradedOverwriteError";
+  }
 }
 
 export async function listInvestigations(
@@ -381,6 +395,7 @@ export async function getInvestigation(id: string): Promise<InvestigationRow | n
       typeof data.twitter_evidence === "string"
         ? JSON.parse(data.twitter_evidence)
         : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
+    updatedAt: data.updated_at ?? null,
   };
 }
 
@@ -408,6 +423,7 @@ export async function getInvestigationByShareId(shareId: string): Promise<Invest
       typeof data.twitter_evidence === "string"
         ? JSON.parse(data.twitter_evidence)
         : (data.twitter_evidence as Record<string, unknown> | null) ?? null,
+    updatedAt: data.updated_at ?? null,
   };
 }
 
@@ -436,13 +452,26 @@ export async function saveInvestigation(data: {
   const score = typeof result?.targetEthos?.score === "number" ? result.targetEthos.score : null;
 
   // On upsert, only stamp owner_profile_id on new rows or legacy rows without
-  // an owner — never overwrite an existing owner.
+  // an owner — never overwrite an existing owner. Any eligible user may
+  // re-scan and save (last_scanned_by records who); delete and share stay
+  // owner/admin-only in the API routes.
   const existingOwner = await getInvestigationOwner(data.id);
   const ownerToWrite = existingOwner === null ? data.ownerProfileId : existingOwner;
 
-  // Prevent a non-owner from overwriting someone else's investigation.
-  if (existingOwner !== null && existingOwner !== data.ownerProfileId) {
-    throw new Error("Not authorized to modify this investigation");
+  // Never replace a complete result with a degraded one. A scan that lost
+  // a chain or an Ethos lookup can come back empty and would otherwise
+  // silently erase real findings. A degraded first scan is still saved
+  // (flagged) so the user sees something rather than nothing.
+  const incomingDegraded = Boolean((data.clusterResult as { degraded?: unknown } | null)?.degraded);
+  if (incomingDegraded) {
+    const { data: existingRow } = await supabase
+      .from("investigations")
+      .select("cluster_result->degraded")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (existingRow && !(existingRow as { degraded?: unknown }).degraded) {
+      throw new DegradedOverwriteError();
+    }
   }
 
   // Merge incoming twitter_evidence with what's already in the DB so a save
@@ -498,13 +527,14 @@ export async function saveInvestigation(data: {
   invalidateInvestigationCaches();
 
   // Refresh the cross-profile connection graph for this source profile.
-  // Only automated scans (scannedByProfileId === null — the backfill /
-  // cron path) feed the global edge graph. clusterResult is client-
-  // supplied on interactive saves, and the graph is world-visible in
-  // every user's connections panel, so we never let an arbitrary user
-  // write edges under a profile key. Best-effort: an edge failure must
-  // not fail the save.
-  if (data.profileId && data.scannedByProfileId === null) {
+  // Every complete (non-degraded) save feeds the graph, manual or
+  // automated, so a user's re-scan is the fresh truth for that profile's
+  // connections. The API route has already verified the target wallet is
+  // attested to this profile id, so a user can only write edges under a
+  // profile they are actually scanning. A degraded result is skipped: it
+  // may be missing candidates and would wipe real edges. Best-effort: an
+  // edge failure must not fail the save.
+  if (data.profileId && !incomingDegraded) {
     try {
       await replaceEdgesForSource(
         data.profileId,

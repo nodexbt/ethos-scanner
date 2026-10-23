@@ -115,7 +115,10 @@ export async function fetchProfile(
 
 /** Bulk lookup Ethos profiles by wallet addresses (up to 500 at a time) */
 export async function fetchProfilesByAddresses(
-  addresses: string[]
+  addresses: string[],
+  /** Called when a bulk batch fails (the per-address fallback still runs,
+      but may miss profiles). Lets the scanner mark the result degraded. */
+  onBatchError?: (reason: string) => void
 ): Promise<Map<string, EthosProfile>> {
   const result = new Map<string, EthosProfile>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
@@ -132,6 +135,7 @@ export async function fetchProfilesByAddresses(
       });
 
       if (!response.ok) {
+        onBatchError?.(`Ethos bulk lookup returned ${response.status} for ${chunk.length} addresses`);
         // Fallback: try individual lookups for this chunk
         for (const addr of chunk) {
           try {
@@ -163,12 +167,37 @@ export async function fetchProfilesByAddresses(
           result.set(w, profile);
         }
       }
-    } catch {
-      // Silently skip failed batches
+    } catch (err) {
+      onBatchError?.(`Ethos bulk lookup threw for ${chunk.length} addresses: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   return result;
+}
+
+/**
+ * Bulk lookup Ethos profiles by profile id. The API accepts at most 500 ids
+ * per call and simply omits ids that don't exist. Throws on a non-OK
+ * response so callers (the mirror sync) can retry rather than treat a
+ * failed batch as "no such profiles".
+ */
+export const PROFILE_ID_BATCH_SIZE = 500;
+
+export async function fetchProfilesByIds(profileIds: number[]): Promise<EthosProfile[]> {
+  if (profileIds.length === 0) return [];
+  if (profileIds.length > PROFILE_ID_BATCH_SIZE) {
+    throw new Error(`fetchProfilesByIds: max ${PROFILE_ID_BATCH_SIZE} ids per call`);
+  }
+  const response = await fetch(`${ETHOS_API}/users/by/profile-id`, {
+    method: "POST",
+    headers: { ...HEADERS, "Content-Type": "application/json" },
+    body: JSON.stringify({ profileIds }),
+  });
+  if (!response.ok) {
+    throw new Error(`users/by/profile-id ${response.status}`);
+  }
+  const data = await response.json();
+  return Array.isArray(data) ? data : (data.values ?? []);
 }
 
 export async function fetchInvitationTree(

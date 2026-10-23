@@ -145,7 +145,14 @@ export async function getOutgoingTransfers(
 export async function getAllTransactions(
   wallet: string,
   chain: Chain,
-  opts: { maxPages?: number; maxTxs?: number } = {}
+  opts: {
+    maxPages?: number;
+    maxTxs?: number;
+    /** Called when a page request fails after retries. The function still
+        returns whatever was fetched so far, so callers that care about
+        completeness must listen here. */
+    onFailure?: (reason: string) => void;
+  } = {}
 ): Promise<AssetTransfer[]> {
   const maxPages = opts.maxPages ?? 50;
   const maxTxs = opts.maxTxs ?? Infinity;
@@ -175,7 +182,16 @@ export async function getAllTransactions(
           [params]
         ) as AssetTransfersResponse | null;
 
-        if (!data) break;
+        if (!data) {
+          opts.onFailure?.(`transfer fetch for ${addr.slice(0, 10)}… failed after retries (page ${pages + 1})`);
+          break;
+        }
+        if ((data as { error?: { message?: string } }).error) {
+          opts.onFailure?.(
+            `transfer fetch for ${addr.slice(0, 10)}… rejected: ${(data as { error?: { message?: string } }).error?.message ?? "RPC error"}`
+          );
+          break;
+        }
 
         const transfers = data.result?.transfers;
         if (!transfers || transfers.length === 0) break;
@@ -188,6 +204,7 @@ export async function getAllTransactions(
         if (!pageKey) break;
       } catch (err) {
         // Break pagination on error, return what we have
+        opts.onFailure?.(`transfer fetch for ${addr.slice(0, 10)}… threw: ${err instanceof Error ? err.message : String(err)}`);
         break;
       }
     }

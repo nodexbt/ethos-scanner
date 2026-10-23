@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AppFooter } from "@/components/app-footer";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -271,6 +272,8 @@ export default function AdminUsersPage() {
           )}
         </CardContent>
       </Card>
+
+      <AppFooter />
     </div>
   );
 }

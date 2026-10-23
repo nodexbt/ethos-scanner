@@ -49,7 +49,9 @@ export function edgesFromClusterResult(
 /**
  * Replace the stored edges for a source profile with the given set —
  * a re-scan is the fresh truth for that profile's connections, so stale
- * edges (candidates that no longer appear) are deleted.
+ * edges (candidates that no longer appear) are deleted. Upserts first and
+ * deletes the leftovers after, so a failed write leaves the old edges in
+ * place rather than none.
  */
 export async function replaceEdgesForSource(
   sourceProfileId: number,
@@ -57,28 +59,34 @@ export async function replaceEdgesForSource(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  const { error: delError } = await supabase
-    .from("investigation_edges")
-    .delete()
-    .eq("source_profile_id", sourceProfileId);
-  if (delError) {
-    console.error("replaceEdgesForSource delete error:", delError.message);
-    return;
+  if (edges.length > 0) {
+    const rows = edges.map((e) => ({
+      source_profile_id: e.sourceProfileId,
+      candidate_profile_id: e.candidateProfileId,
+      investigation_id: e.investigationId,
+      confidence: e.confidence,
+      score: e.score,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from("investigation_edges").upsert(rows, {
+      onConflict: "source_profile_id,candidate_profile_id",
+    });
+    if (error) {
+      console.error("replaceEdgesForSource upsert error:", error.message);
+      return; // keep the old edges rather than deleting them below
+    }
   }
-  if (edges.length === 0) return;
 
-  const rows = edges.map((e) => ({
-    source_profile_id: e.sourceProfileId,
-    candidate_profile_id: e.candidateProfileId,
-    investigation_id: e.investigationId,
-    confidence: e.confidence,
-    score: e.score,
-    updated_at: new Date().toISOString(),
-  }));
-  const { error } = await supabase.from("investigation_edges").upsert(rows, {
-    onConflict: "source_profile_id,candidate_profile_id",
-  });
-  if (error) console.error("replaceEdgesForSource upsert error:", error.message);
+  let del = supabase.from("investigation_edges").delete().eq("source_profile_id", sourceProfileId);
+  if (edges.length > 0) {
+    del = del.not(
+      "candidate_profile_id",
+      "in",
+      `(${edges.map((e) => e.candidateProfileId).join(",")})`
+    );
+  }
+  const { error: delError } = await del;
+  if (delError) console.error("replaceEdgesForSource delete error:", delError.message);
 }
 
 /** Remove every edge sourced from the given investigation id. Called when
