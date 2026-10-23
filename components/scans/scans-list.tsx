@@ -1,7 +1,7 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2 } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 
@@ -19,6 +19,9 @@ export interface InvestigationSummary {
   ownerProfileId: number | null;
   lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
 }
+
+/** Radix Select rejects "" as an item value; the "no filter" option maps to this. */
+const NONE = "__none";
 
 export const SORT_OPTIONS: { value: string; label: string; sort?: string; dir?: string }[] = [
   { value: "", label: "Default sort" },
@@ -155,8 +158,22 @@ export function ScansList({
             className="pl-9 h-9"
           />
         </div>
-        <Select label="Sort scans" value={sortValue} options={SORT_OPTIONS} onChange={onSortChange} />
-        <Select label="Filter by score" value={scoreBand} options={SCORE_BANDS} onChange={onScoreBandChange} />
+        <Select value={sortValue || NONE} onValueChange={(v) => onSortChange(v === NONE ? "" : v)}>
+          <SelectTrigger aria-label="Sort scans"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value || NONE} value={o.value || NONE}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={scoreBand || NONE} onValueChange={(v) => onScoreBandChange(v === NONE ? "" : v)}>
+          <SelectTrigger aria-label="Filter by score"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SCORE_BANDS.map((b) => (
+              <SelectItem key={b.value || NONE} value={b.value || NONE}>{b.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button
           onClick={() => onFlaggedChange(!flaggedOnly)}
           className={`h-9 rounded-md border px-2.5 text-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors ${

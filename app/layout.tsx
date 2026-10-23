@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
 import { SmoothScroll } from "@/components/smooth-scroll";
 import { Background } from "@/components/background";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -70,12 +71,14 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${ibmPlexMono.variable} antialiased`}
       >
         <SessionProvider>
+          <TooltipProvider delayDuration={200}>
           <ThemeProvider>
             <Background />
             <SmoothScroll />
             <main className="min-h-screen">{children}</main>
           </ThemeProvider>
-        </SessionProvider>
+        </TooltipProvider>
+          </SessionProvider>
         <SpeedInsights />
         <Analytics />
       </body>

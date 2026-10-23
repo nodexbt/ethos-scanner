@@ -1,7 +1,7 @@
 "use client";
 
 import { X, ExternalLink } from "lucide-react";
-import { motion } from "framer-motion";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
 import {
   getScoreBorderColor,
@@ -23,23 +23,15 @@ interface CandidateModalProps {
 }
 
 export function CandidateModal({ candidate, result, onClose }: CandidateModalProps) {
+  const name = candidate.ethosProfile?.displayName || candidate.address;
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        transition={{ duration: 0.2 }}
-        className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto mx-2 sm:mx-0"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent
+        hideClose
+        className="max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-xl"
       >
+        <DialogTitle className="sr-only">{name}</DialogTitle>
+        <DialogDescription className="sr-only">Evidence behind this profile&apos;s link to the scanned target.</DialogDescription>
         {/* Header */}
         <div className="flex items-start gap-3 p-5 border-b sticky top-0 bg-background rounded-t-xl z-10">
           {candidate.ethosProfile?.avatarUrl && (
@@ -339,8 +331,8 @@ export function CandidateModal({ candidate, result, onClose }: CandidateModalPro
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
