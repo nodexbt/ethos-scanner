@@ -3,7 +3,6 @@ import {
   type Chain,
   type AssetTransfer,
   getAllTransactions,
-  batchGetCode,
   parallel,
   getFirstFunder,
   getOutgoingTransfers,
@@ -11,6 +10,7 @@ import {
 import { fetchProfilesByAddresses, fetchInvitationTree, fetchActivities, type EthosProfile, type Invitation, type ReviewActivity } from "./ethos";
 import { getAddressLabel, isExchangeAddress } from "./known-addresses";
 import { getSupabase } from "./db/supabase";
+import { batchIsContract } from "./wallet-classify";
 
 /**
  * Look up which of the given counterparty addresses belong to a tracked
@@ -576,7 +576,7 @@ async function scanNetwork(
       "info",
       `[${network}] Checking contract status of ${unknownFunders.length} shared funder(s)…`
     );
-    const codeResult = await batchGetCode(unknownFunders, chain);
+    const codeResult = await batchIsContract(unknownFunders, chain);
     for (const [addr, isContract] of codeResult) {
       contractCache.set(addr, isContract);
     }

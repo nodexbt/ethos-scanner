@@ -1,26 +1,74 @@
-import { CHAINS, batchGetCode } from "./alchemy";
+import { CHAINS, batchGetCode, type Chain } from "./alchemy";
 import { getSupabase } from "./db/supabase";
+
+/**
+ * EIP-7702 delegation designator: an EOA that has delegated to a smart-
+ * account implementation (MetaMask / Coinbase "smart accounts") gets code
+ * `0xef0100 || <20-byte address>` — exactly 23 bytes. It is still a
+ * personally-controlled, private-key wallet, so it counts as an EOA. The
+ * length check keeps the exemption exact: anything else that happens to
+ * start with 0xef is treated as a contract.
+ */
+const EIP7702_PREFIX = "0xef0100";
+const EIP7702_CODE_LEN = 2 + 23 * 2;
+
+/** Does this eth_getCode result mean "smart contract / smart wallet"? */
+export function hasContractCode(code: string | undefined | null): boolean {
+  const c = (code || "0x").toLowerCase();
+  if (c === "0x" || c === "0x0") return false;
+  if (c.length === EIP7702_CODE_LEN && c.startsWith(EIP7702_PREFIX)) return false;
+  return true;
+}
+
+/**
+ * Contract flag per address on one chain. Addresses the RPC did not answer
+ * for are absent (unknown), never defaulted to EOA.
+ */
+export async function batchIsContract(
+  addresses: string[],
+  chain: Chain
+): Promise<Map<string, boolean>> {
+  const codes = await batchGetCode(addresses, chain);
+  const result = new Map<string, boolean>();
+  for (const [addr, code] of codes) result.set(addr, hasContractCode(code));
+  return result;
+}
 
 /**
  * Classify addresses as smart-contract wallets vs personal EOAs by checking
  * for on-chain bytecode across all scanned chains. An address is a contract
- * (smart wallet) if it has code on ANY chain — a private-key EOA never has
- * code anywhere, so any code means it's not a personally-controlled wallet.
+ * (smart wallet) if it has contract code on ANY chain. Plain EOAs have no
+ * code; EIP-7702 delegated EOAs carry a 23-byte designator that
+ * hasContractCode() exempts, so they still classify as EOAs.
+ *
+ * An address is only reported as an EOA (false) when EVERY chain answered
+ * and none had contract code. If any chain failed to answer and no other
+ * chain showed code, the address is left out of the result (unknown) so a
+ * transient RPC outage can't get persisted as "EOA".
+ *
  * A counterfactual (undeployed) smart wallet reads as an EOA here, which is
  * harmless: it has no history to pollute a scan.
  */
 export async function classifyContractsOnChain(
   addresses: string[]
 ): Promise<Map<string, boolean>> {
-  const result = new Map<string, boolean>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
-  for (const a of unique) result.set(a, false);
+  const isContract = new Set<string>();
+  const unresolved = new Set<string>();
 
   for (const chain of CHAINS) {
-    const codes = await batchGetCode(unique, chain);
-    for (const [addr, isContract] of codes) {
-      if (isContract) result.set(addr.toLowerCase(), true);
+    const flags = await batchIsContract(unique, chain);
+    for (const a of unique) {
+      const f = flags.get(a);
+      if (f === undefined) unresolved.add(a);
+      else if (f) isContract.add(a);
     }
+  }
+
+  const result = new Map<string, boolean>();
+  for (const a of unique) {
+    if (isContract.has(a)) result.set(a, true);
+    else if (!unresolved.has(a)) result.set(a, false);
   }
   return result;
 }
@@ -59,6 +107,9 @@ export async function getContractFlags(
   if (unknown.size > 0) {
     const live = await classifyContractsOnChain([...unknown]);
     for (const [addr, isContract] of live) flags.set(addr, isContract);
+    // Addresses the RPC couldn't classify stay absent from `flags`, which
+    // callers read as "scan it" (flags.get() → undefined → not a contract).
+    // They are not cached, so the next scan re-checks them.
     // Best-effort cache write so the next scan doesn't re-check on-chain.
     try {
       await writeContractFlags(live);

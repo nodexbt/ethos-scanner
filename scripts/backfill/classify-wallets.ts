@@ -2,11 +2,13 @@
 /**
  * Populate profile_addresses.is_contract by checking each attested wallet
  * for on-chain bytecode across all scanned chains. Smart-contract wallets
- * (e.g. the Ethos/Privy proxy) are excluded from scans; EOAs are the
- * personal wallets a user actually connected.
+ * (e.g. the Ethos/Privy proxy) are excluded from scans; EOAs — including
+ * EIP-7702 delegated ones — are the personal wallets a user actually
+ * connected. Addresses the RPC fails to answer for are skipped, not
+ * written, so a transient outage can't persist wrong flags.
  *
  * Usage:
- *   npx tsx scripts/backfill/classify-wallets.ts [--all] [--dry-run]
+ *   npx tsx scripts/backfill/classify-wallets.ts [--all | --contracts] [--dry-run]
  *
  *   default   only classify rows where is_contract IS NULL (cheap refresh
  *             for new attestations — safe to run on a schedule)
@@ -30,6 +32,10 @@ import { classifyContractsOnChain, writeContractFlags } from "@/lib/wallet-class
 
 const ALL = process.argv.includes("--all");
 const CONTRACTS_ONLY = process.argv.includes("--contracts");
+if (ALL && CONTRACTS_ONLY) {
+  console.error("[classify] --all and --contracts are mutually exclusive");
+  process.exit(1);
+}
 const DRY_RUN = process.argv.includes("--dry-run");
 
 async function main() {
@@ -55,20 +61,25 @@ async function main() {
 
   let contracts = 0;
   let eoas = 0;
+  let unresolved = 0; // RPC didn't answer on some chain — skipped, not written
   const CHUNK = 500; // classify in chunks (each = 1 batchGetCode per chain)
   for (let i = 0; i < list.length; i += CHUNK) {
     const chunk = list.slice(i, i + CHUNK);
     const flags = await classifyContractsOnChain(chunk);
-    for (const isC of flags.values()) isC ? contracts++ : eoas++;
+    for (const isC of flags.values()) {
+      if (isC) contracts++;
+      else eoas++;
+    }
+    unresolved += chunk.length - flags.size;
 
     // Bulk-write grouped by value (address isn't unique — the .in() update
     // covers every profile_addresses row for these wallets).
     if (!DRY_RUN) await writeContractFlags(flags);
-    console.log(`[classify] ${Math.min(i + CHUNK, list.length)}/${list.length} · contracts=${contracts} eoas=${eoas}`);
+    console.log(`[classify] ${Math.min(i + CHUNK, list.length)}/${list.length} · contracts=${contracts} eoas=${eoas} unresolved=${unresolved}`);
   }
 
   console.log(
-    `[classify] done · contracts=${contracts} (${(100 * contracts / list.length).toFixed(1)}%) · eoas=${eoas}`
+    `[classify] done · contracts=${contracts} (${(100 * contracts / list.length).toFixed(1)}%) · eoas=${eoas} · unresolved=${unresolved} (left unchanged)`
   );
 }
 
