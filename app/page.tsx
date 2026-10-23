@@ -972,10 +972,15 @@ export default function Home() {
             compact={scanActive}
           />
 
+          {/* Expanded while running; collapses to its header row the moment
+              the scan completes so results sit directly under the input.
+              The key remount re-applies the default on each transition. */}
           <ScanLog
+            key={scanning ? "live" : "done"}
             logs={clusterLogs}
             scanning={scanning}
             progress={scanProgress}
+            defaultExpanded={scanning}
           />
         </div>
 
