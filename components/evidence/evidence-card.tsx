@@ -405,8 +405,9 @@ export function EvidenceCard({
               X/Twitter Evidence
             </CardTitle>
             <CardDescription className="text-xs mt-1">
-              Auto-search X for each wallet, filter to Ethos-registered authors, and surface
-              cross-cluster mention patterns.
+              {TWITTER_SEARCH_ENABLED
+                ? "Auto-search X for each wallet, filter to Ethos-registered authors, and surface cross-cluster mention patterns."
+                : "Search links to X for each wallet. Automatic search is disabled right now, so review each one manually."}
             </CardDescription>
           </div>
           {TWITTER_SEARCH_ENABLED && (

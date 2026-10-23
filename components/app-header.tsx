@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Shield, ShieldCheck, LogOut } from "lucide-react";
@@ -18,11 +19,35 @@ interface AppHeaderProps {
   /** Primary navigation (tabs) rendered inline between the logo and the
       account controls. Wraps to its own row on narrow screens. */
   nav?: React.ReactNode;
+  /** Bump to refetch the daily scan quota (e.g. after a scan completes). */
+  quotaKey?: number;
 }
 
-export function AppHeader({ onLogoClick, nav }: AppHeaderProps) {
+interface Quota {
+  used: number;
+  limit: number;
+  remaining: number;
+  unlimited: boolean;
+}
+
+export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [quota, setQuota] = useState<Quota | null>(null);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    fetch("/api/scan/quota")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((q) => {
+        if (!cancelled && q) setQuota(q as Quota);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [session, quotaKey]);
   // @ts-expect-error - isAdmin field added in session callback
   const isAdmin = Boolean(session?.user?.isAdmin);
 
@@ -92,6 +117,20 @@ export function AppHeader({ onLogoClick, nav }: AppHeaderProps) {
                 </span>
               )}
             </div>
+            {quota && (
+              <span
+                title={quota.unlimited ? "Admins have no daily scan limit" : `${quota.used} of ${quota.limit} scans used today (resets 00:00 UTC)`}
+                className={`hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums ${
+                  !quota.unlimited && quota.remaining === 0
+                    ? "bg-red-500/15 text-red-500"
+                    : !quota.unlimited && quota.remaining <= 5
+                      ? "bg-amber-500/15 text-amber-500"
+                      : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {quota.unlimited ? "∞ scans" : `${quota.remaining} scan${quota.remaining === 1 ? "" : "s"} left`}
+              </span>
+            )}
             {isAdmin && (
               <Link
                 href="/admin/users"

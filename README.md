@@ -48,7 +48,7 @@ Ethos Scanner is the tool for looking hard.
 | Multi-hop funding discovery | Traces funder wallets one level deeper to find additional Ethos profiles connected through shared funding chains |
 | Ethos social signal correlation | Cross-references the on-chain cluster against Ethos's invitation tree, mutual reviews, and mutual vouches to surface socially-coordinated abuse |
 | Weighted scoring & bucketing | Each detected signal contributes weighted points; candidates are bucketed into "strong" (high confidence) and "possible" (medium confidence) clusters |
-| AI-drafted slash reports | Optional one-click drafting of evidence-based slash reports using Claude, which the investigator reviews and edits before submitting |
+| Export for reporting | One-click export of the cluster evidence plus any uploaded screenshots as a prompt file, ready to paste into an LLM to draft a report the investigator then reviews |
 | Investigation persistence | Scans are saved per-investigator in Supabase, with sharing, ownership, and an admin panel for managing access |
 
 ---
@@ -114,9 +114,9 @@ Ethos Scanner is the tool for looking hard.
    └──────────┬───────────────────────────────────────┘
               │
    ┌──────────▼───────────────────────────────────────┐
-   │  Stage 8 (optional): AI evidence drafting        │
+   │  Stage 8 (optional): export for reporting        │
    │  ─────────────────────────────────────────────   │
-   │  Claude Sonnet drafts a structured slash report  │
+   │  Evidence + screenshots bundled as a prompt file │
    │  the investigator reviews before submitting      │
    └──────────────────────────────────────────────────┘
 ```
@@ -226,7 +226,7 @@ The result card shows network stats, target Ethos profile, key findings with lin
 A flagged profile with its Ethos identity, network breakdown, signal list, and on-chain evidence. Each signal shows the weight and the specific detail that triggered it.
 
 **AI-drafted slash report generation prompt** — 
-Optional one-click evidence drafting using Claude. The model is given the structured cluster data plus any screenshots the investigator has uploaded as additional evidence, and produces a neutral, structured report the investigator reviews before posting.
+The Export button bundles the structured cluster data and any screenshots the investigator uploaded into a prompt file. Paste it into an LLM of your choice to draft a neutral, structured report, then review it before posting. The app itself makes no AI calls.
 
 
 ---
@@ -242,12 +242,11 @@ Optional one-click evidence drafting using Claude. The model is given the struct
 | Database | Supabase (Postgres) | Investigations, allowlist, audit log, scan duration history |
 | On-chain data | Alchemy `alchemy_getAssetTransfers` and `eth_getCode`, batched and parallelized | Multi-chain transfer indexing without running our own nodes |
 | Reputation data | [Ethos Network API](https://api.ethos.network) | Bulk profile lookup, invitation trees, activity feeds |
-| AI evidence drafting | Anthropic Claude Sonnet via the official SDK | Structured prompt that draws only on provided evidence and refuses to speculate |
 | UI | React 19, Tailwind v4, Framer Motion, Three.js (dithered background shader) | Monochrome retro-terminal aesthetic |
 
 ### Notable internal systems
 
-**Streaming scan output.** The scan API doesn't buffer — it returns a `ReadableStream` that emits newline-delimited JSON events as the scan runs (`log`, `progress`, `result`, `error`). The client renders log entries and progress bar updates live. Total response time is bounded by Vercel's 5-minute function limit; in practice scans run 30s-3min.
+**Streaming scan output.** The scan API doesn't buffer — it returns a `ReadableStream` that emits newline-delimited JSON events as the scan runs (`log`, `progress`, `result`, `error`). The client renders log entries and progress bar updates live. Total response time is bounded by Vercel's 5-minute function limit; measured scans run from under 10 seconds for a quiet profile to about two minutes for a very active one.
 
 **Time-based ETA estimator.** The progress bar and "time left" countdown are driven by a rolling average of the last 20 completed scan durations (stored in `investigations.scan_duration_ms`), not by per-step rate calculation. This produces a stable, monotonic countdown that ticks at exactly 1 second per second. Cold start uses a 90-second baseline that gets replaced as history accumulates. Cached server-side for 60 seconds to keep DB load negligible.
 
@@ -255,7 +254,7 @@ Optional one-click evidence drafting using Claude. The model is given the struct
 
 **Empty-allowlist self-heal.** During the migration from an env-var allowlist to a DB-backed one, the DB layer detects an empty `allowed_users` table and seeds itself from the legacy `ETHOS_PROFILE_ALLOWLIST` env var on the first protected request. Existing users with valid JWTs don't get bounced after deploy.
 
-**Per-chain pagination caps.** The target wallet fetches up to 50 pages of transfers per chain (5,000 transfers max/chain). Candidate wallets fetch only 6 pages with a 4,000-transfer ceiling, since we already know they're suspicious and don't need full history. These caps balance Alchemy CU consumption against detection completeness.
+**Per-chain pagination caps.** The target wallet fetches up to 50 pages of 1,000 transfers per direction per chain. Candidate wallets fetch up to 15 pages or 15,000 transfers per direction. Any cap that bites is reported in the result's coverage notes. Each scan records its Alchemy compute units; a heavy profile measures around 235,000 units (about 12 cents on pay-as-you-go), a quiet one under 15,000.
 
 ---
 

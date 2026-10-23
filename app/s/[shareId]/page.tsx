@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { Shield, AlertTriangle } from "lucide-react";
+import { Shield, AlertTriangle, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { OverviewCard } from "@/components/results/overview-card";
+import { formatRelativeTime } from "@/lib/utils";
 import { DegradedBanner } from "@/components/results/degraded-banner";
 import { AppFooter } from "@/components/app-footer";
 import { CandidateCard } from "@/components/results/candidate-card";
@@ -39,7 +40,16 @@ function ShareHeader() {
           encryptedClassName="text-muted-foreground"
         />
       </Link>
-      <ThemeToggle />
+      <div className="flex items-center gap-2">
+        <Link
+          href="/"
+          className="h-10 hidden sm:inline-flex items-center gap-1.5 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 text-xs font-medium hover:bg-card/90 hover:border-foreground/30 transition-colors"
+        >
+          Run your own scan
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        <ThemeToggle />
+      </div>
     </div>
   );
 }
@@ -150,8 +160,13 @@ export default function SharedInvestigation() {
       <ShareHeader />
 
       <div className="bg-card/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3 mb-4 space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">Shared Investigation</h1>
-        <p className="text-sm text-muted-foreground">Read-only view of a sybil cluster scan.</p>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Scan of {result.targetEthos?.displayName ?? `${result.target.slice(0, 10)}…${result.target.slice(-6)}`}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Read-only view of a wallet cluster scan
+          {scannedAt && <> · scanned {formatRelativeTime(scannedAt)} ({new Date(scannedAt).toLocaleDateString()})</>}.
+        </p>
       </div>
 
       <div className="space-y-4">

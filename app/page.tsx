@@ -163,6 +163,8 @@ export default function Home() {
   const [resultScannedAt, setResultScannedAt] = useState<string | null>(null);
   /** Why the last scan wasn't saved (e.g. degraded over complete), if so. */
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  /** Bumped after each scan so the header refetches the daily quota. */
+  const [quotaKey, setQuotaKey] = useState(0);
   const [selectedCandidate, setSelectedCandidate] = useState<ClusterCandidate | null>(null);
   const [showFirstFunders, setShowFirstFunders] = useState(false);
   const [showPossible, setShowPossible] = useState(false);
@@ -479,6 +481,7 @@ export default function Home() {
     } finally {
       setScanning(false);
       setScanProgress(null);
+      setQuotaKey((k) => k + 1);
     }
   };
 
@@ -1067,6 +1070,7 @@ export default function Home() {
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Header */}
       <AppHeader
+        quotaKey={quotaKey}
         nav={
         <div className="inline-flex items-center gap-1 bg-card/70 backdrop-blur-sm border border-border rounded-lg p-1">
           <button
@@ -1813,9 +1817,9 @@ function ScansList({
                   </span>
                 )}
                 {inv.strongCount === 0 && inv.possibleCount === 0 && (
-                  <span className="flex items-center gap-1">
-                    <Shield className="h-3 w-3 text-green-500" />
-                    Clean
+                  <span className="flex items-center gap-1 text-muted-foreground" title="The scan found no on-chain links. That is not proof of innocence.">
+                    <Shield className="h-3 w-3" />
+                    No links found
                   </span>
                 )}
                 {inv.isPublic && (

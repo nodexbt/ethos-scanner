@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
-import { rateLimit } from "@/lib/rate-limit";
 import { runClusterScan } from "@/lib/cluster-scanner";
 import { resolveScanTarget } from "@/lib/scan-target";
 import { getRecentScanAverageMs } from "@/lib/db/investigations";
@@ -12,18 +11,14 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
 
-  // Rate limit: 10 scans per user per hour
-  if (!rateLimit(`scan:${auth.profileId}`, 10, 60 * 60 * 1000)) {
-    return new Response(
-      JSON.stringify({ error: "Rate limit exceeded. Try again later." }),
-      { status: 429, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  // The only scan limit is the durable daily quota below. The old
+  // in-memory 10/hour limiter was per serverless instance and invisible
+  // to users, so it was removed.
 
   // Accept an address, @handle, or profile URL; resolve server-side to the
   // profile's full attested-wallet set (don't trust a client wallet list).
-  // One scan = one rate-limit token + one daily-quota unit regardless of
-  // how many wallets the profile has.
+  // One scan = one daily-quota unit regardless of how many wallets the
+  // profile has.
   const { target } = await req.json();
   const resolved = typeof target === "string" ? await resolveScanTarget(target) : null;
   if (!resolved) {

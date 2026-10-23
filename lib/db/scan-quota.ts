@@ -30,3 +30,21 @@ export async function consumeDailyScanQuota(
   }
   return { allowed: data <= DAILY_SCAN_LIMIT, count: data, limit: DAILY_SCAN_LIMIT };
 }
+
+/** Today's consumed scans for a user, for display. Fails to 0 on error. */
+export async function getDailyScanUsage(
+  profileId: number
+): Promise<{ used: number; limit: number }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("scan_quota")
+    .select("count")
+    .eq("profile_id", profileId)
+    .eq("day", utcDay())
+    .maybeSingle();
+  if (error) {
+    console.error("getDailyScanUsage error:", error.message);
+    return { used: 0, limit: DAILY_SCAN_LIMIT };
+  }
+  return { used: (data as { count: number } | null)?.count ?? 0, limit: DAILY_SCAN_LIMIT };
+}
