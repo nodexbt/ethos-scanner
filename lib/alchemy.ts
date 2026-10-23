@@ -229,13 +229,19 @@ export async function getAllTransactions(
   return all;
 }
 
-/** Batch check if addresses are contracts via eth_getCode */
+/**
+ * Batch eth_getCode. Returns the raw code hex for every address the RPC
+ * answered for; addresses whose request failed (HTTP error past retries,
+ * per-item JSON-RPC error, malformed response) are simply absent so callers
+ * can tell "no code" apart from "couldn't check". Interpretation of the code
+ * (contract vs EOA vs EIP-7702 delegation) lives in wallet-classify.ts.
+ */
 export async function batchGetCode(
   addresses: string[],
   chain: Chain,
   batchSize: number = 200
-): Promise<Map<string, boolean>> {
-  const result = new Map<string, boolean>();
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
 
   for (let i = 0; i < unique.length; i += batchSize) {
@@ -263,23 +269,17 @@ export async function batchGetCode(
         await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** (attempt - 1), 15000)));
       }
 
-      if (!resp || !resp.ok) {
-        chunk.forEach((addr) => result.set(addr, false));
-        continue;
-      }
+      // Unresolved chunk: leave every address absent rather than guessing.
+      if (!resp || !resp.ok) continue;
 
-      const responses: { id: number; result?: string }[] = await resp.json();
-      const codeById = new Map<number, string>();
+      const responses: { id: number; result?: unknown; error?: unknown }[] = await resp.json();
       for (const r of Array.isArray(responses) ? responses : [responses]) {
-        if (r.id !== undefined) codeById.set(r.id, r.result || "0x");
+        if (r.id === undefined || r.error || typeof r.result !== "string") continue;
+        const addr = chunk[r.id];
+        if (addr) result.set(addr, r.result);
       }
-
-      chunk.forEach((addr, idx) => {
-        const code = codeById.get(idx) || "0x";
-        result.set(addr, code !== "0x" && code !== "0x0");
-      });
     } catch {
-      chunk.forEach((addr) => result.set(addr, false));
+      // Network/parse failure: addresses stay absent (unknown).
     }
   }
   return result;
