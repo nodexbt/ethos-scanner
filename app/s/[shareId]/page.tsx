@@ -13,6 +13,7 @@ import { OverviewCard } from "@/components/results/overview-card";
 import { DegradedBanner } from "@/components/results/degraded-banner";
 import { AppFooter } from "@/components/app-footer";
 import { CandidateCard } from "@/components/results/candidate-card";
+import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 
 // Header chip matching the home page wordmark — links back to "/" so visitors
 // landing on a shared link have a clear path to the scanner.
@@ -218,6 +219,8 @@ export default function SharedInvestigation() {
             </CardHeader>
           </Card>
         )}
+
+        <ResearchDisclaimer />
       </div>
 
       <AppFooter />
