@@ -1050,6 +1050,11 @@ export default function Home() {
             >
               <DegradedBanner degraded={clusterResult.degraded} notice={saveNotice} coverage={clusterResult.coverageNotes} />
 
+              {/* Desktop: overview top-left, candidates on the right spanning
+                  both rows, supporting cards below the overview. Narrow
+                  screens get the same DOM order in one column. */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:items-start">
+              <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
               {/* Overview */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <OverviewCard
@@ -1073,6 +1078,9 @@ export default function Home() {
               />
               </motion.div>
 
+              </div>
+
+              <div className="min-w-0 space-y-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
               {/* Strong Cluster */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
               <Card>
@@ -1148,6 +1156,9 @@ export default function Home() {
               </motion.div>
               )}
 
+              </div>
+
+              <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
               {/* Second-degree connections from other saved scans */}
               {currentInvestigationId && !scanning && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
@@ -1180,6 +1191,8 @@ export default function Home() {
                   <ResearchDisclaimer />
                 </motion.div>
               )}
+              </div>
+              </div>
             </motion.div>
           )}
           </AnimatePresence>
