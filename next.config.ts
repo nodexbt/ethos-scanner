@@ -1,14 +1,21 @@
 import type { NextConfig } from "next";
 
-// One deployment serves two hosts: ethos.tools (landing page only) and
-// app.ethos.tools (everything that needs a session, plus the public profile
-// and share pages). Local development serves both from one origin.
-const LANDING_HOST = "ethos.tools";
-const APP_HOST = "app.ethos.tools";
+// Everything is served from ethos.tools: the landing page at /, the tools
+// as paths (/scanner, ...). app.ethos.tools was the app's host for a while;
+// it now redirects to the same path here so links shared from it keep working.
+const HOST = "ethos.tools";
+const OLD_APP_HOST = "app.ethos.tools";
 
 const nextConfig: NextConfig = {
   async redirects() {
     return [
+      // First, so an old-host link takes one hop, not two.
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: OLD_APP_HOST }],
+        destination: `https://${HOST}/:path*`,
+        permanent: true,
+      },
       // Legacy routes from before the scanner moved under /scanner.
       { source: "/network", destination: "/scanner?tab=network", permanent: true },
       {
@@ -16,23 +23,6 @@ const nextConfig: NextConfig = {
         has: [{ type: "query", key: "tab" }],
         destination: "/scanner",
         permanent: true,
-      },
-      // The app host has no landing page; its root is the scanner.
-      {
-        source: "/",
-        has: [{ type: "host", value: APP_HOST }],
-        destination: "/scanner",
-        permanent: false,
-      },
-      // The landing host serves nothing but the landing page. Its own
-      // assets (/_next/*, favicon, social images) must stay on this host:
-      // redirects run before the filesystem, so without the exclusion the
-      // page's CSS would be fetched from the app host.
-      {
-        source: "/:path((?!_next/|favicon\\.ico|opengraph-image|twitter-image).+)",
-        has: [{ type: "host", value: LANDING_HOST }],
-        destination: `https://${APP_HOST}/:path`,
-        permanent: false,
       },
     ];
   },

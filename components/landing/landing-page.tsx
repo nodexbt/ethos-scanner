@@ -22,8 +22,8 @@ const DAILY_SCAN_LIMIT = 25;
 
 /**
  * Landing page at "/" on ethos.tools. Static marketing content with no
- * session dependency: the call to action opens the scanner on the app
- * host, and /scanner sends signed-out visitors through /sign-in.
+ * session dependency: the call to action opens /scanner, which sends
+ * signed-out visitors through /sign-in.
  */
 
 function OpenScannerButton({ className }: { className?: string }) {
