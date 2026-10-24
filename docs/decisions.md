@@ -58,6 +58,6 @@ The non-obvious calls, each with the problem that forced it. Newest first.
 
 **Decision.** Anyone with a human-verified Ethos profile and a score of at least 1800, or a validator NFT, may sign in. A manual allowlist, with an audit log, covers everyone else. Sign-in requires the X account to be attested to the Ethos profile by immutable X user id, not by handle, because handles are recyclable.
 
-## AI-assisted development
+## How this was built
 
-Most of the code was written with Claude Code in a pair-programming loop: I set the product direction, made the decisions above, reviewed every diff and tested against production data. Commits carry a co-author line where that is the case.
+I build with Claude Code as a pair programmer. I define the problem, the behaviour and the constraints; the implementation is generated to that specification, then I review the diff, run it against production data and feed back what breaks. Every decision above came out of that loop, usually from a real failure (a profile scanning empty, a good result being overwritten, a scan that cost ten times what it should). Commits where the implementation was generated carry a co-author line.

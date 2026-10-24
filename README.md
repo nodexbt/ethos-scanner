@@ -55,7 +55,9 @@ Database setup and the sign-in requirements are in [docs/setup.md](docs/setup.md
 
 ## Status
 
-Built for the Ethos team's investigations and opened to Ethos users who are human-verified with a score of 1800 or more. Most of the code was written with Claude Code; the product direction, architecture and the decisions in [docs/decisions.md](docs/decisions.md) are mine, and every change was reviewed and tested against production data.
+Built for the Ethos team's investigations and opened to Ethos users who are human-verified with a score of 1800 or more.
+
+I designed and own this project: the detection approach, the scoring model, the architecture and the trade-offs in [docs/decisions.md](docs/decisions.md). I build with Claude Code as a pair programmer, so much of the implementation was generated to my specification and then reviewed, tested against production data and refined through the problems that only showed up in real scans.
 
 ## License
 
