@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn } from "next-auth/react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Shield,
@@ -21,27 +21,18 @@ import { MIN_SCORE } from "@/lib/access";
 const DAILY_SCAN_LIMIT = 25;
 
 /**
- * Public landing page shown at "/" when there is no session. Everything on
- * it is static marketing content — the only interactive element is the
- * sign-in button — so it can render before auth resolves without flashing.
+ * Landing page at "/" on ethos.tools. Static marketing content with no
+ * session dependency: the call to action opens the scanner on the app
+ * host, and /scanner sends signed-out visitors through /sign-in.
  */
 
-function XIcon({ className }: { className?: string }) {
+function OpenScannerButton({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    </svg>
-  );
-}
-
-function SignInButton({ className }: { className?: string }) {
-  return (
-    <Button
-      onClick={() => signIn("twitter", { callbackUrl: "/" })}
-      className={`gap-2 h-10 px-5 ${className ?? ""}`}
-    >
-      <XIcon className="h-4 w-4" />
-      Sign in with X
+    <Button asChild className={`gap-2 h-10 px-5 ${className ?? ""}`}>
+      <Link href="/scanner">
+        Open the scanner
+        <ArrowRight className="h-4 w-4" />
+      </Link>
     </Button>
   );
 }
@@ -167,12 +158,7 @@ const SIGNAL_HIGHLIGHTS = [
   },
 ];
 
-interface LandingPageProps {
-  /** Auth/eligibility error carried over from the NextAuth redirect. */
-  authError?: string | null;
-}
-
-export function LandingPage({ authError }: LandingPageProps) {
+export function LandingPage() {
   return (
     <div className="relative min-h-screen">
       {/* Soft veil over the dither shader so long-form text stays readable —
@@ -194,7 +180,7 @@ export function LandingPage({ authError }: LandingPageProps) {
           <div className="inline-flex items-center gap-2 h-10 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 mb-8">
             <Shield className="h-4.5 w-4.5 shrink-0" />
             <DecryptedText
-              text="Ethos Scanner"
+              text="ethos.tools"
               speed={40}
               maxIterations={12}
               sequential
@@ -217,10 +203,7 @@ export function LandingPage({ authError }: LandingPageProps) {
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3">
-            <SignInButton />
-            {authError && (
-              <div className="text-xs text-red-500 max-w-sm">{authError}</div>
-            )}
+            <OpenScannerButton />
             <p className="text-[11px] text-muted-foreground">
               Open to Ethos validators and human-verified profiles with a score
               of {MIN_SCORE}+.
@@ -325,7 +308,7 @@ export function LandingPage({ authError }: LandingPageProps) {
           <h2 className="font-[family-name:var(--font-ibm-plex-mono)] text-xl font-semibold mb-6 text-balance">
             Know who you&apos;re verifying.
           </h2>
-          <SignInButton />
+          <OpenScannerButton />
         </section>
 
         <AppFooter className="mt-0 pt-8" />

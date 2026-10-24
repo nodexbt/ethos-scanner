@@ -74,7 +74,9 @@ The schema is in [`scripts/migrations/`](../scripts/migrations), applied in name
 
 ```text
 app/
-  page.tsx                 Scanner / Scans / Network tabs (client)
+  page.tsx                 landing page (ethos.tools)
+  scanner/                 Scanner / Scans / Network tabs (app.ethos.tools, client)
+  sign-in/                 X sign-in card; NextAuth sends its errors here
   api/scan/                POST starts a scan; jobs/ polls it; quota/
   api/investigations/      list scans, attach X evidence
   api/network, watchlist, notifications, share, admin/
@@ -99,6 +101,17 @@ scripts/
   backfill/                one-off and scheduled maintenance scripts
 tests/                     Vitest: scoring, wallet classification, persistence guards
 ```
+
+## Hosts
+
+One Vercel deployment serves two hosts, wired up in `next.config.ts`:
+
+| Host | Serves |
+| --- | --- |
+| `ethos.tools` | The landing page only. Every other path redirects to the app host |
+| `app.ethos.tools` | Everything else. `/` redirects to `/scanner`. Sessions, the X OAuth callback and `NEXTAUTH_URL` all live here |
+
+Signed-out visitors to any tool route are sent to `/sign-in?callbackUrl=<where they were>` and return there after X. The public profile pages (`/p/<handle>`) and shared results (`/s/<id>`) need no session.
 
 ## Operational limits
 

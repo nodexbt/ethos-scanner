@@ -2,7 +2,7 @@
 
 On-chain sybil detection for the [Ethos Network](https://ethos.network) reputation protocol. Paste a profile, get the wallets and profiles that share its funding history across five EVM chains, with the evidence for every link.
 
-**Live:** [ethos.tools](https://ethos.tools) · **Login-free example:** [a public profile summary](https://ethos.tools/p/nodexbt)
+**Live:** [ethos.tools](https://ethos.tools) · **App:** [app.ethos.tools/scanner](https://app.ethos.tools/scanner) · **Login-free example:** [a public profile summary](https://app.ethos.tools/p/nodexbt)
 
 <img width="1828" alt="Cluster overview: network stats, flagged profiles and the evidence behind each link" src="https://github.com/user-attachments/assets/2df0f2a3-c250-4a3f-b244-a6178b8997d0" />
 

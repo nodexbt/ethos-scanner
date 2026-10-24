@@ -1,3 +1,3 @@
-import Home from "../../page";
+import ScannerPage from "@/app/scanner/page";
 
-export default Home;
+export default ScannerPage;

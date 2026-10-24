@@ -76,7 +76,7 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   pages: {
-    signIn: "/",
+    signIn: "/sign-in",
   },
   session: {
     strategy: "jwt",
@@ -87,11 +87,11 @@ export const authOptions: NextAuthOptions = {
       // @ts-expect-error - Twitter v2 profile has data field
       const data = profile?.data || profile;
       const username = data?.username;
-      if (!username) return "/?error=NoUsername";
-      if (!data?.id) return "/?error=NoTwitterId";
+      if (!username) return "/sign-in?error=NoUsername";
+      if (!data?.id) return "/sign-in?error=NoTwitterId";
 
       const ethos = await fetchAttestedProfile(username, data.id);
-      if (!ethos) return "/?error=NoEthosProfile";
+      if (!ethos) return "/sign-in?error=NoEthosProfile";
 
       await ensureSeeded();
 
@@ -100,7 +100,7 @@ export const authOptions: NextAuthOptions = {
       const onAllowlist =
         ethos.profileId !== null && (await isAllowed(ethos.profileId));
       if (!meetsOpenAccessBar(ethos) && !onAllowlist) {
-        return "/?error=NotEligible";
+        return "/sign-in?error=NotEligible";
       }
       return true;
     },

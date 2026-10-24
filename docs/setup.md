@@ -33,7 +33,7 @@ Create an X OAuth 2.0 app with the callback `http://localhost:3000/api/auth/call
 ## 4. Run
 
 ```bash
-npm run dev          # http://localhost:3000
+npm run dev          # http://localhost:3000 is the landing page, /scanner the app
 npm test             # vitest
 npm run typecheck
 npm run lint

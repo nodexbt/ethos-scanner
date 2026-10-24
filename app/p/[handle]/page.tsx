@@ -21,7 +21,7 @@ type Params = { params: Promise<{ handle: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle } = await params;
   const data = await getPublicProfileSummary(handle);
-  if (!data) return { title: "Profile not found · Ethos Scanner" };
+  if (!data) return { title: "Profile not found" };
   const name = data.profile.displayName;
   const description = data.scan
     ? `${data.scan.strongCount} strong and ${data.scan.possibleCount} possible on-chain links · scanned ${
@@ -29,10 +29,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
       }. Evidence, not a verdict.`
     : `${name} has not been scanned yet. Sign in to run a wallet cluster scan.`;
   return {
-    title: `${name} · Ethos Scanner`,
+    title: name,
     description,
-    openGraph: { title: `${name} · Ethos Scanner`, description, type: "profile" },
-    twitter: { card: "summary", title: `${name} · Ethos Scanner`, description },
+    openGraph: { title: `${name} · ethos.tools`, description, type: "profile" },
+    twitter: { card: "summary", title: `${name} · ethos.tools`, description },
   };
 }
 

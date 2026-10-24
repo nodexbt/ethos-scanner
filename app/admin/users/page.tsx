@@ -52,11 +52,11 @@ export default function AdminUsersPage() {
 
   const [removingId, setRemovingId] = useState<number | null>(null);
 
-  // Redirect non-admins (and unauthenticated users) to home
+  // Redirect non-admins (and unauthenticated users) to the scanner
   useEffect(() => {
     if (status === "loading") return;
     if (!session || !isAdmin) {
-      router.replace("/");
+      router.replace("/scanner");
     }
   }, [session, isAdmin, status, router]);
 

@@ -16,7 +16,7 @@ export function AppFooter({ className }: { className?: string }) {
     >
       <span className="inline-flex items-center gap-1.5">
         <Shield className="h-3.5 w-3.5" />
-        Ethos Scanner
+        ethos.tools
         <span aria-hidden="true">·</span>
         <a
           href="https://x.com/nodexbt"

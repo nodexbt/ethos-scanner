@@ -7,7 +7,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * Header for pages outside the signed-in app (share links, public
- * profile pages): wordmark linking home, a call to action, theme toggle.
+ * profile pages): wordmark linking to the landing page, a call to action
+ * that opens the scanner (signing in on the way if needed), theme toggle.
  */
 export function SiteHeader({ cta = "Run your own scan" }: { cta?: string | null }) {
   return (
@@ -18,7 +19,7 @@ export function SiteHeader({ cta = "Run your own scan" }: { cta?: string | null 
       >
         <Shield className="h-4.5 w-4.5 shrink-0" />
         <DecryptedText
-          text="Ethos Scanner"
+          text="ethos.tools"
           speed={40}
           maxIterations={12}
           sequential
@@ -34,7 +35,7 @@ export function SiteHeader({ cta = "Run your own scan" }: { cta?: string | null 
       <div className="flex items-center gap-2">
         {cta && (
           <Link
-            href="/"
+            href="/scanner"
             className="h-10 hidden sm:inline-flex items-center gap-1.5 bg-card/70 backdrop-blur-sm border border-border rounded-lg px-3 text-xs font-medium hover:bg-card/90 hover:border-foreground/30 transition-colors"
           >
             {cta}

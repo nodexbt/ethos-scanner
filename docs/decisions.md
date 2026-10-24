@@ -2,6 +2,12 @@
 
 The non-obvious calls, each with the problem that forced it. Newest first.
 
+## One deployment, two hosts
+
+**Problem.** The domain became ethos.tools, a name that promises more than one tool. The scanner needed to become one tool among several without splitting into separate apps, separate sessions and separate deploys.
+
+**Decision.** The landing page lives on the root host and the product on `app.ethos.tools`, both served by the same Next.js deployment. Tools are paths under the app host (`/scanner` today), so they share one login, one header and one codebase. Host-based redirects in `next.config.ts` keep each host to its job. A subdomain per tool was rejected: cookies don't cross subdomains, every host needs its own OAuth callback, and shared code would need a monorepo.
+
 ## Scans run as background jobs, and the server saves the result
 
 **Problem.** The first version streamed the scan over one long HTTP response and the browser posted the finished result back to be saved. Closing the tab lost the scan, a slow scan could exceed the function limit mid-stream, and anything the client could submit the client could forge.

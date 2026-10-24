@@ -13,7 +13,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 
 interface AppHeaderProps {
   /**
-   * When present, the Ethos Scanner logo renders as a <button> that invokes
+   * When present, the ethos.tools wordmark renders as a <button> that invokes
    * this handler instead of a <Link>. The home page uses it to reset in-page
    * state; other pages leave it undefined so the logo just links back to "/".
    */
@@ -57,7 +57,7 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
     <>
       <Shield className="h-4.5 w-4.5 shrink-0" />
       <DecryptedText
-        text="Ethos Scanner"
+        text="ethos.tools"
         speed={40}
         maxIterations={12}
         sequential
@@ -69,6 +69,9 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
         className="text-foreground"
         encryptedClassName="text-muted-foreground"
       />
+      <span className="font-[family-name:var(--font-ibm-plex-mono)] text-sm text-muted-foreground hidden sm:inline">
+        /scanner
+      </span>
     </>
   );
 
@@ -82,7 +85,7 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
           {logoContent}
         </button>
       ) : (
-        <Link href="/" className={logoClasses}>
+        <Link href="/scanner" className={logoClasses}>
           {logoContent}
         </Link>
       )}

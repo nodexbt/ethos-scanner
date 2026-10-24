@@ -37,20 +37,20 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Ethos Scanner",
-  description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+  title: { default: "ethos.tools", template: "%s · ethos.tools" },
+  description: "Tools for Ethos Network. Scanner: sybil cluster detection via on-chain transaction analysis.",
   openGraph: {
-    title: "Ethos Scanner",
-    description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+    title: "ethos.tools",
+    description: "Tools for Ethos Network. Scanner: sybil cluster detection via on-chain transaction analysis.",
     type: "website",
-    siteName: "Ethos Scanner",
+    siteName: "ethos.tools",
     // images is auto-populated by app/opengraph-image.tsx — Next 16 picks it
     // up from the file convention, so we don't list it explicitly here.
   },
   twitter: {
     card: "summary_large_image",
-    title: "Ethos Scanner",
-    description: "Sybil cluster detection on Ethos Network via on-chain transaction analysis.",
+    title: "ethos.tools",
+    description: "Tools for Ethos Network. Scanner: sybil cluster detection via on-chain transaction analysis.",
   },
 };
 
