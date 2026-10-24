@@ -48,3 +48,6 @@ next-env.d.ts
 # database
 *.db
 data/
+
+# keep the template, ignore real env files
+!.env.example
