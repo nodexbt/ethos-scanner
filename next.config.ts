@@ -24,11 +24,14 @@ const nextConfig: NextConfig = {
         destination: "/scanner",
         permanent: false,
       },
-      // The landing host serves nothing but the landing page.
+      // The landing host serves nothing but the landing page. Its own
+      // assets (/_next/*, favicon, social images) must stay on this host:
+      // redirects run before the filesystem, so without the exclusion the
+      // page's CSS would be fetched from the app host.
       {
-        source: "/:path+",
+        source: "/:path((?!_next/|favicon\\.ico|opengraph-image|twitter-image).+)",
         has: [{ type: "host", value: LANDING_HOST }],
-        destination: `https://${APP_HOST}/:path+`,
+        destination: `https://${APP_HOST}/:path`,
         permanent: false,
       },
     ];
