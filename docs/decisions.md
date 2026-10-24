@@ -8,7 +8,7 @@ The non-obvious calls, each with the problem that forced it. Newest first.
 
 **Decision.** Everything is served from `ethos.tools` by one Next.js deployment: the landing page at `/`, each tool under its own path (`/scanner` today), sharing one login, one header and one codebase. A subdomain per tool was rejected: cookies don't cross subdomains, every host needs its own OAuth callback, and shared code would need a monorepo.
 
-**Revised.** The product first lived on `app.ethos.tools`, with the root host serving only the landing page. That was dropped a day later: the official Ethos app is `app.ethos.network`, and a near-identical `app.` host invited confusion with it while buying nothing a path doesn't. `app.ethos.tools` now redirects permanently to the same path on `ethos.tools`.
+**Revised.** The product briefly lived on `app.ethos.tools`, with the root host serving only the landing page. That was dropped before anyone used it: the official Ethos app is `app.ethos.network`, and a near-identical `app.` host invited confusion with it while buying nothing a path doesn't. The subdomain was retired outright, with no redirect.
 
 ## Scans run as background jobs, and the server saves the result
 

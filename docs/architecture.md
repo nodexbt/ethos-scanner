@@ -104,7 +104,7 @@ tests/                     Vitest: scoring, wallet classification, persistence g
 
 ## Hosts
 
-One Vercel deployment serves everything from `ethos.tools`: the landing page at `/`, each tool under its own path (`/scanner` today). Sessions, the X OAuth callback and `NEXTAUTH_URL` all live on this host. `app.ethos.tools` permanently redirects to the same path on `ethos.tools` (`next.config.ts`), so links from when the app lived there keep working.
+One Vercel deployment serves everything from `ethos.tools`: the landing page at `/`, each tool under its own path (`/scanner` today). Sessions, the X OAuth callback and `NEXTAUTH_URL` all live on this host.
 
 Signed-out visitors to any tool route are sent to `/sign-in?callbackUrl=<where they were>` and return there after X. The public profile pages (`/p/<handle>`) and shared results (`/s/<id>`) need no session.
 
