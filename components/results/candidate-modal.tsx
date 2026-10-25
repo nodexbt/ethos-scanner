@@ -10,11 +10,13 @@ import {
   buildConnectionSummary,
   SIGNAL_LABELS,
   STRONG_RULE,
+  formatFunderAmount,
 } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl } from "@/lib/utils";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 interface CandidateModalProps {
   /** The candidate to show. Stays the last opened one while `open` is
@@ -34,12 +36,12 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
       >
         <DialogDescription className="sr-only">Evidence behind this profile&apos;s link to the scanned target.</DialogDescription>
         {/* Header */}
-        <div className="flex items-start gap-3 p-5 border-b sticky top-0 bg-background rounded-t-xl z-10">
+        <div className="flex items-start gap-3 p-5 border-b border-border sticky top-0 bg-background rounded-t-xl z-10">
           {candidate.ethosProfile?.avatarUrl && (
-            <img loading="lazy" decoding="async"
+            <AvatarImg
               src={candidate.ethosProfile.avatarUrl}
-              alt={candidate.ethosProfile.displayName}
-              className={`h-12 w-12 rounded-full ring-2 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
+              name={candidate.ethosProfile.displayName}
+              className={`h-12 w-12 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
             />
           )}
           <div className="flex-1 min-w-0">
@@ -152,7 +154,7 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    The first wallet to send ETH to this address on each chain:
+                    The first wallet to send this address the chain&apos;s native token, per chain:
                   </div>
                   {candidate.firstFunders.map((ff, i) => (
                     <div key={i} className="flex items-center justify-between text-xs border border-border rounded px-2 py-1.5">
@@ -160,7 +162,7 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
                         <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
                         <AddressDisplay address={ff.funder} chain={ff.chain} result={result} />
                       </div>
-                      <span className="text-muted-foreground shrink-0">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
+                      <span className="text-muted-foreground shrink-0">{formatFunderAmount(ff)}</span>
                     </div>
                   ))}
                   {candidate.sharedFirstFunder && result.targetFirstFunders && result.targetFirstFunders.length > 0 && (

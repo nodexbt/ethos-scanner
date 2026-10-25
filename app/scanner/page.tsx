@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CandidateCard } from "@/components/results/candidate-card";
 import { CandidateModal } from "@/components/results/candidate-modal";
+import { ShareDialog } from "@/components/results/share-dialog";
 import { ConnectionsCard } from "@/components/results/connections-card";
 import { OverviewCard } from "@/components/results/overview-card";
 import { DegradedBanner } from "@/components/results/degraded-banner";
@@ -22,6 +23,7 @@ import { NetworkView } from "@/components/network/network-view";
 import { useRouter } from "next/navigation";
 import { ScansList, ScansListSkeleton, listControlParams, DEFAULT_SORT, DEFAULT_SCORE_BAND, type InvestigationSummary, type ScanScope } from "@/components/scans/scans-list";
 import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 // --- Saved Investigations ---
 
@@ -91,6 +93,7 @@ export default function ScannerPage() {
   }, []);
   const closeCandidate = useCallback(() => setModalOpen(false), []);
   const [showPossible, setShowPossible] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   /** Which saved scans the Scans tab lists. Survives switching tabs. */
     const [scope, setScope] = useState<ScanScope>("all");
@@ -663,19 +666,15 @@ export default function ScannerPage() {
     setError(null);
   };
 
+  // Throws on failure so the confirmation dialog can show the error.
   const handleDeleteInvestigation = async (id: string) => {
-    await fetch(`/api/investigations/${id}`, { method: "DELETE" });
+    const resp = await fetch(`/api/investigations/${id}`, { method: "DELETE" });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => null);
+      throw new Error(data?.error || "Failed to delete scan");
+    }
     refreshInvestigations();
     if (currentInvestigationId === id) setCurrentInvestigationId(null);
-  };
-
-  const handleShareInvestigation = async (id: string) => {
-    const resp = await fetch(`/api/investigations/${id}`, { method: "PATCH" });
-    if (!resp.ok) return;
-    const { shareId } = await resp.json();
-    const shareUrl = `${window.location.origin}/s/${shareId}`;
-    navigator.clipboard.writeText(shareUrl);
-    refreshInvestigations();
   };
 
   const handleScreenshotUpload = (address: string, file: File) => {
@@ -1036,10 +1035,7 @@ export default function ScannerPage() {
                 result={clusterResult}
                 scanning={scanning}
                 scannedAt={resultScannedAt}
-                onShare={() => {
-                  const id = currentInvestigationId || investigationIdForResult(clusterResult);
-                  handleShareInvestigation(id);
-                }}
+                onShare={() => setShareOpen(true)}
                 onRescan={() => rescanTarget(clusterResult.target)}
                 onCopyWallets={() => {
                   const wallets = [
@@ -1236,11 +1232,7 @@ export default function ScannerPage() {
                         className="w-full group flex items-center gap-3 rounded-lg border border-border bg-card/40 hover:bg-card/80 px-3 py-2.5 transition-colors text-left cursor-pointer"
                       >
                         {inv.targetAvatar ? (
-                          <img loading="lazy" decoding="async"
-                            src={inv.targetAvatar}
-                            alt=""
-                            className="h-8 w-8 rounded-full shrink-0"
-                          />
+                          <AvatarImg src={inv.targetAvatar} name={inv.targetName} className="h-8 w-8 rounded-full shrink-0" />
                         ) : (
                           <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
                             <Wallet className="h-4 w-4 text-muted-foreground" />
@@ -1271,9 +1263,8 @@ export default function ScannerPage() {
                             <Shield className="h-3 w-3 text-green-500" />
                           )}
                           {inv.lastScannedBy && (
-                            <img loading="lazy" decoding="async"
+                            <AvatarImg
                               src={inv.lastScannedBy.avatarUrl}
-                              alt=""
                               title={`Scanned by ${inv.lastScannedBy.displayName}`}
                               className="h-4 w-4 rounded-full"
                             />
@@ -1329,6 +1320,15 @@ export default function ScannerPage() {
           />
         );
       })()}
+
+      {clusterResult && (
+        <ShareDialog
+          investigationId={currentInvestigationId || investigationIdForResult(clusterResult)}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          onChanged={refreshInvestigations}
+        />
+      )}
 
       {/* Candidate Detail Modal — stays mounted so Radix can animate it closed */}
       {modalCandidate && clusterResult && (

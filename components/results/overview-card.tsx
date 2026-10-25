@@ -5,12 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { ExternalLink, Search, Share2, Copy, ChevronDown, ChevronRight, Wallet, Download, Globe } from "lucide-react";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
-import { getScoreBorderColor, getExplorerAddressUrl } from "@/lib/scan-utils";
+import { getScoreBorderColor, getExplorerAddressUrl, formatFunderAmount } from "@/lib/scan-utils";
 import { AddressDisplay } from "./address-display";
 import { safeExternalUrl, formatRelativeTime } from "@/lib/utils";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { WatchButton } from "./watch-button";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 interface OverviewCardProps {
   result: ClusterScanResult;
@@ -68,10 +69,10 @@ export function OverviewCard({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">Cluster Scan Overview</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <CardTitle className="text-base whitespace-nowrap">Cluster Scan Overview</CardTitle>
           {(onShare || onRescan || result.targetEthos?.username) && (
-            <div className="flex items-center gap-0.5">
+            <div className="flex flex-wrap items-center gap-0.5">
               {onRescan && result.targetEthos?.profileId && (
                 <WatchButton profileId={result.targetEthos.profileId} />
               )}
@@ -81,7 +82,7 @@ export function OverviewCard({
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Public summary page for this profile"
-                  className="h-7 px-2 inline-flex items-center gap-1.5 text-xs rounded-md hover:bg-muted transition-colors"
+                  className="h-7 px-2 inline-flex items-center gap-1.5 text-xs rounded-md hover:bg-muted transition-colors whitespace-nowrap"
                 >
                   <Globe className="h-3.5 w-3.5" />
                   Public page
@@ -89,21 +90,13 @@ export function OverviewCard({
               )}
               {onShare && (
                 <Button
-                  onClick={(e) => {
-                    onShare();
-                    const btn = e.currentTarget;
-                    btn.dataset.copied = "true";
-                    setTimeout(() => { btn.dataset.copied = "false"; }, 1500);
-                  }}
+                  onClick={onShare}
                   size="sm" variant="ghost"
-                  className="group h-7 px-2 text-xs gap-1.5 data-[copied=true]:text-green-500"
-                  data-copied="false"
+                  className="h-7 px-2 text-xs gap-1.5"
+                  aria-haspopup="dialog"
                 >
                   <Share2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-32 transition-[max-width] duration-200 [[data-copied=true]_&]:max-w-32">
-                    <span className="[[data-copied=true]_&]:hidden">Share</span>
-                    <span className="hidden [[data-copied=true]_&]:inline">Copied!</span>
-                  </span>
+                  Share
                 </Button>
               )}
               {onShare && onRescan && <div className="w-px h-5 bg-border mx-1" />}
@@ -200,9 +193,10 @@ export function OverviewCard({
             <div className="flex items-center gap-3">
               {result.targetEthos.avatarUrl && (
                 <a href={safeExternalUrl(result.targetEthos.profileUrl)} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                  <img loading="lazy" decoding="async"
+                  <AvatarImg
                     src={result.targetEthos.avatarUrl}
                     alt={result.targetEthos.displayName}
+                    name={result.targetEthos.displayName}
                     className={`h-10 w-10 rounded-full ring-2 ${getScoreBorderColor(result.targetEthos.score)}`}
                   />
                 </a>
@@ -321,7 +315,7 @@ export function OverviewCard({
                       <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
                       <AddressDisplay address={ff.funder} chain={ff.chain} result={result} />
                     </div>
-                    <span className="text-muted-foreground">{parseFloat(String(ff.value)).toFixed(4)} ETH</span>
+                    <span className="text-muted-foreground">{formatFunderAmount(ff)}</span>
                   </div>
                 ))}
               </div>

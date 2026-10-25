@@ -630,11 +630,47 @@ export async function deleteInvestigation(id: string): Promise<void> {
 
   if (error) {
     console.error("deleteInvestigation error:", error);
+    // Surface the failure so the UI doesn't report a delete that didn't happen.
+    throw new Error("Failed to delete scan");
   }
   // Drop any connection-graph edges this scan contributed so the
   // connections panel doesn't reference a deleted investigation.
   await deleteEdgesForInvestigation(id);
   invalidateInvestigationCaches();
+}
+
+/** Sharing state of one investigation, for the share dialog. */
+export async function getInvestigationShare(
+  id: string
+): Promise<{ isPublic: boolean; shareId: string | null; ownerProfileId: number | null } | null> {
+  const { data, error } = await getSupabase()
+    .from("investigations")
+    .select("is_public, share_id, owner_profile_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    isPublic: data.is_public ?? false,
+    shareId: data.share_id ?? null,
+    ownerProfileId: data.owner_profile_id ?? null,
+  };
+}
+
+/**
+ * Stop sharing: the /s link stops resolving. The share id is kept so that
+ * sharing again restores the same link anyone was already sent.
+ */
+export async function unshareInvestigation(id: string): Promise<boolean> {
+  const { error } = await getSupabase()
+    .from("investigations")
+    .update({ is_public: false })
+    .eq("id", id);
+  if (error) {
+    console.error("unshareInvestigation error:", error);
+    return false;
+  }
+  invalidateInvestigationCaches();
+  return true;
 }
 
 export async function shareInvestigation(id: string): Promise<string | null> {

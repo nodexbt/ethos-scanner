@@ -131,13 +131,13 @@ async function alchemyRequest(
 export async function getFirstFunder(
   wallet: string,
   chain: (typeof CHAINS)[number]
-): Promise<{ funder: string; txHash: string; value: number } | null> {
+): Promise<{ funder: string; txHash: string; value: number; asset: string | null } | null> {
   try {
     const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
       {
         fromBlock: "0x0",
         toAddress: wallet.toLowerCase(),
-        // ETH only, incl. internal where supported: a wallet bootstrapped
+        // Native token only, incl. internal where supported: a wallet bootstrapped
         // by a smart wallet or bridge is funded by an internal transfer.
         category: transferCategories(chain, "native"),
         order: "asc",
@@ -156,6 +156,7 @@ export async function getFirstFunder(
       funder: first.from.toLowerCase(),
       txHash: first.hash,
       value: first.value || 0,
+      asset: first.asset ?? null,
     };
   } catch {
     return null;

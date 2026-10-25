@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Network, Search, ArrowRight, ArrowLeft } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 interface Edge {
   sourceProfileId: number;
@@ -79,13 +80,7 @@ export function ConnectionsCard({ investigationId, onScanProfile, scanning }: Co
     return (
       <span className="inline-flex items-center gap-1 font-medium text-foreground">
         {p?.avatarUrl && (
-          <img
-            loading="lazy"
-            decoding="async"
-            src={p.avatarUrl}
-            alt=""
-            className="h-4 w-4 rounded-full"
-          />
+          <AvatarImg src={p.avatarUrl} className="h-4 w-4 rounded-full" />
         )}
         {profileLabel(pid)}
         {p?.humanVerified && <HumanVerifiedBadge />}

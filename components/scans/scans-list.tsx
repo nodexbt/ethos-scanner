@@ -1,10 +1,14 @@
 "use client";
 
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
 import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 export interface InvestigationSummary {
   id: string;
@@ -132,7 +136,8 @@ interface ScansListProps {
   currentInvestigationId: string | null;
   canDelete: (inv: InvestigationSummary) => boolean;
   onLoad: (inv: InvestigationSummary) => void;
-  onDelete: (id: string) => void;
+  /** Deletes the scan; throws on failure so the dialog can show it. */
+  onDelete: (id: string) => Promise<void>;
   /** Optional server-side pagination knobs — when provided, the list
    * renders a Load-more button that calls onLoadMore until investigations
    * reaches totalCount. */
@@ -171,6 +176,11 @@ export function ScansList({
   const hasRemoteMore =
     onLoadMore != null && totalCount != null && investigations.length < totalCount;
   const filtersActive = flaggedOnly || scoreBand !== DEFAULT_SCORE_BAND || search.trim() !== "";
+  // The scan awaiting delete confirmation; kept while the dialog animates out.
+  const [pendingDelete, setPendingDelete] = useState<InvestigationSummary | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const nameOf = (inv: InvestigationSummary) =>
+    inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`;
 
   return (
     <div className="space-y-4">
@@ -239,11 +249,7 @@ export function ScansList({
               }`}
             >
               {inv.targetAvatar ? (
-                <img loading="lazy" decoding="async"
-                  src={inv.targetAvatar}
-                  alt={inv.targetName || ""}
-                  className="h-10 w-10 rounded-full shrink-0"
-                />
+                <AvatarImg src={inv.targetAvatar} name={inv.targetName} className="h-10 w-10 rounded-full shrink-0" />
               ) : (
                 <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0">
                   <Wallet className="h-5 w-5 text-muted-foreground" />
@@ -295,11 +301,7 @@ export function ScansList({
                 <span className="flex items-center gap-1.5 min-w-0">
                   {inv.lastScannedBy ? (
                     <>
-                      <img loading="lazy" decoding="async"
-                        src={inv.lastScannedBy.avatarUrl}
-                        alt=""
-                        className="h-4 w-4 rounded-full shrink-0"
-                      />
+                      <AvatarImg src={inv.lastScannedBy.avatarUrl} className="h-4 w-4 rounded-full shrink-0" />
                       <span className="truncate text-foreground" title={`Scanned by ${inv.lastScannedBy.displayName}`}>
                         {inv.lastScannedBy.displayName}
                       </span>
@@ -313,13 +315,20 @@ export function ScansList({
                   {new Date(inv.savedAt).toLocaleDateString()}
                 </span>
               </div>
-              {/* Fixed trailing slot so columns line up whether or not a row is deletable. */}
-              <div className="shrink-0 h-7 w-7 hidden md:flex items-center justify-center">
+              {/* Fixed trailing slot so columns line up whether or not a row is
+                  deletable. Always visible on touch screens; on desktop it
+                  appears on hover or keyboard focus. */}
+              <div className="shrink-0 h-7 w-7 flex items-center justify-center">
                 {canDelete(inv) && (
                   <button
-                    onClick={() => onDelete(inv.id)}
-                    className="h-7 w-7 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                    type="button"
+                    onClick={() => {
+                      setPendingDelete(inv);
+                      setConfirmOpen(true);
+                    }}
+                    className="h-7 w-7 flex items-center justify-center rounded md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
                     title="Delete scan"
+                    aria-label={`Delete scan of ${nameOf(inv)}`}
                   >
                     <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                   </button>
@@ -338,6 +347,23 @@ export function ScansList({
             </button>
           )}
         </div>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="Delete this scan?"
+          description={
+            <>
+              The saved result for <span className="font-medium text-foreground">{nameOf(pendingDelete)}</span>{" "}
+              will be removed for everyone, along with its links in the network graph and any share link. This
+              can&apos;t be undone.
+            </>
+          }
+          confirmLabel="Delete scan"
+          onConfirm={() => onDelete(pendingDelete.id)}
+        />
       )}
     </div>
   );

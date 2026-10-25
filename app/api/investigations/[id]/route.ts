@@ -4,18 +4,30 @@ import {
   getInvestigation,
   deleteInvestigation,
   shareInvestigation,
+  unshareInvestigation,
+  getInvestigationShare,
   getInvestigationOwner,
 } from "@/lib/db/investigations";
 
 // GET /api/investigations/[id] — load one
+// GET /api/investigations/[id]?fields=share — just its sharing state
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
 
   const { id } = await params;
+  if (req.nextUrl.searchParams.get("fields") === "share") {
+    const share = await getInvestigationShare(id);
+    if (!share) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({
+      isPublic: share.isPublic,
+      shareId: share.isPublic ? share.shareId : null,
+      canManage: auth.isAdmin || share.ownerProfileId === auth.profileId,
+    });
+  }
   const investigation = await getInvestigation(id);
   if (!investigation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -38,13 +50,18 @@ export async function DELETE(
   if (!auth.isAdmin && owner !== auth.profileId) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
-  await deleteInvestigation(id);
+  try {
+    await deleteInvestigation(id);
+  } catch {
+    return NextResponse.json({ error: "Failed to delete scan" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
 
-// PATCH /api/investigations/[id] — share (owner only)
+// PATCH /api/investigations/[id] — share (owner only).
+// Body { "public": false } stops sharing; no body (or true) shares.
 export async function PATCH(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth();
@@ -56,9 +73,17 @@ export async function PATCH(
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
+  const body = (await req.json().catch(() => null)) as { public?: unknown } | null;
+  if (body?.public === false) {
+    if (!(await unshareInvestigation(id))) {
+      return NextResponse.json({ error: "Failed to stop sharing" }, { status: 500 });
+    }
+    return NextResponse.json({ isPublic: false, shareId: null });
+  }
+
   const shareId = await shareInvestigation(id);
   if (!shareId) {
     return NextResponse.json({ error: "Failed to share" }, { status: 500 });
   }
-  return NextResponse.json({ shareId });
+  return NextResponse.json({ isPublic: true, shareId });
 }

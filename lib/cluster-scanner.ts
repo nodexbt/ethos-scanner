@@ -117,6 +117,9 @@ export interface FirstFunderInfo {
   funderLabel: string | null; // e.g. "Kraken", "Binance", "Base Bridge"
   txHash: string;
   value: number;
+  /** Symbol Alchemy recorded for the transfer (ETH, MATIC…). Absent on
+      results saved before it was stored. */
+  asset?: string | null;
 }
 
 export interface ClusterCandidate {
@@ -720,8 +723,9 @@ async function scanNetwork(
           funderLabel: getAddressLabel(ff.funder),
           txHash: ff.txHash,
           value: ff.value,
+          asset: ff.asset,
         });
-        log("info", `[${network}] Target first funder: ${ff.funder.slice(0, 10)}... (${ff.value} ETH)`);
+        log("info", `[${network}] Target first funder: ${ff.funder.slice(0, 10)}... (${ff.value} ${ff.asset ?? "native"})`);
       }
     },
     CONCURRENCY
@@ -740,6 +744,7 @@ async function scanNetwork(
           funderLabel: getAddressLabel(ff.funder),
           txHash: ff.txHash,
           value: ff.value,
+          asset: ff.asset,
         });
       }
     },
@@ -1462,7 +1467,7 @@ async function runClusterScanInner(
             sharedFundingSources: [],
             sharedFirstFunder: sameFirstFunder && funderIsTargets,
             firstFunders: ownFirst
-              ? [{ chain: meta.chain, funder: ownFirst.funder, funderLabel: getAddressLabel(ownFirst.funder), txHash: ownFirst.txHash, value: ownFirst.value }]
+              ? [{ chain: meta.chain, funder: ownFirst.funder, funderLabel: getAddressLabel(ownFirst.funder), txHash: ownFirst.txHash, value: ownFirst.value, asset: ownFirst.asset }]
               : [{ chain: meta.chain, funder: meta.funderAddress, funderLabel: getAddressLabel(meta.funderAddress), txHash: "", value: 0 }],
             sharedCexDeposits: [],
             invitedByTarget: false,

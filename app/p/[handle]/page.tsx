@@ -11,6 +11,7 @@ import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { getPublicProfileSummary } from "@/lib/public-profile";
 import { formatRelativeTime, scanHref } from "@/lib/utils";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 // Public, summary-only. Re-rendered at most every 2 minutes per handle so
 // a shared link can't hammer the Ethos API or the database.
@@ -52,8 +53,7 @@ export default async function PublicProfilePage({ params }: Params) {
 
       <Card>
         <CardContent className="p-5 flex items-center gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={profile.avatarUrl} alt="" className="h-16 w-16 rounded-full ring-2 ring-border shrink-0" />
+          <AvatarImg src={profile.avatarUrl} name={profile.displayName} className="h-16 w-16 rounded-full ring-2 ring-border shrink-0 text-xl" />
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold tracking-tight inline-flex items-center gap-2 flex-wrap">
               {profile.displayName}
@@ -130,8 +130,7 @@ export default async function PublicProfilePage({ params }: Params) {
                     href={`/p/${l.username ?? l.profileId}`}
                     className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/30 transition-colors"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={l.avatarUrl} alt="" className="h-9 w-9 rounded-full shrink-0" />
+                    <AvatarImg src={l.avatarUrl} name={l.displayName} className="h-9 w-9 rounded-full shrink-0" />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-sm truncate">{l.displayName}</div>
                       <div className="text-xs text-muted-foreground truncate">

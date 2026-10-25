@@ -5,6 +5,7 @@ import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-sca
 import { getScoreBorderColor, buildConnectionSummary } from "@/lib/scan-utils";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
+import { AvatarImg } from "@/components/ui/avatar-img";
 
 interface CandidateCardProps {
   candidate: ClusterCandidate;
@@ -21,21 +22,28 @@ export const CandidateCard = memo(function CandidateCard({
   result,
   onSelect,
 }: CandidateCardProps) {
-  const interactive = !!onSelect;
+  // A real <button> when it opens the evidence dialog, so keyboard and
+  // screen-reader users can reach it; a plain block on read-only pages.
+  // The card holds no other interactive elements, so nesting is safe.
+  const Wrapper = onSelect ? "button" : "div";
   return (
-    <div
-      onClick={onSelect ? () => onSelect(candidate) : undefined}
-      className={`rounded-lg border border-border p-3 space-y-2.5 ${
-        interactive ? "cursor-pointer hover:bg-muted/30 transition-colors" : ""
+    <Wrapper
+      {...(onSelect && {
+        type: "button" as const,
+        onClick: () => onSelect(candidate),
+        "aria-haspopup": "dialog" as const,
+      })}
+      className={`block w-full text-left rounded-lg border border-border p-3 space-y-2.5 ${
+        onSelect
+          ? "cursor-pointer hover:bg-muted/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          : ""
       }`}
     >
       <div className="flex items-start gap-3">
         {candidate.ethosProfile?.avatarUrl && (
-          <img
+          <AvatarImg
             src={candidate.ethosProfile.avatarUrl}
-            alt={candidate.ethosProfile.displayName}
-            loading="lazy"
-            decoding="async"
+            name={candidate.ethosProfile.displayName}
             className={`h-10 w-10 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
           />
         )}
@@ -80,6 +88,6 @@ export const CandidateCard = memo(function CandidateCard({
           </div>
         ))}
       </div>
-    </div>
+    </Wrapper>
   );
 });

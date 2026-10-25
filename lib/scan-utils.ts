@@ -149,6 +149,20 @@ export function formatTime(ms: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+/**
+ * "0.0036 ETH" for a first-funding transfer. Uses the symbol Alchemy
+ * recorded with the transfer; results saved before that was stored fall
+ * back to the symbol Alchemy reports for the chain's native token.
+ * Returns null when the amount is unknown (e.g. a funder inferred from a
+ * funding chain rather than read from the wallet's own history).
+ */
+export function formatFunderAmount(ff: { chain: string; value: number | string; asset?: string | null }): string | null {
+  const value = parseFloat(String(ff.value));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const symbol = ff.asset || (ff.chain === "Polygon" ? "MATIC" : "ETH");
+  return `${value.toFixed(4)} ${symbol}`;
+}
+
 export function getLogColor(level: string): string {
   switch (level) {
     case "success":
