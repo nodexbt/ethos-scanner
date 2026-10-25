@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
  * Watch / unwatch a profile. Self-contained: loads its own state so any
@@ -47,9 +48,11 @@ export function WatchButton({ profileId, className = "" }: { profileId: number; 
       onClick={toggle}
       disabled={watching === null || busy}
       title={watching ? "Stop watching this profile" : "Get an alert when this profile gains a new link"}
-      className={`h-7 px-2 inline-flex items-center gap-1.5 text-xs rounded-md transition-colors cursor-pointer disabled:cursor-default ${
-        watching ? "text-foreground bg-muted hover:bg-muted/70" : "hover:bg-muted"
-      } ${className}`}
+      className={cn(
+        "h-7 px-2 inline-flex items-center gap-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer disabled:cursor-default",
+        watching ? "text-foreground bg-muted hover:bg-muted/70" : "hover:bg-muted",
+        className
+      )}
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : watching ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
       {watching ? "Watching" : "Watch"}

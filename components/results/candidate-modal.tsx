@@ -1,22 +1,25 @@
 "use client";
 
-import { X, ExternalLink } from "lucide-react";
-import { Dialog, DialogClose, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
-import {
-  getScoreBorderColor,
-  getExplorerAddressUrl,
-  resolveAddressName,
-  buildConnectionSummary,
-  SIGNAL_LABELS,
-  STRONG_RULE,
-  formatFunderAmount,
-} from "@/lib/scan-utils";
-import { AddressDisplay } from "./address-display";
-import { safeExternalUrl } from "@/lib/utils";
+import { ChevronLeft, ChevronRight, ExternalLink, Search, X } from "lucide-react";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { AvatarImg } from "@/components/ui/avatar-img";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
-import { AvatarImg } from "@/components/ui/avatar-img";
+import { ConfidencePill } from "@/components/ui/confidence-pill";
+import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
+import {
+  describeSignal,
+  formatFunderAmount,
+  getExplorerAddressUrl,
+  getScoreBorderColor,
+  resolveAddressName,
+  scoringSignals,
+  shortAddress,
+  targetLabel,
+} from "@/lib/scan-utils";
+import { safeExternalUrl } from "@/lib/utils";
+import { AddressDisplay } from "./address-display";
 
 interface CandidateModalProps {
   /** The candidate to show. Stays the last opened one while `open` is
@@ -25,312 +28,159 @@ interface CandidateModalProps {
   open: boolean;
   result: ClusterScanResult;
   onClose: () => void;
+  /** Where this candidate sits in the visible list, for previous/next. */
+  position?: { index: number; total: number } | null;
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** Scan the linked profile. Omitted on read-only pages. */
+  onScanProfile?: (input: string) => void;
 }
 
-export function CandidateModal({ candidate, open, result, onClose }: CandidateModalProps) {
+const MAX_SENDERS_SHOWN = 5;
+
+/**
+ * The evidence behind one link: scoring signals first and in plain
+ * English, then context that never changes the score, then first funders.
+ */
+export function CandidateModal({ candidate, open, result, onClose, position, onPrev, onNext, onScanProfile }: CandidateModalProps) {
+  const e = candidate.ethosProfile;
+  const name = e?.displayName || shortAddress(candidate.address);
+  const t = targetLabel(result);
+  const wallets = candidate.wallets?.length ? candidate.wallets : [candidate.address];
+  const scoring = scoringSignals(candidate);
+  const canStep = !!position && position.total > 1;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent
         showCloseButton={false}
         className="w-[calc(100%-2rem)] max-w-2xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-xl sm:rounded-xl"
+        onKeyDown={(ev) => {
+          if (!canStep) return;
+          if (ev.key === "ArrowRight") { ev.preventDefault(); onNext?.(); }
+          if (ev.key === "ArrowLeft") { ev.preventDefault(); onPrev?.(); }
+        }}
       >
-        <DialogDescription className="sr-only">Evidence behind this profile&apos;s link to the scanned target.</DialogDescription>
+        <DialogDescription className="sr-only">
+          Evidence behind the link between {name} and {t}.
+        </DialogDescription>
+
         {/* Header */}
-        <div className="flex items-start gap-3 p-5 border-b border-border sticky top-0 bg-background rounded-t-xl z-10">
-          {candidate.ethosProfile?.avatarUrl && (
-            <AvatarImg
-              src={candidate.ethosProfile.avatarUrl}
-              name={candidate.ethosProfile.displayName}
-              className={`h-12 w-12 rounded-full ring-2 shrink-0 ${getScoreBorderColor(candidate.ethosProfile.score)}`}
-            />
-          )}
-          <div className="flex-1 min-w-0">
+        <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-border bg-background p-4 sm:p-5 rounded-t-xl">
+          <AvatarImg
+            src={e?.avatarUrl}
+            name={e?.displayName}
+            className={`h-12 w-12 rounded-full shrink-0 text-base ${e ? `ring-2 ${getScoreBorderColor(e.score)}` : ""}`}
+          />
+          <div className="min-w-0 flex-1">
             <DialogTitle asChild>
-              <div className="font-semibold text-lg inline-flex items-center gap-1.5">
-                {candidate.ethosProfile?.displayName || `${candidate.address.slice(0, 12)}...${candidate.address.slice(-6)}`}
-                {candidate.ethosProfile?.humanVerified && <HumanVerifiedBadge size={16} />}
-              </div>
+              <h2 className="text-lg font-semibold leading-tight flex flex-wrap items-center gap-1.5 break-words">
+                {name}
+                {e?.humanVerified && <HumanVerifiedBadge size={16} />}
+              </h2>
             </DialogTitle>
-            <div className="text-sm text-muted-foreground">
-              {candidate.ethosProfile?.username && `@${candidate.ethosProfile.username} · `}
-              {candidate.confidence === "high" ? "Strong" : "Possible"} match · Link strength {candidate.score}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-sm text-muted-foreground">
+              {e?.username && <span>@{e.username}</span>}
+              {e && (
+                <span className="inline-flex items-center gap-1">
+                  Ethos score <span className="text-foreground font-medium">{e.score}</span>
+                  <EthosScoreIcon size={9} />
+                </span>
+              )}
+              <span>{candidate.networks.join(", ")}</span>
+            </div>
+            <div className="mt-1.5">
+              <ConfidencePill confidence={candidate.confidence === "high" ? "high" : "medium"} score={candidate.score} />
             </div>
           </div>
-          <DialogClose className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer" aria-label="Close">
-            <X className="h-5 w-5" />
-          </DialogClose>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {canStep && (
+              <>
+                <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={onPrev} aria-label="Previous linked profile">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="hidden sm:inline min-w-12 text-center text-xs text-muted-foreground tabular-nums">
+                  {position!.index + 1} of {position!.total}
+                </span>
+                <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={onNext} aria-label="Next linked profile">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+            <DialogClose className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-muted transition-colors cursor-pointer" aria-label="Close">
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Profile links */}
+        <div className="space-y-5 p-4 sm:p-5">
+          {/* Next steps */}
           <div className="flex flex-wrap gap-2">
-            {candidate.ethosProfile && (
-              <a
-                href={safeExternalUrl(candidate.ethosProfile.profileUrl)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors"
-              >
-                Ethos Profile <ExternalLink className="h-3 w-3 opacity-50" />
-              </a>
+            {onScanProfile && (
+              <Button size="sm" className="h-8 text-xs" onClick={() => onScanProfile(e?.username ? `@${e.username}` : candidate.address)}>
+                <Search className="h-3.5 w-3.5" />
+                Scan {e?.displayName?.split(" ")[0] || "this wallet"}
+              </Button>
             )}
-            {(candidate.wallets || [candidate.address]).map((wallet) => (
-              <a
-                key={wallet}
-                href={getExplorerAddressUrl(wallet, candidate.networks[0])}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted/50 transition-colors font-mono"
-              >
-                {wallet.slice(0, 8)}...{wallet.slice(-6)} <ExternalLink className="h-3 w-3 opacity-50" />
+            {e?.profileUrl && (
+              <Button asChild variant="outline" size="sm" className="h-8 text-xs bg-transparent">
+                <a href={safeExternalUrl(e.profileUrl)} target="_blank" rel="noopener noreferrer">
+                  Ethos profile <ExternalLink className="h-3 w-3 opacity-60" />
+                </a>
+              </Button>
+            )}
+            <Button asChild variant="outline" size="sm" className="h-8 text-xs bg-transparent">
+              <a href={`https://x.com/search?q=${encodeURIComponent(wallets.join(" OR "))}&f=live`} target="_blank" rel="noopener noreferrer">
+                Search X <ExternalLink className="h-3 w-3 opacity-60" />
               </a>
+            </Button>
+            {wallets.map((w) => (
+              <Button key={w} asChild variant="outline" size="sm" className="h-8 text-xs font-mono bg-transparent">
+                <a href={getExplorerAddressUrl(w, candidate.networks[0])} target="_blank" rel="noopener noreferrer">
+                  {shortAddress(w)} <ExternalLink className="h-3 w-3 opacity-60" />
+                </a>
+              </Button>
             ))}
           </div>
 
-          {/* Summary */}
-          <div>
-            <h3 className="text-sm font-semibold mb-2">Summary</h3>
-            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
-              {buildConnectionSummary(candidate, result).map((line, i) => (
-                <div key={i} className="flex gap-1.5 text-xs text-muted-foreground">
-                  <span className="shrink-0">-</span>
-                  <span>{line}</span>
-                </div>
+          {/* Scoring evidence */}
+          <section>
+            <h3 className="mb-2 flex items-baseline justify-between text-sm font-semibold">
+              Why they&apos;re linked
+              <span className="text-xs font-normal text-muted-foreground">{candidate.score} points</span>
+            </h3>
+            <div className="space-y-1.5">
+              {scoring.length === 0 && (
+                <p className="text-sm text-muted-foreground">No scoring signals. This profile is shown for context only.</p>
+              )}
+              {scoring.map((s, i) => (
+                <ScoringSignal key={`${s.type}-${i}`} signal={s} candidate={candidate} result={result} />
               ))}
             </div>
-          </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Strong: first funded by {t} or a linked wallet, or 15+ points across two signal types. Possible: 8+ points.
+            </p>
+          </section>
 
-          {/* Signal breakdown — the number on the pill, explained */}
-          <div>
-            <h3 className="text-sm font-semibold mb-2">Link Strength: {candidate.score}</h3>
-            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5">
-              {candidate.signals.map((s: Signal, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs">
-                  <span
-                    className={`shrink-0 w-9 text-right font-mono tabular-nums ${
-                      s.score > 0 ? "text-foreground font-medium" : "text-muted-foreground"
-                    }`}
-                  >
-                    {s.score > 0 ? `+${s.score}` : "ctx"}
-                  </span>
-                  <div className="min-w-0">
-                    <span className="font-medium">{SIGNAL_LABELS[s.type] ?? s.type}</span>
-                    {s.details && <span className="text-muted-foreground"> · {s.details}</span>}
+          {/* Context */}
+          <ContextSection candidate={candidate} result={result} name={name} />
+
+          {/* First funders */}
+          {candidate.firstFunders && candidate.firstFunders.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-sm font-semibold">First funders</h3>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-1 text-xs">
+                {candidate.firstFunders.map((ff, i) => (
+                  <div key={`${ff.chain}-${i}`} className="flex items-center gap-3 border-t border-border py-1.5 first:border-t-0">
+                    <span className="w-16 shrink-0 text-muted-foreground">{ff.chain}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      <AddressDisplay address={ff.funder} chain={ff.chain} result={result} />
+                    </span>
+                    <span className="shrink-0 text-muted-foreground tabular-nums">{formatFunderAmount(ff)}</span>
                   </div>
-                </div>
-              ))}
-              <p className="text-[11px] text-muted-foreground pt-2 mt-1 border-t border-border">{STRONG_RULE}</p>
-            </div>
-          </div>
-
-          {/* Connection details */}
-          <div>
-            <h3 className="text-sm font-semibold mb-2">Connection Details</h3>
-            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-              {/* Direct transfers */}
-              {candidate.directCount > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">Direct Transfers</div>
-                  <div className="text-xs text-muted-foreground">
-                    {candidate.directCount} transfer{candidate.directCount !== 1 && "s"} detected
-                    {" "}({candidate.incomingCount} incoming, {candidate.outgoingCount} outgoing)
-                    {candidate.bidirectional && (
-                      <span className="ml-1 text-amber-500 font-medium">-- funds flow both ways</span>
-                    )}
-                    {candidate.repeatTransfer && (
-                      <span className="ml-1 text-amber-500 font-medium">-- repeated pattern</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* First funders */}
-              {candidate.firstFunders && candidate.firstFunders.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium flex items-center gap-1.5">
-                    First Funder{candidate.firstFunders.length > 1 ? "s" : ""}
-                    {candidate.sharedFirstFunder && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500 text-white font-medium">same as target</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    The first wallet to send this address the chain&apos;s native token, per chain:
-                  </div>
-                  {candidate.firstFunders.map((ff, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs border border-border rounded px-2 py-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground w-16 shrink-0">{ff.chain}</span>
-                        <AddressDisplay address={ff.funder} chain={ff.chain} result={result} />
-                      </div>
-                      <span className="text-muted-foreground shrink-0">{formatFunderAmount(ff)}</span>
-                    </div>
-                  ))}
-                  {candidate.sharedFirstFunder && result.targetFirstFunders && result.targetFirstFunders.length > 0 && (
-                    <div className="text-xs text-red-500 dark:text-red-400 font-medium mt-1">
-                      The target wallet was also first funded by the same address -- this is a strong sybil indicator.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Shared incoming senders */}
-              {candidate.sharedFundingSources.length > 0 && (() => {
-                const firstFunderAddrs = new Set(
-                  (candidate.firstFunders || []).map((f) => f.funder)
-                );
-                const targetFFAddrs = new Set(
-                  (result.targetFirstFunders || []).map((f) => f.funder)
-                );
-                const senders = candidate.sharedFundingSources;
-                const isFirstFunder = (addr: string) => firstFunderAddrs.has(addr) || targetFFAddrs.has(addr);
-                const MAX_SHOWN = 5;
-
-                return (
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium">Shared Incoming Senders</div>
-                    <div className="text-xs text-muted-foreground">
-                      {senders.length} address{senders.length !== 1 && "es"} sent tokens to both the target and this wallet. This does not mean they funded the wallet — it only indicates shared incoming transaction sources.
-                    </div>
-                    <div className="space-y-0.5">
-                      {senders.slice(0, MAX_SHOWN).map((addr) => (
-                        <div key={addr} className="flex items-center gap-1.5 text-xs">
-                          <AddressDisplay address={addr} result={result} />
-                          {isFirstFunder(addr) && (
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-500 font-medium">first funder</span>
-                          )}
-                        </div>
-                      ))}
-                      {senders.length > MAX_SHOWN && (
-                        <div className="text-[10px] text-muted-foreground">
-                          + {senders.length - MAX_SHOWN} more shared sender{senders.length - MAX_SHOWN !== 1 && "s"}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Ethos social connections */}
-              {(candidate.invitedByTarget || candidate.invitedTarget || candidate.mutualReviews || candidate.mutualVouches) && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">Ethos Social Connections</div>
-                  <div className="text-xs text-muted-foreground space-y-0.5">
-                    {candidate.invitedByTarget && (
-                      <div>Invited by {result.targetEthos?.displayName || "the target"} on Ethos.</div>
-                    )}
-                    {candidate.invitedTarget && (
-                      <div>Invited {result.targetEthos?.displayName || "the target"} on Ethos.</div>
-                    )}
-                    {candidate.mutualReviews && (
-                      <div className="space-y-0.5">
-                        <div>Mutual reviews: both reviewed each other on Ethos.</div>
-                        <MutualActivityLinks
-                          signal={candidate.signals.find((s) => s.type === "mutual_reviews")}
-                          verb="review"
-                          targetName={result.targetEthos?.displayName || "the target"}
-                          candidateName={candidate.ethosProfile?.displayName || "this wallet"}
-                        />
-                      </div>
-                    )}
-                    {candidate.mutualVouches && (
-                      <div className="space-y-0.5">
-                        <div>Mutual vouches: both vouched for each other on Ethos.</div>
-                        <MutualActivityLinks
-                          signal={candidate.signals.find((s) => s.type === "mutual_vouches")}
-                          verb="vouch"
-                          targetName={result.targetEthos?.displayName || "the target"}
-                          candidateName={candidate.ethosProfile?.displayName || "this wallet"}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Shared CEX deposit addresses */}
-              {candidate.sharedCexDeposits && candidate.sharedCexDeposits.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">Shared Exchange Deposit Addresses</div>
-                  <div className="text-xs text-muted-foreground">
-                    This wallet and other cluster members deposited to the same exchange address. CEX deposit addresses are unique per account, so this strongly suggests the same exchange account.
-                  </div>
-                  <div className="space-y-1.5">
-                    {candidate.sharedCexDeposits.map((dep, i) => (
-                      <div key={i} className="text-xs border border-border rounded px-2.5 py-2 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{dep.exchange}</span>
-                            <a
-                              href={getExplorerAddressUrl(dep.depositAddress, dep.network)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono text-muted-foreground hover:underline"
-                            >
-                              {dep.depositAddress.slice(0, 10)}...{dep.depositAddress.slice(-6)} <ExternalLink className="inline h-2.5 w-2.5 opacity-50" />
-                            </a>
-                          </div>
-                          <span className="text-muted-foreground">{dep.network}</span>
-                        </div>
-                        <div className="text-muted-foreground">
-                          Also used by: {dep.wallets
-                            .filter((w) => !(candidate.wallets || [candidate.address]).includes(w))
-                            .map((w) => resolveAddressName(w, result))
-                            .join(", ")}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* No connections found */}
-              {candidate.directCount === 0 &&
-                candidate.sharedFundingSources.length === 0 &&
-                !candidate.invitedByTarget &&
-                !candidate.invitedTarget &&
-                !candidate.mutualReviews &&
-                !candidate.mutualVouches && (
-                <div className="text-xs text-muted-foreground">No specific connection details available.</div>
-              )}
-            </div>
-          </div>
-
-          {/* Network activity */}
-          <div>
-            <h3 className="text-sm font-semibold mb-2">Active Networks</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {candidate.networks.map((network) => (
-                <span key={network} className="text-xs border border-border rounded-md px-2.5 py-1">
-                  {network}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Ethos profile details */}
-          {candidate.ethosProfile && (
-            <div>
-              <h3 className="text-sm font-semibold mb-2">Ethos Profile</h3>
-              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Credibility Score</span>
-                  <span className="font-medium inline-flex items-center gap-0.5">
-                    {candidate.ethosProfile.score}
-                    <EthosScoreIcon size={9} className="ml-0.5" />
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Profile ID</span>
-                  <span className="font-medium">{candidate.ethosProfile.profileId}</span>
-                </div>
-                {candidate.ethosProfile.username && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">X/Twitter</span>
-                    <span className="font-medium">@{candidate.ethosProfile.username}</span>
-                  </div>
-                )}
+                ))}
               </div>
-            </div>
+            </section>
           )}
         </div>
       </DialogContent>
@@ -338,59 +188,123 @@ export function CandidateModal({ candidate, open, result, onClose }: CandidateMo
   );
 }
 
-function formatActivityDate(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+function ScoringSignal({ signal, candidate, result }: { signal: Signal; candidate: ClusterCandidate; result: ClusterScanResult }) {
+  const text = describeSignal(signal, candidate, result);
+  const own = candidate.wallets?.length ? candidate.wallets : [candidate.address];
+  return (
+    <div className="flex items-baseline gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+      <span className="w-8 shrink-0 text-right font-mono text-sm font-semibold tabular-nums">+{signal.score}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">{text.title}</div>
+        <div className="text-xs text-muted-foreground">{text.detail}</div>
+
+        {signal.type === "shared_incoming_sender" && candidate.sharedFundingSources.length > 0 && (
+          <ul className="mt-1.5 space-y-0.5 text-xs">
+            {candidate.sharedFundingSources.slice(0, MAX_SENDERS_SHOWN).map((addr) => (
+              <li key={addr}><AddressDisplay address={addr} result={result} /></li>
+            ))}
+            {candidate.sharedFundingSources.length > MAX_SENDERS_SHOWN && (
+              <li className="text-muted-foreground">and {candidate.sharedFundingSources.length - MAX_SENDERS_SHOWN} more</li>
+            )}
+          </ul>
+        )}
+
+        {signal.type === "shared_cex_deposit" && (candidate.sharedCexDeposits?.length ?? 0) > 0 && (
+          <ul className="mt-1.5 space-y-1 text-xs">
+            {candidate.sharedCexDeposits!.map((dep, i) => {
+              const others = dep.wallets.filter((w) => !own.includes(w)).map((w) => resolveAddressName(w, result));
+              return (
+                <li key={i} className="text-muted-foreground">
+                  {dep.exchange} deposit address{" "}
+                  <a href={getExplorerAddressUrl(dep.depositAddress, dep.network)} target="_blank" rel="noopener noreferrer" className="font-mono text-foreground hover:underline">
+                    {shortAddress(dep.depositAddress)}
+                  </a>{" "}
+                  on {dep.network}
+                  {others.length > 0 && <>, also used by {others.join(", ")}</>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
-/** Renders both directions of a mutual review/vouch, with archived state, date, and links. */
-function MutualActivityLinks({
-  signal,
-  verb,
-  targetName,
-  candidateName,
-}: {
-  signal?: Signal;
-  verb: "review" | "vouch";
-  targetName: string;
-  candidateName: string;
-}) {
-  if (!signal?.mutual) return null;
-  const { fromTarget, fromCandidate } = signal.mutual;
+function ContextSection({ candidate, result, name }: { candidate: ClusterCandidate; result: ClusterScanResult; name: string }) {
+  const t = targetLabel(result);
+  const items: React.ReactNode[] = [];
+
+  if (candidate.directCount > 0) {
+    // Counts are from the scanned profile's side: outgoing = it sent.
+    const n = candidate.directCount;
+    let line = `${n} transfer${n === 1 ? "" : "s"} directly between them`;
+    if (candidate.outgoingCount > 0 && candidate.incomingCount > 0) {
+      line += `: ${t} sent ${candidate.outgoingCount} and received ${candidate.incomingCount}`;
+    } else if (candidate.outgoingCount > 0) {
+      line += `, all sent by ${t}`;
+    } else {
+      line += `, all sent to ${t}`;
+    }
+    items.push(`${line}.`);
+  }
+  if (candidate.invitedByTarget) items.push(`${t} invited ${name} to Ethos.`);
+  if (candidate.invitedTarget) items.push(`${name} invited ${t} to Ethos.`);
+  for (const type of ["mutual_reviews", "mutual_vouches"] as const) {
+    const flag = type === "mutual_reviews" ? candidate.mutualReviews : candidate.mutualVouches;
+    if (!flag) continue;
+    const verb = type === "mutual_reviews" ? "reviewed" : "vouched for";
+    const signal = candidate.signals.find((s) => s.type === type);
+    items.push(
+      <>
+        They {verb} each other on Ethos.
+        {signal?.mutual && <MutualLinks signal={signal} kind={type === "mutual_reviews" ? "review" : "vouch"} targetName={t} candidateName={name} />}
+      </>
+    );
+  }
+  if (items.length === 0) return null;
+
+  return (
+    <section>
+      <h3 className="mb-2 flex items-baseline justify-between text-sm font-semibold">
+        Context
+        <span className="text-xs font-normal text-muted-foreground">not scored</span>
+      </h3>
+      <ul className="text-sm text-muted-foreground">
+        {items.map((item, i) => (
+          <li key={i} className="border-t border-border py-1.5 first:border-t-0">{item}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function formatActivityDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Both directions of a mutual review or vouch, with date and archived state. */
+function MutualLinks({ signal, kind, targetName, candidateName }: { signal: Signal; kind: "review" | "vouch"; targetName: string; candidateName: string }) {
+  if (!signal.mutual) return null;
   const rows = [
-    { label: `${targetName}'s ${verb} of ${candidateName}`, ref: fromTarget },
-    { label: `${candidateName}'s ${verb} of ${targetName}`, ref: fromCandidate },
+    { label: `${targetName}'s ${kind}`, ref: signal.mutual.fromTarget },
+    { label: `${candidateName}'s ${kind}`, ref: signal.mutual.fromCandidate },
   ];
   return (
-    <div className="space-y-0.5 pl-3">
+    <span className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
       {rows.map((row, i) => (
-        <div key={i} className="flex items-center gap-1.5 flex-wrap">
+        <span key={i} className="inline-flex items-center gap-1">
           {row.ref.url ? (
-            <a
-              href={safeExternalUrl(row.ref.url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-foreground hover:underline inline-flex items-center gap-1"
-            >
+            <a href={safeExternalUrl(row.ref.url)} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-2 hover:no-underline">
               {row.label}
-              <ExternalLink className="h-3 w-3 opacity-50" />
             </a>
           ) : (
             <span>{row.label}</span>
           )}
-          {row.ref.date > 0 && (
-            <span className="text-muted-foreground">· {formatActivityDate(row.ref.date)}</span>
-          )}
-          {row.ref.archived && (
-            <span className="text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-muted text-muted-foreground border border-border">
-              {verb === "vouch" ? "withdrawn" : "archived"}
-            </span>
-          )}
-        </div>
+          {row.ref.date > 0 && <span>{formatActivityDate(row.ref.date)}</span>}
+          {row.ref.archived && <span className="rounded border border-border px-1 text-[10px] uppercase tracking-wide">{kind === "vouch" ? "withdrawn" : "archived"}</span>}
+        </span>
       ))}
-    </div>
+    </span>
   );
 }

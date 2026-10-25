@@ -1,23 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, ChevronDown, ChevronRight, History, Users, Activity, Network, ArrowRight } from "lucide-react";
-import { ClusterScanResult, ClusterCandidate, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
+import { useState, useRef, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, History, Users, Activity, Network, ArrowRight } from "lucide-react";
+import { ClusterScanResult, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
 import type { ResolvedScanTarget } from "@/lib/scan-target";
 import { useSession } from "next-auth/react";
-import { motion, AnimatePresence } from "framer-motion";
-import { CandidateCard } from "@/components/results/candidate-card";
-import { CandidateModal } from "@/components/results/candidate-modal";
+import { motion } from "framer-motion";
 import { ShareDialog } from "@/components/results/share-dialog";
-import { ConnectionsCard } from "@/components/results/connections-card";
-import { OverviewCard } from "@/components/results/overview-card";
-import { DegradedBanner } from "@/components/results/degraded-banner";
+import { ResultView } from "@/components/results/result-view";
 import { AppFooter } from "@/components/app-footer";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
-import { EvidenceCard } from "@/components/evidence/evidence-card";
-import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
 import { AppHeader } from "@/components/app-header";
 import { NetworkView } from "@/components/network/network-view";
 import { useRouter } from "next/navigation";
@@ -82,17 +76,6 @@ export default function ScannerPage() {
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   /** Bumped after each scan so the header refetches the daily quota. */
   const [quotaKey, setQuotaKey] = useState(0);
-  /** Last opened candidate (kept while the dialog animates closed) and
-      whether the dialog is open. Stable callbacks so memo()'d cards skip
-      re-rendering on open/close. */
-  const [modalCandidate, setModalCandidate] = useState<ClusterCandidate | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const openCandidate = useCallback((c: ClusterCandidate) => {
-    setModalCandidate(c);
-    setModalOpen(true);
-  }, []);
-  const closeCandidate = useCallback(() => setModalOpen(false), []);
-  const [showPossible, setShowPossible] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   /** Which saved scans the Scans tab lists. Survives switching tabs. */
@@ -677,41 +660,6 @@ export default function ScannerPage() {
     if (currentInvestigationId === id) setCurrentInvestigationId(null);
   };
 
-  const handleScreenshotUpload = (address: string, file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setScreenshots((prev) => new Map(prev).set(address, dataUrl));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removeScreenshot = (address: string) => {
-    setScreenshots((prev) => {
-      const next = new Map(prev);
-      next.delete(address);
-      return next;
-    });
-  };
-
-  // Handle paste from clipboard for a specific wallet
-  const handlePaste = (address: string) => {
-    navigator.clipboard.read().then((items) => {
-      for (const item of items) {
-        const imageType = item.types.find((t) => t.startsWith("image/"));
-        if (imageType) {
-          item.getType(imageType).then((blob) => {
-            handleScreenshotUpload(address, new File([blob], "screenshot.png", { type: imageType }));
-          });
-          return;
-        }
-      }
-    }).catch(() => {
-      // Clipboard API not available or no image
-    });
-  };
-
   const exportInvestigation = () => {
     if (!clusterResult) return;
 
@@ -1015,158 +963,24 @@ export default function ScannerPage() {
             </motion.div>
           )}
 
-          <AnimatePresence>
           {hasResults && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="space-y-4"
-            >
-              <DegradedBanner degraded={clusterResult.degraded} notice={saveNotice} coverage={clusterResult.coverageNotes} />
-
-              {/* Desktop: overview top-left, candidates on the right spanning
-                  both rows, supporting cards below the overview. Narrow
-                  screens get the same DOM order in one column. */}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:grid-rows-[auto_1fr] xl:items-start">
-              <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
-              {/* Overview */}
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-              <OverviewCard
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
+              <ResultView
                 result={clusterResult}
-                scanning={scanning}
                 scannedAt={resultScannedAt}
-                onShare={() => setShareOpen(true)}
-                onRescan={() => rescanTarget(clusterResult.target)}
-                onCopyWallets={() => {
-                  const wallets = [
-                    ...(clusterResult.targetWallets ?? [clusterResult.target]),
-                    ...clusterResult.strongCluster.flatMap((c) => c.wallets || [c.address]),
-                    ...clusterResult.possibleCluster.flatMap((c) => c.wallets || [c.address]),
-                  ];
-                  navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
+                scanning={scanning}
+                isAdmin={isAdmin}
+                saveNotice={saveNotice}
+                investigationId={currentInvestigationId}
+                actions={{
+                  onRescan: () => rescanTarget(clusterResult.target),
+                  onShare: () => setShareOpen(true),
+                  onExport: exportInvestigation,
                 }}
-                onExport={exportInvestigation}
+                onScanProfile={scanTargetInput}
               />
-              </motion.div>
-
-              </div>
-
-              <div className="min-w-0 space-y-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
-              {/* Strong Cluster */}
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
-              <Card>
-                <CardHeader className={clusterResult.strongCluster.length === 0 ? "pb-6" : "pb-3"}>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    {clusterResult.strongCluster.length > 0 ? (
-                      <>
-                        <AlertTriangle className="h-5 w-5 text-red-500" />
-                        {clusterResult.strongCluster.length} Strong Cluster Wallet{clusterResult.strongCluster.length !== 1 && "s"}
-                      </>
-                    ) : clusterResult.degraded ? (
-                      <>
-                        <AlertTriangle className="h-5 w-5 text-amber-500" />
-                        No Strong Cluster in Available Data
-                      </>
-                    ) : (
-                      <>
-                        <Shield className="h-5 w-5 text-green-500" />
-                        No Strong Cluster Found
-                      </>
-                    )}
-                  </CardTitle>
-                  {clusterResult.strongCluster.length === 0 && (
-                    <CardDescription className="text-xs">
-                      {clusterResult.degraded
-                        ? "The scan was incomplete, so this is inconclusive rather than clean."
-                        : "No wallets scored high enough across multiple signal types."}
-                    </CardDescription>
-                  )}
-                </CardHeader>
-                {clusterResult.strongCluster.length > 0 && (
-                  <CardContent className="space-y-2">
-                    {clusterResult.strongCluster.map((candidate) => (
-                      <CandidateCard
-                        key={candidate.address}
-                        candidate={candidate}
-                        result={clusterResult}
-                        onSelect={openCandidate}
-                      />
-                    ))}
-                  </CardContent>
-                )}
-              </Card>
-              </motion.div>
-
-              {/* Possible Candidates */}
-              {clusterResult.possibleCluster.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
-                <Card>
-                  <CardHeader className={showPossible ? "pb-3" : ""}>
-                    <button
-                      onClick={() => setShowPossible(!showPossible)}
-                      className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors w-full"
-                    >
-                      {showPossible ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <AlertTriangle className="h-5 w-5 text-amber-500" />
-                      {clusterResult.possibleCluster.length} Possible Candidate{clusterResult.possibleCluster.length !== 1 && "s"}
-                    </button>
-                  </CardHeader>
-                  {showPossible && (
-                  <CardContent className="space-y-2">
-                    {clusterResult.possibleCluster.map((candidate) => (
-                      <CandidateCard
-                        key={candidate.address}
-                        candidate={candidate}
-                        result={clusterResult}
-                        onSelect={openCandidate}
-                      />
-                    ))}
-                  </CardContent>
-                  )}
-                </Card>
-              </motion.div>
-              )}
-
-              </div>
-
-              <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
-              {/* Second-degree connections from other saved scans */}
-              {currentInvestigationId && !scanning && (
-                <motion.div className="empty:hidden" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
-                  <ConnectionsCard
-                    investigationId={currentInvestigationId}
-                    scanning={scanning}
-                    onScanProfile={scanTargetInput}
-                  />
-                </motion.div>
-              )}
-
-              {/* Manual Checks + Evidence Collection */}
-              {/* Evidence Collection */}
-              {(clusterResult.strongCluster.length > 0 || clusterResult.possibleCluster.length > 0) && (
-                <EvidenceCard
-                  result={clusterResult}
-                  screenshots={screenshots}
-                  onScreenshotUpload={handleScreenshotUpload}
-                  onScreenshotRemove={removeScreenshot}
-                  onPaste={handlePaste}
-                  initialTwitterEvidence={twitterEvidence}
-                  onTwitterEvidenceChange={setTwitterEvidence}
-                />
-              )}
-
-              {/* Interpretation caveats — shown for clean results too, since
-                  "no cluster" is not proof of innocence. */}
-              {!scanning && (
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
-                  <ResearchDisclaimer />
-                </motion.div>
-              )}
-              </div>
-              </div>
             </motion.div>
           )}
-          </AnimatePresence>
 
           {/* Empty state */}
           {!scanning && !hasResults && !loadingCached && (
@@ -1327,16 +1141,6 @@ export default function ScannerPage() {
           open={shareOpen}
           onOpenChange={setShareOpen}
           onChanged={refreshInvestigations}
-        />
-      )}
-
-      {/* Candidate Detail Modal — stays mounted so Radix can animate it closed */}
-      {modalCandidate && clusterResult && (
-        <CandidateModal
-          candidate={modalCandidate}
-          open={modalOpen}
-          result={clusterResult}
-          onClose={closeCandidate}
         />
       )}
 

@@ -1,4 +1,4 @@
-import { type ClusterScanResult, type ClusterCandidate } from "./cluster-scanner";
+import { type ClusterScanResult, type ClusterCandidate, type Signal } from "./cluster-scanner";
 import { getAddressLabel } from "./known-addresses";
 
 export function getScoreBorderColor(score: number): string {
@@ -35,110 +35,6 @@ export function resolveAddressName(addr: string, result: ClusterScanResult | nul
   const knownLabel = getAddressLabel(addr);
   if (knownLabel) return knownLabel;
   return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
-}
-
-export function buildConnectionSummary(
-  candidate: ClusterCandidate,
-  result: ClusterScanResult | null
-): string[] {
-  const targetName = result?.targetEthos?.displayName || result?.target.slice(0, 10) + "...";
-  const name = candidate.ethosProfile?.displayName || candidate.address.slice(0, 10) + "...";
-  const lines: string[] = [];
-
-  // First funder
-  if (candidate.firstFunders && candidate.firstFunders.length > 0 && result) {
-    for (const ff of candidate.firstFunders) {
-      const funderName = resolveAddressName(ff.funder, result);
-      const isFundedByTarget = (result.targetWallets ?? [result.target]).includes(ff.funder);
-      const isFundedByResult = !isFundedByTarget && [...result.strongCluster, ...result.possibleCluster]
-        .some((c) => c.address !== candidate.address && (c.wallets?.includes(ff.funder) || c.address === ff.funder));
-
-      let fundedOthers = 0;
-      for (const other of [...result.strongCluster, ...result.possibleCluster]) {
-        if (other.address === candidate.address) continue;
-        if (other.firstFunders?.some((f) => f.funder === ff.funder)) fundedOthers++;
-      }
-
-      const exchangeLabel = ff.funderLabel || getAddressLabel(ff.funder);
-
-      if (isFundedByTarget) {
-        lines.push(`First funded by ${targetName} on ${ff.chain}.`);
-      } else if (isFundedByResult) {
-        lines.push(`First funded by ${funderName} (another result) on ${ff.chain}.`);
-      } else if (candidate.sharedFirstFunder && ff.funder === result.targetFirstFunders?.find((f) => f.funder === ff.funder)?.funder) {
-        if (exchangeLabel) {
-          lines.push(`Same ${exchangeLabel} withdrawal address as ${targetName} on ${ff.chain} (likely same ${exchangeLabel} account).`);
-        } else {
-          lines.push(`Same first funder as ${targetName} on ${ff.chain}.`);
-        }
-      } else if (fundedOthers > 0) {
-        if (exchangeLabel) {
-          lines.push(`First funded by the same ${exchangeLabel} address on ${ff.chain} as ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""} (likely same ${exchangeLabel} account).`);
-        } else {
-          lines.push(`First funded by ${funderName} on ${ff.chain}, which also funded ${fundedOthers} other result${fundedOthers > 1 ? "s" : ""}.`);
-        }
-      }
-    }
-  } else if (candidate.sharedFirstFunder) {
-    lines.push(`Same first funder as ${targetName} on at least one chain.`);
-  }
-
-  // Direct transfers
-  if (candidate.directCount > 0) {
-    const parts: string[] = [];
-    if (candidate.incomingCount > 0 && candidate.outgoingCount > 0) {
-      parts.push(`Sent ${candidate.outgoingCount} and received ${candidate.incomingCount} transaction${candidate.directCount > 1 ? "s" : ""} with ${targetName}`);
-    } else if (candidate.outgoingCount > 0) {
-      parts.push(`Sent ${candidate.outgoingCount} transaction${candidate.outgoingCount > 1 ? "s" : ""} to ${targetName}`);
-    } else {
-      parts.push(`Received ${candidate.incomingCount} transaction${candidate.incomingCount > 1 ? "s" : ""} from ${targetName}`);
-    }
-    if (candidate.bidirectional) parts.push("funds flow both ways");
-    if (candidate.repeatTransfer) parts.push("repeated pattern");
-    lines.push(parts.join(", ") + ".");
-  }
-
-  // Shared incoming senders
-  if (candidate.sharedFundingSources.length > 0) {
-    lines.push(`${candidate.sharedFundingSources.length} address${candidate.sharedFundingSources.length > 1 ? "es" : ""} sent tokens to both ${name} and ${targetName}.`);
-  }
-
-  // Shared CEX deposit addresses
-  if (candidate.sharedCexDeposits && candidate.sharedCexDeposits.length > 0) {
-    for (const dep of candidate.sharedCexDeposits) {
-      const others = dep.wallets
-        .filter((w) => !(candidate.wallets || [candidate.address]).includes(w))
-        .map((w) => resolveAddressName(w, result));
-      if (others.length > 0) {
-        lines.push(`Same ${dep.exchange} deposit address as ${others.slice(0, 3).join(", ")}${others.length > 3 ? ` and ${others.length - 3} more` : ""} (likely same ${dep.exchange} account).`);
-      }
-    }
-  }
-
-  // Multi-hop funding
-  if (candidate.signals.some((s) => s.type === "multi_hop_funding")) {
-    const detail = candidate.signals.find((s) => s.type === "multi_hop_funding")?.details || "";
-    lines.push(`Discovered via multi-hop funding analysis: ${detail}.`);
-  }
-
-  // Ethos social signals
-  if (candidate.invitedByTarget && candidate.invitedTarget) {
-    lines.push(`Mutual invitation: ${targetName} invited ${name} and ${name} invited ${targetName} on Ethos.`);
-  } else if (candidate.invitedByTarget) {
-    lines.push(`Invited by ${targetName} on Ethos.`);
-  } else if (candidate.invitedTarget) {
-    lines.push(`Invited ${targetName} on Ethos.`);
-  }
-
-  if (candidate.mutualReviews) {
-    lines.push(`${name} and ${targetName} reviewed each other on Ethos.`);
-  }
-
-  if (candidate.mutualVouches) {
-    lines.push(`${name} and ${targetName} vouched for each other on Ethos.`);
-  }
-
-  return lines;
 }
 
 export function formatTime(ms: number): string {
@@ -194,6 +90,122 @@ export const SIGNAL_LABELS: Record<string, string> = {
   mutual_reviews: "Mutual Ethos reviews",
   mutual_vouches: "Mutual Ethos vouches",
 };
+
+/** "0x1234…abcd" */
+export function shortAddress(address: string): string {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/** How the scanned profile is named in sentences. */
+export function targetLabel(result: ClusterScanResult): string {
+  return result.targetEthos?.displayName || shortAddress(result.target);
+}
+
+/** Signals that add points, strongest first. */
+export function scoringSignals(candidate: ClusterCandidate): Signal[] {
+  return candidate.signals.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+}
+
+export interface SignalText {
+  /** Heading in the evidence dialog. */
+  title: string;
+  /** One-sentence explanation under the heading. */
+  detail: string;
+  /** Compact form for list rows. */
+  short: string;
+}
+
+const firstNumber = (s?: string) => Number((s?.match(/\d+/) ?? ["0"])[0]);
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1) + (/[.!?]$/.test(s) ? "" : ".");
+
+/** Plain-English wording for a scoring signal, replacing raw details like "senders=4". */
+export function describeSignal(s: Signal, candidate: ClusterCandidate, result: ClusterScanResult): SignalText {
+  const t = targetLabel(result);
+  switch (s.type) {
+    case "funded_by_target": {
+      const targetWallets = result.targetWallets ?? [result.target];
+      const ff = candidate.firstFunders?.find((f) => targetWallets.includes(f.funder));
+      return {
+        title: `First funded by ${t}`,
+        short: `First funded by ${t}`,
+        detail: `${t}'s wallet sent this wallet its first-ever transaction${ff ? ` on ${ff.chain}` : ""}.`,
+      };
+    }
+    case "funded_by_cluster":
+      return {
+        title: "First funded by another linked wallet",
+        short: "First funded by a linked wallet",
+        detail: "Its first-ever transaction came from a wallet that is also in these results.",
+      };
+    case "shared_first_funder":
+      return {
+        title: `Same first funder as ${t}`,
+        short: `Same first funder as ${t}`,
+        detail: s.details?.startsWith("first funded by")
+          ? sentence(s.details.replace("the target", t))
+          : "Both wallets were first funded by the same address.",
+      };
+    case "shared_exchange_funder": {
+      const exchange = s.details?.match(/^same (.+) withdrawal address$/)?.[1] ?? "exchange";
+      return {
+        title: `Same ${exchange} withdrawal address`,
+        short: `Same ${exchange} funder`,
+        detail: `Both were first funded from the same ${exchange} withdrawal address. Weaker than a private funder, because exchange hot wallets fund many unrelated people.`,
+      };
+    }
+    case "shared_cex_deposit": {
+      const exchange = candidate.sharedCexDeposits?.[0]?.exchange ?? "exchange";
+      return {
+        title: `Deposits to the same ${exchange} account`,
+        short: "Same exchange account",
+        detail: `Sent funds to the same ${exchange} deposit address as another wallet in these results. Deposit addresses are unique to one customer.`,
+      };
+    }
+    case "multi_hop_funding":
+      return {
+        title: "Found through a funding chain",
+        short: "Funding chain",
+        detail: s.details ? sentence(s.details.replace("the target", t)) : `Received funds from an address that also funded ${t}.`,
+      };
+    case "shared_incoming_sender": {
+      const n = firstNumber(s.details) || candidate.sharedFundingSources.length;
+      return {
+        title: `${n} sender${n === 1 ? "" : "s"} in common`,
+        short: `${n} shared sender${n === 1 ? "" : "s"}`,
+        detail: `${n === 1 ? "One address has" : `${n} addresses have`} sent funds to both ${t} and this wallet. On its own this does not show who controls either.`,
+      };
+    }
+    default: {
+      const label = SIGNAL_LABELS[s.type] ?? s.type;
+      return { title: label, short: label, detail: s.details ? sentence(s.details) : "" };
+    }
+  }
+}
+
+/** Scoring signal types in the order "How they connect" lists them. */
+export const CONNECTION_TYPES = [
+  "funded_by_target",
+  "funded_by_cluster",
+  "shared_first_funder",
+  "shared_cex_deposit",
+  "shared_exchange_funder",
+  "multi_hop_funding",
+  "shared_incoming_sender",
+] as const;
+
+/** Phrase completing "<count> …" in the "How they connect" panel. */
+export function connectionPhrase(type: string, t: string): string {
+  switch (type) {
+    case "funded_by_target": return `first funded by ${t}`;
+    case "funded_by_cluster": return "first funded by another linked wallet";
+    case "shared_first_funder": return `share ${t}'s first funder`;
+    case "shared_cex_deposit": return "use the same exchange account";
+    case "shared_exchange_funder": return "share an exchange withdrawal funder";
+    case "multi_hop_funding": return "found through a funding chain";
+    case "shared_incoming_sender": return `share senders with ${t}`;
+    default: return SIGNAL_LABELS[type] ?? type;
+  }
+}
 
 /** Mirrors confidenceFor() in lib/cluster-scanner.ts. Keep in sync. */
 export const STRONG_RULE =

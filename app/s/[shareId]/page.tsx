@@ -2,17 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { Shield, AlertTriangle } from "lucide-react";
+import { Shield } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
 import { useParams } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
-import { OverviewCard } from "@/components/results/overview-card";
-import { formatRelativeTime } from "@/lib/utils";
-import { DegradedBanner } from "@/components/results/degraded-banner";
 import { AppFooter } from "@/components/app-footer";
-import { CandidateCard } from "@/components/results/candidate-card";
-import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
+import { ResultView } from "@/components/results/result-view";
 
 export default function SharedInvestigation() {
   const params = useParams();
@@ -101,111 +97,13 @@ export default function SharedInvestigation() {
     );
   }
 
-  // Read-only "Copy Wallets" handler — operates only on already-loaded data,
-  // so it's safe to expose on the public page. Share/Re-scan/Export are
-  // intentionally omitted: a viewer landing here already has the share link,
-  // can't trigger a new scan without auth, and Export pulls in evidence
-  // screenshots that only exist in the owner's session.
-  const handleCopyWallets = () => {
-    const wallets = [
-      ...(result.targetWallets ?? [result.target]),
-      ...result.strongCluster.flatMap((c) => c.wallets || [c.address]),
-      ...result.possibleCluster.flatMap((c) => c.wallets || [c.address]),
-    ];
-    navigator.clipboard.writeText([...new Set(wallets)].join("\n"));
-  };
-
+  // Read-only: no Share, Re-scan, Watch or Export, and no scanning from the
+  // evidence dialog. Copy wallets only uses data already on the page.
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       <SiteHeader />
-
-      <div className="bg-card/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3 mb-4 space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">
-          Scan of {result.targetEthos?.displayName ?? `${result.target.slice(0, 10)}…${result.target.slice(-6)}`}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Read-only view of a wallet cluster scan
-          {scannedAt && <> · scanned {formatRelativeTime(scannedAt)} ({new Date(scannedAt).toLocaleDateString()})</>}.
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        <DegradedBanner degraded={result.degraded} coverage={result.coverageNotes} />
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:grid-rows-[auto_1fr] xl:items-start">
-        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
-        <OverviewCard
-          result={result}
-          scanning={false}
-          onCopyWallets={handleCopyWallets}
-          scannedAt={scannedAt}
-        />
-
-        </div>
-        <div className="min-w-0 space-y-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
-        {result.strongCluster.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-red-500" />
-                {result.strongCluster.length} Strong Cluster Wallet{result.strongCluster.length !== 1 && "s"}
-              </CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6 space-y-2">
-              {result.strongCluster.map((c) => (
-                <CandidateCard key={c.address} candidate={c} result={result} />
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {result.possibleCluster.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-amber-500" />
-                {result.possibleCluster.length} Possible Candidate{result.possibleCluster.length !== 1 && "s"}
-              </CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6 space-y-2">
-              {result.possibleCluster.map((c) => (
-                <CandidateCard key={c.address} candidate={c} result={result} />
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {result.strongCluster.length === 0 && result.possibleCluster.length === 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                {result.degraded ? (
-                  <>
-                    <AlertTriangle className="h-5 w-5 text-amber-500" />
-                    No Cluster in Available Data
-                  </>
-                ) : (
-                  <>
-                    <Shield className="h-5 w-5 text-green-500" />
-                    No Cluster Found
-                  </>
-                )}
-              </CardTitle>
-              <CardDescription className="text-xs">
-                {result.degraded
-                  ? "The scan was incomplete, so this is inconclusive rather than clean."
-                  : "No wallets scored high enough to be flagged."}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
-
-        </div>
-        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
-        <ResearchDisclaimer />
-        </div>
-        </div>
-      </div>
-
+      <p className="mb-3 text-xs text-muted-foreground">Shared scan · read-only</p>
+      <ResultView result={result} scannedAt={scannedAt} />
       <AppFooter />
     </div>
   );
