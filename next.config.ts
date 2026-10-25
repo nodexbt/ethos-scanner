@@ -1,27 +1,32 @@
 import type { NextConfig } from "next";
+import type { Redirect } from "next/dist/lib/load-custom-routes";
 
 const nextConfig: NextConfig = {
   async redirects() {
     // Old in-page tab addresses (/?tab=… and /scanner?tab=…) now have pages.
-    const legacyTabs = ["/", "/scanner"].flatMap((source) => [
+    // Temporary (307), so browsers don't cache them for good the way the
+    // first /network redirect was. The query string is passed through, so
+    // an old cached /network → /scanner?tab=network ends at
+    // /network?tab=network rather than looping.
+    const legacyTabs: Redirect[] = ["/", "/scanner"].flatMap((source): Redirect[] => [
       {
         source,
-        has: [{ type: "query" as const, key: "tab", value: "network" }],
+        has: [{ type: "query", key: "tab", value: "network" }],
         destination: "/network",
-        permanent: true,
+        permanent: false,
       },
       {
         source,
-        has: [{ type: "query" as const, key: "tab", value: "(?<scope>yours|verified)" }],
+        has: [{ type: "query", key: "tab", value: "(?<scope>yours|verified)" }],
         destination: "/scans?scope=:scope",
-        permanent: true,
+        permanent: false,
       },
       {
         source,
         // Next anchors this as ^…$; the group keeps the alternation anchored.
-        has: [{ type: "query" as const, key: "tab", value: "(scans|all)" }],
+        has: [{ type: "query", key: "tab", value: "(scans|all)" }],
         destination: "/scans",
-        permanent: true,
+        permanent: false,
       },
     ]);
     return [
@@ -30,7 +35,7 @@ const nextConfig: NextConfig = {
       // as the old single page did.
       {
         source: "/",
-        has: [{ type: "query" as const, key: "tab" }],
+        has: [{ type: "query", key: "tab" }],
         destination: "/scanner",
         permanent: true,
       },

@@ -1,91 +1,164 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-import { Activity, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, History, Loader2, Users, Wallet } from "lucide-react";
+import { toast } from "sonner";
+import { Activity, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, History, Loader2, Search, Users, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatTile } from "@/components/ui/stat-tile";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
 import { ResultView } from "@/components/results/result-view";
 import { ShareDialog } from "@/components/results/share-dialog";
 import { LinkCounts } from "@/components/scans/link-counts";
-import { investigationHref, type InvestigationSummary } from "@/components/scans/scans-list";
-import { useScan } from "@/components/scan/scan-provider";
+import { investigationHref, nameOf } from "@/components/scans/scans-list";
+import { requestFor, useScan, type ScanRequest } from "@/components/scan/scan-provider";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
+import type { ResolvedScanTarget, ScanIdentifier } from "@/lib/scan-target";
+import { downloadEvidence, type TwitterEvidence } from "@/lib/evidence-export";
+import { scanPath } from "@/lib/utils";
 
-function investigationIdFor(result: ClusterScanResult): string {
-  return result.targetProfileId != null ? `scan-p${result.targetProfileId}` : `scan-${result.target.toLowerCase()}`;
+type RouteScan =
+  | { status: "loading" }
+  | { status: "loaded"; investigationId: string; result: ClusterScanResult; scannedAt: string | null; twitterEvidence: TwitterEvidence | null }
+  | { status: "missing"; investigationId: string; target: ResolvedScanTarget }
+  | { status: "error"; message: string };
+
+/**
+ * The saved scan for this page's address. The route is the only thing that
+ * decides which result is shown: a new address starts a new load, and the
+ * old load is aborted rather than raced. It reloads when a scan of the same
+ * investigation finishes (`reloadFor`).
+ */
+function useRouteScan(target: ScanIdentifier | undefined, reloadFor: Record<string, number>): RouteScan | null {
+  const [state, setState] = useState<{ key: string; scan: RouteScan } | null>(null);
+  const key = target ? `${target.kind}:${target.value}` : "";
+  const loadedId = state?.key === key && "investigationId" in state.scan ? state.scan.investigationId : null;
+  const reloadKey = loadedId ? reloadFor[loadedId] ?? 0 : 0;
+
+  useEffect(() => {
+    if (!target) return;
+    const ctl = new AbortController();
+    const set = (scan: RouteScan) => {
+      if (!ctl.signal.aborted) setState({ key, scan });
+    };
+    const resolve = async (): Promise<ResolvedScanTarget> => {
+      const r = await fetch(`/api/resolve?kind=${target.kind}&value=${encodeURIComponent(target.value)}`, { signal: ctl.signal });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "No Ethos profile or valid address found");
+      return r.json();
+    };
+    (async () => {
+      try {
+        // A profile id names its saved scan directly; everything else resolves first.
+        let resolved: ResolvedScanTarget | null = null;
+        let id = target.kind === "profileId" ? `scan-p${target.value}` : null;
+        if (!id) {
+          resolved = await resolve();
+          id = resolved.investigationId;
+        }
+        const resp = await fetch(`/api/investigations/${id}`, { signal: ctl.signal });
+        if (resp.ok) {
+          const data = await resp.json();
+          const result = data.clusterResult as ClusterScanResult;
+          set({ status: "loaded", investigationId: id, result, scannedAt: data.updatedAt ?? null, twitterEvidence: data.twitterEvidence ?? null });
+          // Show the handle address without a navigation (no remount, no refetch).
+          const canonical = scanPath({ username: result.targetEthos?.username, profileId: result.targetProfileId, wallet: result.target });
+          if (!ctl.signal.aborted && window.location.pathname !== canonical) window.history.replaceState(null, "", canonical);
+          return;
+        }
+        set({ status: "missing", investigationId: id, target: resolved ?? (await resolve()) });
+      } catch (e) {
+        set({ status: "error", message: (e as Error).message });
+      }
+    })();
+    return () => ctl.abort();
+    // `target` is captured through `key`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, reloadKey]);
+
+  if (!target) return null;
+  // A new address shows loading until its own load lands; the old result never leaks.
+  return state?.key === key ? state.scan : { status: "loading" };
+}
+
+/** Text for the scan box on a deep link. */
+function labelFor(target: ScanIdentifier | undefined): string {
+  if (!target) return "";
+  return target.kind === "handle" ? `@${target.value}` : target.kind === "address" ? target.value : "";
 }
 
 /**
- * The scanner: input, live scan log, and either the result or the start
- * screen. `target` comes from a /scan/... deep link.
+ * The scanner. With a target (a /scan/... address) it shows that profile's
+ * saved result, or the running scan of it; without one, the start screen.
  */
-export function ScannerView({ target }: { target?: string }) {
+export function ScannerView({ target }: { target?: ScanIdentifier }) {
   const scan = useScan();
   const pathname = usePathname();
   const { data: session } = useSession();
   // @ts-expect-error - isAdmin field added in session callback
   const isAdmin = Boolean(session?.user?.isAdmin);
+  const [input, setInput] = useState(() => labelFor(target));
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const route = useRouteScan(target, scan.finished);
 
-  // Open a deep link unless it is already the result on screen. The ref
-  // keeps re-renders during the load from requesting it again. A running
-  // scan doesn't block this: it continues in the background.
-  const { openFromUrl, resultPath } = scan;
-  const requestedPath = useRef<string | null>(null);
+  const investigationId = route && "investigationId" in route ? route.investigationId : null;
+  const jobHere = !!scan.job && !!investigationId && scan.job.investigationId === investigationId;
+  const failureHere = scan.failure && scan.failure.investigationId === investigationId ? scan.failure.message : null;
+
+  // Tell the shell what is on screen: for the header indicator, the Scanner
+  // tab's return address, and whether a finished scan needs a toast.
+  const { setViewing } = scan;
   useEffect(() => {
-    if (!target) return;
-    // Already on screen (e.g. reached by typing the handle): remember that,
-    // so clearing the result (logo click) doesn't read as a fresh visit
-    // and reload the scan while the app navigates away.
-    if (pathname === resultPath) {
-      requestedPath.current = pathname;
-      return;
-    }
-    if (requestedPath.current === pathname) return;
-    requestedPath.current = pathname;
-    void openFromUrl(target);
-  }, [target, pathname, resultPath, openFromUrl]);
+    setViewing({ investigationId, path: pathname });
+  }, [setViewing, investigationId, pathname]);
+  useEffect(() => () => setViewing(null), [setViewing]);
 
-  // The running scan is shown only while it owns the screen.
-  const scanOnScreen = scan.scanning && scan.screenIsScan;
-  const result = scan.result;
-  const hasResults = result !== null && !scanOnScreen;
-  const active = scanOnScreen || hasResults || scan.loadingCached;
+  const submit = async (value: string) => {
+    setSubmitting(true);
+    setInputError(null);
+    const err = await scan.openOrScan(value);
+    setSubmitting(false);
+    if (err) setInputError(err);
+  };
+  const start = async (req: ScanRequest) => {
+    const err = await scan.startScan(req);
+    if (err) toast.error(err);
+  };
+
+  const loaded = route?.status === "loaded" && !jobHere ? route : null;
+  const finishedLog = scan.lastLog && scan.lastLog.investigationId === investigationId ? scan.lastLog.logs : null;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="space-y-4">
         <ScanInput
-          walletInput={scan.input}
-          setWalletInput={scan.setInput}
-          scanning={scanOnScreen}
-          error={scan.error}
+          walletInput={input}
+          setWalletInput={setInput}
+          scanning={submitting || jobHere}
+          error={inputError}
           onSubmit={(e) => {
             e.preventDefault();
-            void scan.scanInput(scan.input);
+            void submit(input);
           }}
-          compact={active}
+          compact={!!target}
         />
-        {/* Expanded while running; collapses once the scan completes so
-            results sit directly under the input. */}
-        <ScanLog
-          key={scanOnScreen ? "live" : "done"}
-          logs={scan.screenIsScan ? scan.logs : []}
-          scanning={scanOnScreen}
-          progress={scan.progress}
-          defaultExpanded={scanOnScreen}
-        />
+        {jobHere ? (
+          <ScanLog key="live" logs={scan.job!.logs} scanning progress={scan.job!.progress} defaultExpanded />
+        ) : (
+          finishedLog && <ScanLog key="done" logs={finishedLog} scanning={false} progress={null} defaultExpanded={false} />
+        )}
       </div>
 
       <div className="space-y-4">
-        {scanOnScreen && scan.logs.length === 0 && (
+        {jobHere && scan.job!.logs.length === 0 && (
           <Card>
             <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground" role="status">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -94,43 +167,67 @@ export function ScannerView({ target }: { target?: string }) {
           </Card>
         )}
 
-        {!scanOnScreen && !hasResults && scan.error && (
+        {!jobHere && (failureHere || route?.status === "error") && (
           <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-500" />
-            <span>{scan.error}</span>
+            <span>{failureHere ?? (route?.status === "error" ? route.message : "")}</span>
           </div>
         )}
 
-        {scan.loadingCached && !result && <ResultSkeleton />}
+        {!jobHere && route?.status === "loading" && <ResultSkeleton />}
 
-        {hasResults && result && (
+        {!jobHere && route?.status === "missing" && (
+          <NotScannedYet target={route.target} busy={!!scan.job} onScan={() => void start(requestFor(route.target))} />
+        )}
+
+        {loaded && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
             <ResultView
-              result={result}
-              scannedAt={scan.scannedAt}
-              scanning={scanOnScreen}
+              result={loaded.result}
+              scannedAt={loaded.scannedAt}
               isAdmin={isAdmin}
-              saveNotice={scan.saveNotice}
-              investigationId={scan.investigationId}
+              investigationId={loaded.investigationId}
               actions={{
-                onRescan: () => void scan.rescan(result.target),
+                onRescan: () =>
+                  void start({
+                    primaryWallet: loaded.result.targetWallets?.[0] ?? loaded.result.target,
+                    investigationId: loaded.investigationId,
+                    path: pathname,
+                    label: loaded.result.targetEthos?.username ? `@${loaded.result.targetEthos.username}` : loaded.result.target,
+                  }),
                 onShare: () => setShareOpen(true),
-                onExport: () => void scan.exportEvidence(),
+                onExport: () => {
+                  downloadEvidence(loaded.result, loaded.twitterEvidence);
+                  toast.success("Evidence file downloaded");
+                },
               }}
-              onScanProfile={(input) => void scan.scanInput(input)}
+              onScanProfile={(value) => void submit(value)}
             />
-            <ShareDialog
-              investigationId={scan.investigationId || investigationIdFor(result)}
-              open={shareOpen}
-              onOpenChange={setShareOpen}
-              onChanged={() => scan.notifySavedChanged()}
-            />
+            <ShareDialog investigationId={loaded.investigationId} open={shareOpen} onOpenChange={setShareOpen} />
           </motion.div>
         )}
 
-        {!active && !scan.error && <StartScreen savedVersion={scan.savedVersion} />}
+        {!target && <StartScreen />}
       </div>
     </div>
+  );
+}
+
+function NotScannedYet({ target, busy, onScan }: { target: ResolvedScanTarget; busy: boolean; onScan: () => void }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-center gap-4 p-5">
+        {target.ethos && <AvatarImg src={target.ethos.avatarUrl} name={target.ethos.displayName} className="h-12 w-12 shrink-0 rounded-full" />}
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">{target.ethos?.displayName ?? target.primaryWallet}</div>
+          <p className="text-sm text-muted-foreground">No saved scan yet. A scan takes up to a couple of minutes and uses one of your daily scans.</p>
+        </div>
+        <Button onClick={onScan} disabled={busy} title={busy ? "Another scan of yours is still running" : undefined}>
+          <Search className="h-4 w-4" />
+          Scan now
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -156,33 +253,19 @@ function ResultSkeleton() {
   );
 }
 
-interface StartData {
-  recent: InvestigationSummary[];
-  total: number;
-  stats: { strongSum: number; possibleSum: number } | null;
-  mine: number;
-}
-
 /** Shown before any scan: totals, recent scans and the explainer. */
-function StartScreen({ savedVersion }: { savedVersion: number }) {
-  const [data, setData] = useState<StartData | null>(null);
+function StartScreen() {
+  const { summary, savedVersion } = useScan();
+  const [mine, setMine] = useState<number | null>(null);
   /** null = default: open until the user has scans of their own. */
   const [howChoice, setHowChoice] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      fetch("/api/investigations?limit=5&stats=1").then((r) => (r.ok ? r.json() : null)),
-      fetch("/api/investigations?limit=1&scope=mine").then((r) => (r.ok ? r.json() : null)),
-    ])
-      .then(([all, mine]) => {
-        if (cancelled) return;
-        setData({
-          recent: (all?.rows as InvestigationSummary[]) ?? [],
-          total: Number(all?.total) || 0,
-          stats: all?.stats ?? null,
-          mine: Number(mine?.total) || 0,
-        });
+    fetch("/api/investigations?limit=1&scope=mine")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setMine(Number(d.total) || 0);
       })
       .catch(() => {});
     return () => {
@@ -190,29 +273,14 @@ function StartScreen({ savedVersion }: { savedVersion: number }) {
     };
   }, [savedVersion]);
 
-  const howOpen = howChoice ?? (data !== null && data.mine === 0);
-  const stats = [
-    { icon: Activity, label: "Profiles scanned", value: data?.total, iconClass: "" },
-    { icon: AlertTriangle, label: "Strong links", value: data?.stats?.strongSum, iconClass: "text-red-600 dark:text-red-500" },
-    { icon: Users, label: "Possible links", value: data?.stats?.possibleSum, iconClass: "text-amber-600 dark:text-amber-500" },
-  ];
+  const howOpen = howChoice ?? mine === 0;
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
-        {stats.map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <stat.icon className={`h-3.5 w-3.5 shrink-0 ${stat.iconClass}`} />
-                {stat.label}
-              </div>
-              <div className="mt-1 text-xl font-bold tabular-nums sm:text-2xl">
-                {stat.value != null ? stat.value.toLocaleString() : <Skeleton className="h-7 w-16" />}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        <StatTile icon={Activity} label="Profiles scanned" value={summary?.total} />
+        <StatTile icon={AlertTriangle} label="Strong links" value={summary?.stats?.strongSum} iconClass="text-red-600 dark:text-red-500" />
+        <StatTile icon={Users} label="Possible links" value={summary?.stats?.possibleSum} iconClass="text-amber-600 dark:text-amber-500" />
       </div>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -228,10 +296,9 @@ function StartScreen({ savedVersion }: { savedVersion: number }) {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {!data &&
-              [0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-[54px] w-full" />)}
-            {data?.recent.length === 0 && <p className="text-sm text-muted-foreground">No scans yet.</p>}
-            {data?.recent.map((inv) => (
+            {!summary && [0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-[54px] w-full" />)}
+            {summary?.recent.length === 0 && <p className="text-sm text-muted-foreground">No scans yet.</p>}
+            {summary?.recent.map((inv) => (
               <Link
                 key={inv.id}
                 href={investigationHref(inv)}
@@ -245,9 +312,7 @@ function StartScreen({ savedVersion }: { savedVersion: number }) {
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">
-                    {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
-                  </span>
+                  <span className="block truncate text-sm font-medium">{nameOf(inv)}</span>
                   <span className="block truncate font-mono text-[11px] text-muted-foreground">{inv.target}</span>
                 </span>
                 <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} className="shrink-0" />

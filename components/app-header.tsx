@@ -12,12 +12,6 @@ import { NotificationsBell } from "@/components/notifications-bell";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface AppHeaderProps {
-  /**
-   * When present, the ethos.tools wordmark renders as a <button> that invokes
-   * this handler instead of a <Link>. The home page uses it to reset in-page
-   * state; other pages leave it undefined so the logo just links back to "/".
-   */
-  onLogoClick?: () => void;
   /** Primary navigation (tabs) rendered inline between the logo and the
       account controls. Wraps to its own row on narrow screens. */
   nav?: React.ReactNode;
@@ -32,7 +26,7 @@ interface Quota {
   unlimited: boolean;
 }
 
-export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
+export function AppHeader({ nav, quotaKey = 0 }: AppHeaderProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const [quota, setQuota] = useState<Quota | null>(null);
@@ -77,15 +71,9 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
 
   return (
     <div className="flex items-center gap-3 pb-4 flex-wrap">
-      {onLogoClick ? (
-        <button onClick={onLogoClick} className={logoClasses}>
-          {logoContent}
-        </button>
-      ) : (
-        <Link href="/scanner" className={logoClasses}>
-          {logoContent}
-        </Link>
-      )}
+      <Link href="/scanner" className={logoClasses}>
+        {logoContent}
+      </Link>
 
       {nav && (
         // Takes the remaining width on large screens and scrolls inside it,

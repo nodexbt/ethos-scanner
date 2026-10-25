@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Network, Users, GitBranch, Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatTile } from "@/components/ui/stat-tile";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { formatRelativeTime, scanHref } from "@/lib/utils";
@@ -89,15 +90,7 @@ export function NetworkView() {
               { icon: GitBranch, label: "Links in the graph", value: data.totals.edges },
               { icon: AlertTriangle, label: "Strong links", value: data.totals.strongEdges, cls: "text-red-600 dark:text-red-500" },
             ].map((t) => (
-              <Card key={t.label}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <t.icon className={`h-3.5 w-3.5 ${t.cls ?? ""}`} />
-                    {t.label}
-                  </div>
-                  <div className="text-2xl font-bold mt-1 tabular-nums">{t.value.toLocaleString()}</div>
-                </CardContent>
-              </Card>
+              <StatTile key={t.label} icon={t.icon} label={t.label} value={t.value} iconClass={t.cls} />
             ))}
           </div>
 

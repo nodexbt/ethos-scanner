@@ -45,3 +45,30 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(now - 95 * 86_400_000)).toBe("3 months ago");
   });
 });
+
+describe("scan addresses", () => {
+  it("prefers the handle, then the profile id, then the wallet", async () => {
+    const { scanPath, pathForInvestigationId, investigationIdFor } = await import("@/lib/utils");
+    expect(scanPath({ username: "g3rmxyz", profileId: 3708, wallet: "0xAB" })).toBe("/scan/x/g3rmxyz");
+    expect(scanPath({ username: null, profileId: 3708, wallet: "0xAB" })).toBe("/scan/p/3708");
+    expect(scanPath({ wallet: "0xAB" })).toBe("/scan/0xab");
+    expect(pathForInvestigationId("scan-p3708")).toBe("/scan/p/3708");
+    expect(pathForInvestigationId("scan-0xabc")).toBe("/scan/0xabc");
+    expect(investigationIdFor(3708, "0xAB")).toBe("scan-p3708");
+    expect(investigationIdFor(null, "0xAB")).toBe("scan-0xab");
+  });
+});
+
+describe("buildEvidencePrompt", () => {
+  it("adds a Social Evidence section only when stored X posts exist", async () => {
+    const { buildEvidencePrompt } = await import("@/lib/evidence-export");
+    const result = {
+      target: "0x1", targetEthos: null, networkStats: { Base: { txCount: 3, directWallets: 0 } },
+      strongCluster: [], possibleCluster: [],
+    } as unknown as Parameters<typeof buildEvidencePrompt>[0];
+    expect(buildEvidencePrompt(result, null)).not.toContain("Social Evidence");
+    const withPosts = buildEvidencePrompt(result, { "0x2": { tweets: [{ url: "https://x.com/a/1", author: { userName: "a" } }] } });
+    expect(withPosts).toContain("## Social Evidence");
+    expect(withPosts).toContain("0x2: 1 post by @a");
+  });
+});

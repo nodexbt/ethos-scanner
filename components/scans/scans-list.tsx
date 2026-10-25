@@ -12,6 +12,7 @@ import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { Plate } from "@/components/ui/plate";
 import { LinkCounts } from "./link-counts";
+import { pathForInvestigationId } from "@/lib/utils";
 
 export interface InvestigationSummary {
   id: string;
@@ -28,12 +29,21 @@ export interface InvestigationSummary {
   lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
 }
 
-/** Address of a saved scan: profile scans by id (the scanner then switches
-    to the handle), raw-wallet scans by address. */
-export function investigationHref(inv: { id: string; target: string }): string {
-  const profileId = inv.id.match(/^scan-p(\d+)$/)?.[1];
-  return profileId ? `/scan/p/${profileId}` : `/scan/${inv.target.toLowerCase()}`;
+/** Address of a saved scan (by profile id; the page then shows the handle). */
+export function investigationHref(inv: { id: string }): string {
+  return pathForInvestigationId(inv.id);
 }
+
+/** Display name for a saved scan, falling back to the shortened address. */
+export function nameOf(inv: { targetName: string | null; target: string }): string {
+  return inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`;
+}
+
+const EMPTY_LABEL: Record<ScanScope, string> = {
+  all: "No scans yet. Run one to get started.",
+  yours: "You haven't run any scans yet.",
+  verified: "No human-verified profiles scanned yet.",
+};
 
 export const DEFAULT_SORT = "default";
 export const DEFAULT_SCORE_BAND = "any";
@@ -133,7 +143,6 @@ interface ScansListProps {
   scope: ScanScope;
   onScopeChange: (scope: ScanScope) => void;
   counts: Record<ScanScope, number>;
-  emptyLabel: string;
   search: string;
   onSearchChange: (value: string) => void;
   // Server-side sort/filter controls (shared across tabs).
@@ -147,13 +156,11 @@ interface ScansListProps {
   canDelete: (inv: InvestigationSummary) => boolean;
   /** Deletes the scan; throws on failure so the dialog can show it. */
   onDelete: (id: string) => Promise<void>;
-  /** Optional server-side pagination knobs — when provided, the list
-   * renders a Load-more button that calls onLoadMore until investigations
-   * reaches totalCount. */
-  totalCount?: number;
-  onLoadMore?: () => void;
-  loadingMore?: boolean;
-  loadMoreBatchSize?: number;
+  /** Server-side pagination: Load more appends until rows reach totalCount. */
+  totalCount: number;
+  onLoadMore: () => void;
+  loadingMore: boolean;
+  loadMoreBatchSize: number;
 }
 
 export function ScansList({
@@ -161,7 +168,6 @@ export function ScansList({
   scope,
   onScopeChange,
   counts,
-  emptyLabel,
   search,
   onSearchChange,
   sortValue,
@@ -176,19 +182,16 @@ export function ScansList({
   totalCount,
   onLoadMore,
   loadingMore,
-  loadMoreBatchSize = 50,
+  loadMoreBatchSize,
 }: ScansListProps) {
   // Search/sort/filter are all applied server-side now, so this list renders
   // exactly the rows it was given for the current query.
-  const displayedTotal = totalCount ?? investigations.length;
-  const hasRemoteMore =
-    onLoadMore != null && totalCount != null && investigations.length < totalCount;
+  const displayedTotal = totalCount;
+  const hasRemoteMore = investigations.length < totalCount;
   const filtersActive = flaggedOnly || scoreBand !== DEFAULT_SCORE_BAND || search.trim() !== "";
   // The scan awaiting delete confirmation; kept while the dialog animates out.
   const [pendingDelete, setPendingDelete] = useState<InvestigationSummary | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const nameOf = (inv: InvestigationSummary) =>
-    inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`;
 
   return (
     <div className="space-y-4">
@@ -235,7 +238,7 @@ export function ScansList({
         <div className="flex h-64 items-center justify-center">
           <Plate className="flex flex-col items-center gap-2 px-6 py-5 text-sm text-muted-foreground">
             <FolderOpen className="h-8 w-8" />
-            <p>{filtersActive ? "No scans match these filters." : emptyLabel}</p>
+            <p>{filtersActive ? "No scans match these filters." : EMPTY_LABEL[scope]}</p>
           </Plate>
         </div>
       ) : (
@@ -271,7 +274,7 @@ export function ScansList({
                 className="flex-1 min-w-0 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
               >
                 <div className="font-medium truncate">
-                  {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
+                  {nameOf(inv)}
                 </div>
                 <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
                   {inv.target}
@@ -340,12 +343,12 @@ export function ScansList({
           ))}
           {hasRemoteMore && (
             <button
-              onClick={() => onLoadMore?.()}
+              onClick={onLoadMore}
               disabled={loadingMore}
               className="mt-1 mx-auto text-xs text-muted-foreground hover:text-foreground bg-card border border-border rounded-md px-3 py-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-2"
             >
               {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
-              Load {Math.min(loadMoreBatchSize, (totalCount ?? 0) - investigations.length)} more · {(totalCount ?? 0) - investigations.length} remaining
+              Load {Math.min(loadMoreBatchSize, totalCount - investigations.length)} more · {totalCount - investigations.length} remaining
             </button>
           )}
         </div>

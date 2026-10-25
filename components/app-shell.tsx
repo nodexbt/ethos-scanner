@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { FolderOpen, Loader2, Network, Search } from "lucide-react";
@@ -40,8 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function Frame({ children }: { children: React.ReactNode }) {
-  const scan = useScan();
-  const router = useRouter();
+  const { quotaKey } = useScan();
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6 lg:p-8">
       <a
@@ -50,14 +50,8 @@ function Frame({ children }: { children: React.ReactNode }) {
       >
         Skip to content
       </a>
-      <AppHeader
-        quotaKey={scan.quotaKey}
-        nav={<NavTabs />}
-        onLogoClick={() => {
-          scan.reset();
-          router.push("/scanner");
-        }}
-      />
+      {/* No onLogoClick: the logo is a plain link to /scanner. */}
+      <AppHeader quotaKey={quotaKey} nav={<NavTabs />} />
       {/* The root layout owns <main>; this is the skip-link target. */}
       <div id="main" tabIndex={-1} className="outline-none">
         {children}
@@ -67,53 +61,43 @@ function Frame({ children }: { children: React.ReactNode }) {
   );
 }
 
+const isScannerPath = (p: string) => p === "/scanner" || p.startsWith("/scan/");
+
 function NavTabs() {
   const pathname = usePathname() ?? "";
-  const scan = useScan();
-  const [scanTotal, setScanTotal] = useState(0);
+  const { summary, job, viewing } = useScan();
 
-  // Total for the Scans tab badge; refreshed whenever saved scans change.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/investigations?limit=1")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d) setScanTotal(Number(d.total) || 0);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [scan.savedVersion]);
+  // The Scanner tab returns to the last scan address shown, not an empty
+  // scanner. Derived-state update during render, the React-sanctioned way.
+  const [lastScannerPath, setLastScannerPath] = useState("/scanner");
+  if (viewing && viewing.path !== lastScannerPath) setLastScannerPath(viewing.path);
 
-  const onScanner = pathname === "/scanner" || pathname.startsWith("/scan/");
-  // Return to the result on screen rather than an empty scanner.
-  const scannerHref = scan.resultPath ?? "/scanner";
+  const onScanner = isScannerPath(pathname);
+  const jobOnScreen = !!job && viewing?.investigationId === job.investigationId;
 
   return (
     <nav aria-label="Main" className="flex items-center gap-2">
       <div className="inline-flex h-10 items-center gap-1 rounded-lg border border-border bg-card/70 p-1 backdrop-blur-sm">
-        <SegmentedLink href={scannerHref} icon={Search} active={onScanner}>
+        <SegmentedLink href={lastScannerPath} icon={Search} active={onScanner}>
           Scanner
         </SegmentedLink>
         <SegmentedLink href="/scans" icon={FolderOpen} active={pathname === "/scans"}>
           Scans
-          <SegmentedCount value={scanTotal} />
+          <SegmentedCount value={summary?.total ?? 0} />
         </SegmentedLink>
         <SegmentedLink href="/network" icon={Network} active={pathname === "/network"}>
           Network
         </SegmentedLink>
       </div>
       {/* A scan running off-screen: elsewhere in the app, or behind another result. */}
-      {scan.scanning && !(onScanner && scan.screenIsScan) && (
-        <button
-          type="button"
-          onClick={scan.showRunningScan}
-          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-border bg-card/70 px-3 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
+      {job && !jobOnScreen && (
+        <Link
+          href={job.path}
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card/70 px-3 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span className="max-w-[12rem] truncate">Scanning {scan.jobLabel || "…"}</span>
-        </button>
+          <span className="max-w-[12rem] truncate">Scanning {job.label || "…"}</span>
+        </Link>
       )}
     </nav>
   );

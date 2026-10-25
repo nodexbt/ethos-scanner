@@ -8,6 +8,7 @@ import {
 } from "./ethos";
 import { getSupabase } from "./db/supabase";
 import { getContractFlags } from "./wallet-classify";
+import { investigationIdFor } from "./utils";
 
 /** Most profiles have 1-2 attested wallets; cap the scan fan-out so a
     profile with many attestations can't multiply Alchemy volume
@@ -36,12 +37,7 @@ export interface ResolvedScanTarget {
   };
 }
 
-export function investigationIdFor(
-  profileId: number | null,
-  primaryWallet: string
-): string {
-  return profileId !== null ? `scan-p${profileId}` : `scan-${primaryWallet}`;
-}
+export { investigationIdFor } from "./utils";
 
 /**
  * Normalize free-form scan input to a lookup identifier:
@@ -198,8 +194,11 @@ export async function resolveScanTarget(
   input: string
 ): Promise<ResolvedScanTarget | null> {
   const identifier = parseScanInput(input);
-  if (!identifier) return null;
+  return identifier ? resolveIdentifier(identifier) : null;
+}
 
+/** Resolve an already-classified identifier (routes know the kind). */
+export async function resolveIdentifier(identifier: ScanIdentifier): Promise<ResolvedScanTarget | null> {
   let profile: EthosProfile | null = null;
   try {
     profile =

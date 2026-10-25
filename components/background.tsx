@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
+import { useReducedMotion } from "framer-motion";
 import { useTheme } from "@/components/theme-provider";
 
 // Dynamically import Dither so WebGL/three.js code never runs server-side
@@ -21,12 +22,6 @@ function getCoarsePointerSnapshot(): boolean {
 function getCoarsePointerServerSnapshot(): boolean {
   return false;
 }
-function subscribeToReducedMotion(callback: () => void): () => void {
-  const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-  mql.addEventListener("change", callback);
-  return () => mql.removeEventListener("change", callback);
-}
-const getReducedMotionSnapshot = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function Background() {
   const { data: session, status } = useSession();
@@ -36,7 +31,7 @@ export function Background() {
     getCoarsePointerSnapshot,
     getCoarsePointerServerSnapshot
   );
-  const reducedMotion = useSyncExternalStore(subscribeToReducedMotion, getReducedMotionSnapshot, getCoarsePointerServerSnapshot);
+  const reducedMotion = Boolean(useReducedMotion());
 
   if (status === "loading") {
     return null;

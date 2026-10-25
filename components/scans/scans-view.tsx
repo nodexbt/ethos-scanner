@@ -18,11 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Plate } from "@/components/ui/plate";
 
 const PAGE_SIZE = 25;
-const EMPTY_LABEL: Record<ScanScope, string> = {
-  all: "No scans yet. Run one to get started.",
-  yours: "You haven't run any scans yet.",
-  verified: "No human-verified profiles scanned yet.",
-};
+const SCOPES: ScanScope[] = ["all", "yours", "verified"];
 
 /** ?scope=mine|verified; "yours" is accepted for old links. */
 function scopeFromParam(v: string | null): ScanScope {
@@ -36,7 +32,7 @@ export function ScansView() {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const scan = useScan();
+  const { savedVersion, notifySavedChanged, viewing } = useScan();
   const { data: session } = useSession();
   // @ts-expect-error - ethos field added in session callback
   const myProfileId = (session?.user?.ethos?.profileId as number | undefined) ?? null;
@@ -51,9 +47,12 @@ export function ScansView() {
   const [scoreBand, setScoreBand] = useState(DEFAULT_SCORE_BAND);
 
   const [rows, setRows] = useState<InvestigationSummary[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [counts, setCounts] = useState<Record<ScanScope, number>>({ all: 0, yours: 0, verified: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  // Aborted whenever the query changes, so a late page can't land in a new list.
+  const queryCtl = useRef<AbortController | null>(null);
   const loadedCount = useRef(0);
 
   useEffect(() => {
@@ -62,81 +61,69 @@ export function ScansView() {
   }, [search]);
 
   const fetchPage = useCallback(
-    async (sc: ScanScope, offset: number, limit: number) => {
+    async (sc: ScanScope, offset: number, limit: number, signal?: AbortSignal) => {
       const q = listControlParams({ search: debouncedSearch, sortValue, flaggedOnly, scoreBand });
       q.set("limit", String(limit));
       q.set("offset", String(offset));
       if (sc === "yours") q.set("scope", "mine");
       const base = sc === "verified" ? "/api/investigations/verified" : "/api/investigations";
-      const resp = await fetch(`${base}?${q}`);
-      if (!resp.ok) return null;
+      const resp = await fetch(`${base}?${q}`, { signal });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      if (!data || !Array.isArray(data.rows)) return null;
-      return { rows: data.rows as InvestigationSummary[], total: Number(data.total) || 0 };
+      return { rows: (data.rows ?? []) as InvestigationSummary[], total: Number(data.total) || 0 };
     },
     [debouncedSearch, sortValue, flaggedOnly, scoreBand]
   );
 
-  // First page of the active scope (or as many rows as were loaded, after
-  // a delete or share). The active scope's count comes from that page; the
-  // other two are refetched only when the filters or saved data change.
-  const queryKey = `${scope}|${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}`;
-  const filtersKey = `${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}|${scan.savedVersion}`;
-  const currentQuery = useRef(queryKey);
+  // Counts for the scope chips: when filters or saved scans change, not on a scope switch.
   useEffect(() => {
-    currentQuery.current = queryKey;
-  }, [queryKey]);
-  const lastQuery = useRef("");
-  const lastCountsKey = useRef("");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
+    const ctl = new AbortController();
+    SCOPES.forEach((sc) => {
+      fetchPage(sc, 0, 1, ctl.signal)
+        .then((page) => setCounts((c) => ({ ...c, [sc]: page.total })))
+        .catch(() => {});
+    });
+    return () => ctl.abort();
+  }, [fetchPage, savedVersion]);
 
+  // Rows for the open scope. After a delete or a finished scan, reload as
+  // many rows as were showing so the user keeps their place.
+  const lastQuery = useRef("");
   useEffect(() => {
-    let cancelled = false;
-    const sameQuery = queryKey === lastQuery.current;
-    lastQuery.current = queryKey;
+    const ctl = new AbortController();
+    queryCtl.current = ctl;
+    const query = `${scope}|${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}`;
+    const sameQuery = query === lastQuery.current;
+    lastQuery.current = query;
     const limit = sameQuery ? Math.min(200, Math.max(PAGE_SIZE, Math.ceil(loadedCount.current / PAGE_SIZE) * PAGE_SIZE)) : PAGE_SIZE;
-    // Keep the current rows on screen while a new query loads, so the
-    // search box (and its focus) stays mounted.
-    fetchPage(scope, 0, limit)
+    // The current rows stay on screen while this loads, so the search box keeps focus.
+    fetchPage(scope, 0, limit, ctl.signal)
       .then((page) => {
-        if (cancelled) return;
-        if (!page) throw new Error("load failed");
         setRows(page.rows);
-        setTotal(page.total);
         setCounts((c) => ({ ...c, [scope]: page.total }));
         setLoadError(null);
         loadedCount.current = page.rows.length;
       })
       .catch(() => {
-        if (!cancelled) setLoadError("Couldn't load scans. Check your connection and try again.");
+        if (!ctl.signal.aborted) setLoadError("Couldn't load scans. Check your connection and try again.");
       });
-    if (filtersKey !== lastCountsKey.current) {
-      lastCountsKey.current = filtersKey;
-      (["all", "yours", "verified"] as const)
-        .filter((sc) => sc !== scope)
-        .forEach((sc) => {
-          fetchPage(sc, 0, 1).then((page) => {
-            if (!cancelled && page) setCounts((c) => ({ ...c, [sc]: page.total }));
-          });
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [queryKey, filtersKey, scope, fetchPage, retry]);
+    return () => ctl.abort();
+  }, [scope, debouncedSearch, sortValue, flaggedOnly, scoreBand, fetchPage, savedVersion, retry]);
 
   const loadMore = async () => {
-    if (loadingMore || !rows) return;
-    const startedFor = queryKey;
+    const ctl = queryCtl.current;
+    if (loadingMore || !rows || !ctl) return;
     setLoadingMore(true);
-    const page = await fetchPage(scope, rows.length, PAGE_SIZE);
-    setLoadingMore(false);
-    // Drop a page that belongs to a query the user has since changed.
-    if (!page || currentQuery.current !== startedFor) return;
-    setRows((prev) => [...(prev ?? []), ...page.rows]);
-    setTotal(page.total);
-    loadedCount.current += page.rows.length;
+    try {
+      const page = await fetchPage(scope, rows.length, PAGE_SIZE, ctl.signal);
+      setRows((prev) => [...(prev ?? []), ...page.rows]);
+      setCounts((c) => ({ ...c, [scope]: page.total }));
+      loadedCount.current += page.rows.length;
+    } catch {
+      // Aborted by a query change, or failed: the button stays for another try.
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   const deleteScan = async (id: string) => {
@@ -146,7 +133,7 @@ export function ScansView() {
       throw new Error(data?.error || "Failed to delete scan");
     }
     toast.success("Scan deleted");
-    scan.notifySavedChanged(id);
+    notifySavedChanged();
   };
 
   if (!rows && loadError) {
@@ -164,14 +151,12 @@ export function ScansView() {
 
   if (!rows) return <ScansListSkeleton />;
 
-
   return (
     <ScansList
       investigations={rows}
       scope={scope}
       onScopeChange={(sc) => router.replace(sc === "all" ? pathname : `${pathname}?scope=${sc === "yours" ? "mine" : sc}`, { scroll: false })}
       counts={counts}
-      emptyLabel={EMPTY_LABEL[scope]}
       search={search}
       onSearchChange={setSearch}
       sortValue={sortValue}
@@ -180,10 +165,10 @@ export function ScansView() {
       onFlaggedChange={setFlaggedOnly}
       scoreBand={scoreBand}
       onScoreBandChange={setScoreBand}
-      currentInvestigationId={scan.investigationId}
+      currentInvestigationId={viewing?.investigationId ?? null}
       canDelete={(inv) => isAdmin || inv.ownerProfileId === null || inv.ownerProfileId === myProfileId}
       onDelete={deleteScan}
-      totalCount={total}
+      totalCount={counts[scope]}
       onLoadMore={loadMore}
       loadingMore={loadingMore}
       loadMoreBatchSize={PAGE_SIZE}

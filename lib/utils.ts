@@ -52,10 +52,30 @@ export function formatRelativeTime(input: string | number | Date): string {
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
-/** In-app scan page for a profile: /scan/x/<handle> when known, else
-    /scan/p/<profileId>. Ids never go on the handle route, where an
-    all-digit X handle would be ambiguous. */
+/**
+ * The one rule for a scan's address: /scan/x/<handle> when the handle is
+ * known, else /scan/p/<profileId>, else /scan/<wallet>. Ids never go on the
+ * handle route, where an all-digit X handle would be ambiguous.
+ */
+export function scanPath(p: { username?: string | null; profileId?: number | null; wallet?: string | null }): string {
+  if (p.username) return `/scan/x/${p.username}`;
+  if (p.profileId != null) return `/scan/p/${p.profileId}`;
+  if (p.wallet) return `/scan/${p.wallet.toLowerCase()}`;
+  return "/scanner";
+}
+
+/** scanPath for a profile record that may be missing. */
 export function scanHref(p: { username: string | null; profileId: number } | null | undefined): string {
-  if (!p) return "/scanner";
-  return p.username ? `/scan/x/${p.username}` : `/scan/p/${p.profileId}`;
+  return p ? scanPath(p) : "/scanner";
+}
+
+/** Saved-scan key: `scan-p<profileId>` for profiles, legacy `scan-<address>` otherwise. */
+export function investigationIdFor(profileId: number | null | undefined, wallet: string): string {
+  return profileId != null ? `scan-p${profileId}` : `scan-${wallet.toLowerCase()}`;
+}
+
+/** The address of a saved scan from its key. */
+export function pathForInvestigationId(id: string): string {
+  const profileId = id.match(/^scan-p(\d+)$/)?.[1];
+  return profileId ? `/scan/p/${profileId}` : `/scan/${id.slice("scan-".length)}`;
 }

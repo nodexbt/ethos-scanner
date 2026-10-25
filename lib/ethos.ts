@@ -108,7 +108,7 @@ export async function fetchProfile(
   } else if (isEthereumAddress(identifier)) {
     url = `${ETHOS_API}/user/by/address/${identifier}`;
   } else {
-    url = `${ETHOS_API}/user/by/x/${encodeURIComponent(identifier)}`;
+    return fetchProfileByX(identifier);
   }
 
   const response = await fetch(url, { headers: HEADERS });
