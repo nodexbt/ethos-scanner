@@ -8,11 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
 import { Search, Loader2, AlertTriangle, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { Plate } from "@/components/ui/plate";
 import { LinkCounts } from "./link-counts";
 import { pathForInvestigationId } from "@/lib/utils";
+import { EthosScore } from "@/components/ui/ethos-score";
 
 export interface InvestigationSummary {
   id: string;
@@ -281,26 +281,14 @@ export function ScansList({
                 </div>
                 {/* Phones hide the columns; keep the essentials on a second line. */}
                 <div className="md:hidden mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {inv.score != null && (
-                    <span className="inline-flex items-center gap-0.5 tabular-nums">
-                      {inv.score}
-                      <EthosScoreIcon size={9} className="ml-0.5" />
-                    </span>
-                  )}
+                  {inv.score != null && <EthosScore score={inv.score} />}
                   <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} />
                 </div>
               </Link>
               {/* Fixed-width columns so values line up down the list. */}
               <div className="hidden md:grid md:grid-cols-[4.5rem_10.5rem_9rem_5.5rem] items-center gap-3 text-xs text-muted-foreground shrink-0">
-                <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
-                  {inv.score != null ? (
-                    <>
-                      {inv.score}
-                      <EthosScoreIcon size={9} className="ml-0.5" />
-                    </>
-                  ) : (
-                    "—"
-                  )}
+                <span className="flex items-center">
+                  {inv.score != null ? <EthosScore score={inv.score} /> : "—"}
                 </span>
                 <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} />
                 <span className="flex items-center gap-1.5 min-w-0">

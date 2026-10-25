@@ -7,9 +7,9 @@ import { useSession, signOut } from "next-auth/react";
 import { Shield, ShieldCheck, LogOut } from "lucide-react";
 import DecryptedText from "@/components/ui/decrypted-text";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { NotificationsBell } from "@/components/notifications-bell";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { EthosScore } from "@/components/ui/ethos-score";
 
 interface AppHeaderProps {
   /** Primary navigation (tabs) rendered inline between the logo and the
@@ -103,10 +103,9 @@ export function AppHeader({ nav, quotaKey = 0 }: AppHeaderProps) {
               </span>
               {/* @ts-expect-error - ethos field added in session callback */}
               {session.user?.ethos?.score !== undefined && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[11px] font-semibold tabular-nums">
+                <span className="px-1.5 py-0.5 rounded bg-muted text-[11px]">
                   {/* @ts-expect-error - ethos field added in session callback */}
-                  {session.user.ethos.score}
-                  <EthosScoreIcon size={9} />
+                  <EthosScore score={session.user.ethos.score} />
                 </span>
               )}
             </div>

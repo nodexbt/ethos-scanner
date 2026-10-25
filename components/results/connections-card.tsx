@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Network, Search, ArrowRight, ArrowLeft } from "lucide-react";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { AvatarImg } from "@/components/ui/avatar-img";
+import { EthosScore } from "@/components/ui/ethos-score";
 
 interface Edge {
   sourceProfileId: number;
@@ -85,10 +85,7 @@ export function ConnectionsCard({ investigationId, onScanProfile, scanning }: Co
         {profileLabel(pid)}
         {p?.humanVerified && <HumanVerifiedBadge />}
         {p?.score != null && (
-          <span className="inline-flex items-center gap-0.5 text-muted-foreground font-normal">
-            ({p.score}
-            <EthosScoreIcon size={8} />)
-          </span>
+          <EthosScore score={p.score} size={8} className="font-medium" />
         )}
       </span>
     );

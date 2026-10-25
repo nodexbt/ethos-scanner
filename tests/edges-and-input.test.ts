@@ -72,3 +72,16 @@ describe("buildEvidencePrompt", () => {
     expect(withPosts).toContain("0x2: 1 post by @a");
   });
 });
+
+describe("ethosLevel", () => {
+  it("matches Ethos's level ranges at the boundaries", async () => {
+    const { ethosLevel } = await import("@/lib/ethos-levels");
+    expect(ethosLevel(0).name).toBe("Untrusted");
+    expect(ethosLevel(799).name).toBe("Untrusted");
+    expect(ethosLevel(800).name).toBe("Questionable");
+    expect(ethosLevel(1399).name).toBe("Neutral");
+    expect(ethosLevel(1557).name).toBe("Known");
+    expect(ethosLevel(1914).name).toBe("Reputable");
+    expect(ethosLevel(2800).name).toBe("Renowned");
+  });
+});

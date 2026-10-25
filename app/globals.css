@@ -116,3 +116,20 @@ svg {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Ethos level colours (lib/ethos-levels.ts sets --level-light/--level-dark
+   inline). Without the variables these fall back to the inherited colour
+   and the default border, which is what Neutral wants. */
+.level-text {
+  color: var(--level-light, inherit);
+}
+.dark .level-text {
+  color: var(--level-dark, inherit);
+}
+.level-ring {
+  --tw-ring-color: var(--level-light, hsl(var(--border)));
+}
+.dark .level-ring {
+  --tw-ring-color: var(--level-dark, hsl(var(--border)));
+}
+

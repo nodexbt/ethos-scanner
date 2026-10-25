@@ -7,12 +7,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WatchButton } from "./watch-button";
 import { type ClusterScanResult } from "@/lib/cluster-scanner";
-import { getExplorerAddressUrl, getScoreBorderColor, shortAddress } from "@/lib/scan-utils";
+import { getExplorerAddressUrl, shortAddress } from "@/lib/scan-utils";
 import { formatRelativeTime, safeExternalUrl } from "@/lib/utils";
+import { EthosScore } from "@/components/ui/ethos-score";
+import { levelVars } from "@/lib/ethos-levels";
 
 export interface ResultActions {
   /** Present in the signed-in app; enables Watch and Re-scan. */
@@ -74,7 +75,8 @@ export function ResultHeader({
           <AvatarImg
             src={ethos.avatarUrl}
             name={ethos.displayName}
-            className={`h-14 w-14 sm:h-16 sm:w-16 rounded-full ring-2 shrink-0 text-lg ${getScoreBorderColor(ethos.score)}`}
+            className="level-ring h-14 w-14 sm:h-16 sm:w-16 rounded-full ring-2 shrink-0 text-lg"
+            style={levelVars(ethos.score)}
           />
         ) : (
           <span className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-muted flex items-center justify-center shrink-0">
@@ -95,8 +97,7 @@ export function ResultHeader({
             )}
             {ethos && (
               <span className="inline-flex items-center gap-1">
-                Ethos score <span className="text-foreground font-medium tabular-nums">{ethos.score}</span>
-                <EthosScoreIcon size={10} />
+                Ethos score <EthosScore score={ethos.score} size={10} />
               </span>
             )}
             {scannedAt && <span title={new Date(scannedAt).toLocaleString()}>scanned {formatRelativeTime(scannedAt)}</span>}

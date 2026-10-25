@@ -6,13 +6,13 @@ import { AlertTriangle, Network, Users, GitBranch, Activity } from "lucide-react
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatTile } from "@/components/ui/stat-tile";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { formatRelativeTime, scanHref } from "@/lib/utils";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
 import type { NetworkOverview, NetworkProfile } from "@/lib/db/network";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { Plate } from "@/components/ui/plate";
+import { EthosScore } from "@/components/ui/ethos-score";
 
 function ProfileRow({ p, right }: { p: NetworkProfile; right: React.ReactNode }) {
   return (
@@ -26,9 +26,9 @@ function ProfileRow({ p, right }: { p: NetworkProfile; right: React.ReactNode })
         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
           {p.username ? `@${p.username}` : ""}
           {p.score != null && (
-            <span className="inline-flex items-center gap-0.5">
-              {p.username ? "· " : ""}{p.score}
-              <EthosScoreIcon size={9} />
+            <span className="inline-flex items-center gap-1">
+              {p.username ? "· " : ""}
+              <EthosScore score={p.score} />
             </span>
           )}
         </div>

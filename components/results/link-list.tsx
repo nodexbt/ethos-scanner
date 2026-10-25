@@ -7,7 +7,8 @@ import { AvatarImg } from "@/components/ui/avatar-img";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
 import { type ClusterCandidate, type ClusterScanResult } from "@/lib/cluster-scanner";
-import { describeSignal, getScoreBorderColor, scoringSignals, shortAddress } from "@/lib/scan-utils";
+import { describeSignal, scoringSignals, shortAddress } from "@/lib/scan-utils";
+import { levelVars } from "@/lib/ethos-levels";
 
 /** One linked profile: who, how strongly, and the strongest reason. */
 export const LinkRow = memo(function LinkRow({
@@ -31,7 +32,8 @@ export const LinkRow = memo(function LinkRow({
       <AvatarImg
         src={e?.avatarUrl}
         name={e?.displayName}
-        className={`h-9 w-9 rounded-full shrink-0 ${e ? `ring-2 ${getScoreBorderColor(e.score)}` : ""}`}
+        className={`h-9 w-9 rounded-full shrink-0 ${e ? "level-ring ring-2" : ""}`}
+        style={e ? levelVars(e.score) : undefined}
       />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">

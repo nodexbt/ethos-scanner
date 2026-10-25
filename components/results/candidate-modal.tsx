@@ -5,14 +5,12 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } fr
 import { Button } from "@/components/ui/button";
 import { AvatarImg } from "@/components/ui/avatar-img";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
 import { type ClusterCandidate, type ClusterScanResult, type Signal } from "@/lib/cluster-scanner";
 import {
   describeSignal,
   formatFunderAmount,
   getExplorerAddressUrl,
-  getScoreBorderColor,
   resolveAddressName,
   scoringSignals,
   shortAddress,
@@ -20,6 +18,8 @@ import {
 } from "@/lib/scan-utils";
 import { safeExternalUrl } from "@/lib/utils";
 import { AddressDisplay } from "./address-display";
+import { EthosScore } from "@/components/ui/ethos-score";
+import { levelVars } from "@/lib/ethos-levels";
 
 interface CandidateModalProps {
   /** The candidate to show. Stays the last opened one while `open` is
@@ -70,7 +70,8 @@ export function CandidateModal({ candidate, open, result, onClose, position, onP
           <AvatarImg
             src={e?.avatarUrl}
             name={e?.displayName}
-            className={`h-12 w-12 rounded-full shrink-0 text-base ${e ? `ring-2 ${getScoreBorderColor(e.score)}` : ""}`}
+            className={`h-12 w-12 rounded-full shrink-0 text-base ${e ? "level-ring ring-2" : ""}`}
+            style={e ? levelVars(e.score) : undefined}
           />
           <div className="min-w-0 flex-1">
             <DialogTitle asChild>
@@ -83,8 +84,7 @@ export function CandidateModal({ candidate, open, result, onClose, position, onP
               {e?.username && <span>@{e.username}</span>}
               {e && (
                 <span className="inline-flex items-center gap-1">
-                  Ethos score <span className="text-foreground font-medium">{e.score}</span>
-                  <EthosScoreIcon size={9} />
+                  Ethos score <EthosScore score={e.score} />
                 </span>
               )}
               <span>{candidate.networks.join(", ")}</span>

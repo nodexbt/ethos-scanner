@@ -6,12 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { SiteHeader } from "@/components/site-header";
 import { AppFooter } from "@/components/app-footer";
 import { ResearchDisclaimer } from "@/components/results/research-disclaimer";
-import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { HumanVerifiedBadge } from "@/components/ui/human-verified-badge";
 import { getPublicProfileSummary } from "@/lib/public-profile";
 import { formatRelativeTime, scanHref } from "@/lib/utils";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
 import { AvatarImg } from "@/components/ui/avatar-img";
+import { EthosScore } from "@/components/ui/ethos-score";
 
 // Public, summary-only. Re-rendered at most every 2 minutes per handle so
 // a shared link can't hammer the Ethos API or the database.
@@ -69,8 +69,7 @@ export default async function PublicProfilePage({ params }: Params) {
                 </a>
               )}
               <span className="inline-flex items-center gap-1">
-                Ethos score {profile.score}
-                <EthosScoreIcon size={10} />
+                Ethos score <EthosScore score={profile.score} size={10} />
               </span>
               {scan?.scannedAt && (
                 <span title={new Date(scan.scannedAt).toLocaleString()}>· scanned {formatRelativeTime(scan.scannedAt)}</span>
@@ -137,7 +136,7 @@ export default async function PublicProfilePage({ params }: Params) {
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-sm truncate">{l.displayName}</div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {l.username ? `@${l.username} · ` : ""}Ethos score {l.ethosScore}
+                        {l.username ? `@${l.username} · ` : ""}<EthosScore score={l.ethosScore} />
                       </div>
                     </div>
                     <ConfidencePill confidence={l.confidence} score={l.linkStrength} />

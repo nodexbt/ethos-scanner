@@ -1,15 +1,6 @@
 import { type ClusterScanResult, type ClusterCandidate, type Signal } from "./cluster-scanner";
 import { getAddressLabel } from "./known-addresses";
 
-export function getScoreBorderColor(score: number): string {
-  if (score < 1200) return "ring-yellow-600";
-  if (score < 1400) return "ring-gray-400";
-  if (score < 1600) return "ring-sky-400";
-  if (score < 1800) return "ring-blue-500";
-  if (score < 2000) return "ring-blue-700";
-  return "ring-green-600";
-}
-
 export function getExplorerAddressUrl(address: string, chain?: string): string {
   switch (chain) {
     case "Base": return `https://basescan.org/address/${address}`;

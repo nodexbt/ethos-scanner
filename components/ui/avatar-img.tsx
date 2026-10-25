@@ -17,12 +17,15 @@ export function AvatarImg({
   name,
   title,
   className,
+  style,
 }: {
   src: string | null | undefined;
   alt?: string;
   name?: string | null;
   title?: string;
   className?: string;
+  /** e.g. level colour variables for a `level-ring`. */
+  style?: React.CSSProperties;
 }) {
   // Remember which URL failed rather than a boolean, so a new src (e.g.
   // the card is reused for another profile) gets its own attempt.
@@ -36,6 +39,7 @@ export function AvatarImg({
         role={alt ? "img" : undefined}
         aria-label={alt || undefined}
         title={title}
+        style={style}
         className={cn(
           "inline-flex items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-medium select-none shrink-0",
           className
@@ -52,6 +56,7 @@ export function AvatarImg({
       src={src}
       alt={alt}
       title={title}
+      style={style}
       loading="lazy"
       decoding="async"
       className={className}
