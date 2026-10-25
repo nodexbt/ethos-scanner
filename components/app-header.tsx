@@ -69,9 +69,6 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
         className="text-foreground"
         encryptedClassName="text-muted-foreground"
       />
-      <span className="font-[family-name:var(--font-ibm-plex-mono)] text-sm text-muted-foreground hidden sm:inline">
-        /scanner
-      </span>
     </>
   );
 
