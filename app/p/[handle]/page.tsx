@@ -82,13 +82,13 @@ export default async function PublicProfilePage({ params }: Params) {
           <div className="grid grid-cols-2 gap-3 mt-4">
             <Card>
               <CardContent className="p-4 text-center">
-                <div className={`text-3xl font-bold ${scan.strongCount > 0 ? "text-red-500" : ""}`}>{scan.strongCount}</div>
+                <div className={`text-3xl font-bold ${scan.strongCount > 0 ? "text-red-600 dark:text-red-500" : ""}`}>{scan.strongCount}</div>
                 <div className="text-xs text-muted-foreground">Strong links</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className={`text-3xl font-bold ${scan.possibleCount > 0 ? "text-amber-500" : ""}`}>{scan.possibleCount}</div>
+                <div className={`text-3xl font-bold ${scan.possibleCount > 0 ? "text-amber-600 dark:text-amber-500" : ""}`}>{scan.possibleCount}</div>
                 <div className="text-xs text-muted-foreground">Possible links</div>
               </CardContent>
             </Card>
@@ -96,7 +96,7 @@ export default async function PublicProfilePage({ params }: Params) {
 
           {scan.degraded && (
             <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
               <span>This scan was incomplete: a data source failed while it ran. Treat the result as inconclusive.</span>
             </div>
           )}
@@ -106,7 +106,7 @@ export default async function PublicProfilePage({ params }: Params) {
               <CardTitle className="text-base flex items-center gap-2">
                 {scan.links.length > 0 ? (
                   <>
-                    <AlertTriangle className={`h-5 w-5 ${scan.strongCount > 0 ? "text-red-500" : "text-amber-500"}`} />
+                    <AlertTriangle className={`h-5 w-5 ${scan.strongCount > 0 ? "text-red-600 dark:text-red-500" : "text-amber-600 dark:text-amber-500"}`} />
                     Linked profiles
                   </>
                 ) : (

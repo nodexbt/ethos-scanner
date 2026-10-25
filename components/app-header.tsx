@@ -115,7 +115,7 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
               </span>
               {/* @ts-expect-error - ethos field added in session callback */}
               {session.user?.ethos?.score !== undefined && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] font-semibold tabular-nums">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[11px] font-semibold tabular-nums">
                   {/* @ts-expect-error - ethos field added in session callback */}
                   {session.user.ethos.score}
                   <EthosScoreIcon size={9} />
@@ -126,11 +126,11 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
               <Tooltip>
               <TooltipTrigger asChild>
               <span
-                className={`hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums ${
+                className={`hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium tabular-nums ${
                   !quota.unlimited && quota.remaining === 0
-                    ? "bg-red-500/15 text-red-500"
+                    ? "bg-red-500/15 text-red-600 dark:text-red-500"
                     : !quota.unlimited && quota.remaining <= 5
-                      ? "bg-amber-500/15 text-amber-500"
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-500"
                       : "bg-muted text-muted-foreground"
                 }`}
               >

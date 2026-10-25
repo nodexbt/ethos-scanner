@@ -302,7 +302,7 @@ function MutualLinks({ signal, kind, targetName, candidateName }: { signal: Sign
             <span>{row.label}</span>
           )}
           {row.ref.date > 0 && <span>{formatActivityDate(row.ref.date)}</span>}
-          {row.ref.archived && <span className="rounded border border-border px-1 text-[10px] uppercase tracking-wide">{kind === "vouch" ? "withdrawn" : "archived"}</span>}
+          {row.ref.archived && <span className="rounded border border-border px-1 text-[11px] uppercase tracking-wide">{kind === "vouch" ? "withdrawn" : "archived"}</span>}
         </span>
       ))}
     </span>

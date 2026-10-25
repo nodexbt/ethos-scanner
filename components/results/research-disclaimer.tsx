@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 const POINTS: { title: string; body: string }[] = [
   {
     title: "Signals, not a verdict",
-    body: "Every flag is an on-chain pattern with a weight, and several have innocent explanations — a friend funding a new wallet, an OTC desk, a shared custodian. Confidence tiers reflect the strength of the evidence, not certainty of guilt.",
+    body: "Every flag is an on-chain pattern with a weight, and several have innocent explanations — a friend funding a new wallet, an OTC desk, a shared custodian. “Strong” and “possible” describe the strength of the evidence, not certainty of guilt.",
   },
   {
     title: "A clean result is not proof of innocence",

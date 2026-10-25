@@ -9,6 +9,7 @@ import { useParams } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { AppFooter } from "@/components/app-footer";
 import { ResultView } from "@/components/results/result-view";
+import { Plate } from "@/components/ui/plate";
 
 export default function SharedInvestigation() {
   const params = useParams();
@@ -102,7 +103,7 @@ export default function SharedInvestigation() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       <SiteHeader />
-      <p className="mb-3 text-xs text-muted-foreground">Shared scan · read-only</p>
+      <Plate className="mb-3 inline-block px-2.5 py-1 text-xs text-muted-foreground">Shared scan · read-only</Plate>
       <ResultView result={result} scannedAt={scannedAt} />
       <AppFooter />
     </div>

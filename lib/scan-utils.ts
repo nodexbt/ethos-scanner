@@ -76,7 +76,7 @@ export function getLogColor(level: string): string {
 /** Plain-language names for signal types, for the breakdown in the UI. */
 export const SIGNAL_LABELS: Record<string, string> = {
   funded_by_target: "First funded by the target",
-  funded_by_cluster: "First funded by a cluster wallet",
+  funded_by_cluster: "First funded by a linked wallet",
   shared_first_funder: "Same first funder as the target",
   shared_exchange_funder: "Same exchange withdrawal address",
   shared_cex_deposit: "Shared exchange deposit address",

@@ -43,7 +43,7 @@ export function DegradedBanner({ degraded, notice, coverage }: DegradedBannerPro
   return (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
       <div className="flex items-start gap-2">
-        <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1 space-y-1">
           {degraded && (
             <p className="font-medium text-foreground">{headline}</p>

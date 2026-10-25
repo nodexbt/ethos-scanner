@@ -29,7 +29,7 @@ function describe(n: Item): string {
   }
   const l = n.payload.linked?.displayName ?? "a watched profile";
   const strength = n.payload.linked?.confidence === "high" ? "strong" : "possible";
-  return `${l} was linked (${strength}) in a scan of ${t}`;
+  return `${l} has a ${strength} link in a scan of ${t}`;
 }
 
 /** Header bell: unread badge, dropdown of recent in-app alerts. */
@@ -95,7 +95,7 @@ export function NotificationsBell() {
       </button>
       {open && (
         <div className="absolute right-0 top-9 z-50 w-80 max-h-96 overflow-y-auto rounded-lg border border-border bg-background shadow-xl p-1">
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">Alerts</div>
+          <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground/70">Alerts</div>
           {items.length === 0 ? (
             <div className="px-2 pb-2 text-xs text-muted-foreground">
               Nothing yet. Watch a profile from its scan overview to get alerted when it gains a new link.
@@ -109,7 +109,7 @@ export function NotificationsBell() {
                 className={`block rounded-md px-2 py-1.5 text-xs hover:bg-muted ${n.read ? "text-muted-foreground" : "text-foreground"}`}
               >
                 <div>{describe(n)}</div>
-                <div className="text-[10px] text-muted-foreground/70 mt-0.5">{formatRelativeTime(n.createdAt)}</div>
+                <div className="text-[11px] text-muted-foreground/70 mt-0.5">{formatRelativeTime(n.createdAt)}</div>
               </Link>
             ))
           )}

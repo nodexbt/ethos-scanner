@@ -191,7 +191,7 @@ export function ResultHeader({
         ) : (
           <>
             <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
-              <span className="font-semibold text-red-500 tabular-nums">{strong}</span> strong link{strong === 1 ? "" : "s"}
+              <span className="font-semibold text-red-600 dark:text-red-500 tabular-nums">{strong}</span> strong link{strong === 1 ? "" : "s"}
             </span>
             <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
               <span className="font-semibold text-amber-600 dark:text-amber-500 tabular-nums">{possible}</span> possible link{possible === 1 ? "" : "s"}

@@ -10,6 +10,7 @@ import { Loader2, ArrowRight, ArrowLeftRight, Check, X, Users, Shield } from "lu
 import { motion } from "framer-motion";
 import { useSession, signIn } from "next-auth/react";
 import { AppHeader } from "@/components/app-header";
+import { Plate } from "@/components/ui/plate";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { FollowRelationship } from "@/lib/twitter-search";
 
@@ -123,10 +124,10 @@ export default function FollowsPage() {
       <AppHeader />
 
       <div className="mx-auto mt-6 max-w-2xl">
-        <div className="mb-6 flex items-center gap-2">
+        <Plate className="mb-6 inline-flex items-center gap-2 px-3 py-2">
           <Users className="h-5 w-5 text-muted-foreground" />
           <h1 className="text-2xl font-semibold tracking-tight">Follow Check</h1>
-        </div>
+        </Plate>
 
         <Card className="backdrop-blur-sm bg-card/80">
           <CardHeader>

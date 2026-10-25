@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Wallet } from "lucide-react";
@@ -37,7 +37,7 @@ export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubm
               {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             </Button>
           </form>
-          {error && <div className="text-xs text-red-500">{error}</div>}
+          {error && <div className="text-xs text-red-600 dark:text-red-500">{error}</div>}
         </CardContent>
       </Card>
     );
@@ -45,41 +45,33 @@ export function ScanInput({ walletInput, setWalletInput, scanning, error, onSubm
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Wallet Cluster Scan</CardTitle>
-        <CardDescription className="text-xs">
-          Enter an EVM address or X handle to discover related wallets across 5 chains.
-          Profiles with multiple attested wallets are scanned as one.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="p-4 sm:p-5 space-y-3">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Scan a profile</h1>
+          <p className="text-sm text-muted-foreground">
+            Paste an X handle, an Ethos profile link or a wallet address. Every wallet attested to the profile is
+            scanned across Ethereum, Base, Arbitrum, Optimism and Polygon.
+          </p>
+        </div>
         <form onSubmit={onSubmit} className="flex gap-2">
           <div className="relative flex-1">
             <Wallet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="text"
-              placeholder="0x address or @handle"
+              placeholder="@handle or 0x address"
+              aria-label="Profile or wallet to scan"
               value={walletInput}
               onChange={(e) => setWalletInput(e.target.value)}
-              className="pl-10 h-9 font-mono"
+              className="pl-10 h-11 font-mono md:text-base"
               disabled={scanning}
             />
           </div>
-          <Button type="submit" size="sm" disabled={scanning || !walletInput.trim()}>
-            {scanning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Search className="h-4 w-4" />
-            )}
+          <Button type="submit" className="h-11 px-5" disabled={scanning || !walletInput.trim()}>
+            {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            Scan
           </Button>
         </form>
-
-        {error && <div className="text-xs text-red-500">{error}</div>}
-
-        <div className="text-[10px] text-muted-foreground space-y-0.5">
-          <p>Scans Ethereum, Base, Arbitrum, Optimism, and Polygon in parallel.</p>
-          <p>Analyzes direct transfers, funding sources, and CEX deposit addresses.</p>
-        </div>
+        {error && <div className="text-sm text-red-600 dark:text-red-500">{error}</div>}
       </CardContent>
     </Card>
   );

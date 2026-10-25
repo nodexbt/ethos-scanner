@@ -11,6 +11,7 @@ import { formatRelativeTime, scanHref } from "@/lib/utils";
 import { ConfidencePill } from "@/components/ui/confidence-pill";
 import type { NetworkOverview, NetworkProfile } from "@/lib/db/network";
 import { AvatarImg } from "@/components/ui/avatar-img";
+import { Plate } from "@/components/ui/plate";
 
 function ProfileRow({ p, right }: { p: NetworkProfile; right: React.ReactNode }) {
   return (
@@ -62,7 +63,7 @@ export function NetworkView() {
 
   return (
     <div>
-      <div className="mb-4">
+      <Plate className="mb-4 px-4 py-3">
         <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
           <Network className="h-5 w-5" />
           Network
@@ -70,9 +71,8 @@ export function NetworkView() {
         <p className="text-sm text-muted-foreground">
           What all saved scans add up to: the profiles most often linked, the scans that found the most, and the newest links.
         </p>
-      </div>
-
-      {error && <div className="text-sm text-red-500 mb-4">{error}</div>}
+        {error && <p className="mt-2 text-sm text-red-600 dark:text-red-500">{error}</p>}
+      </Plate>
 
       {!data ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -87,7 +87,7 @@ export function NetworkView() {
               { icon: Activity, label: "Profiles scanned", value: data.totals.profilesScanned },
               { icon: Users, label: "Profiles linked by a scan", value: data.totals.linkedProfiles },
               { icon: GitBranch, label: "Links in the graph", value: data.totals.edges },
-              { icon: AlertTriangle, label: "Strong links", value: data.totals.strongEdges, cls: "text-red-500" },
+              { icon: AlertTriangle, label: "Strong links", value: data.totals.strongEdges, cls: "text-red-600 dark:text-red-500" },
             ].map((t) => (
               <Card key={t.label}>
                 <CardContent className="p-4">
@@ -115,7 +115,7 @@ export function NetworkView() {
                     right={
                       <>
                         <div className="text-foreground font-medium">{p.linkedBy} scans</div>
-                        {p.strong > 0 && <div className="text-red-500">{p.strong} strong</div>}
+                        {p.strong > 0 && <div className="text-red-600 dark:text-red-500">{p.strong} strong</div>}
                       </>
                     }
                   />
@@ -136,7 +136,7 @@ export function NetworkView() {
                     right={
                       <>
                         <div className="text-foreground font-medium">{p.links} links</div>
-                        {p.strong > 0 && <div className="text-red-500">{p.strong} strong</div>}
+                        {p.strong > 0 && <div className="text-red-600 dark:text-red-500">{p.strong} strong</div>}
                       </>
                     }
                   />

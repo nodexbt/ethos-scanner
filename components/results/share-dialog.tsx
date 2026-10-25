@@ -122,7 +122,7 @@ export function ShareDialog({
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : current.error ? (
-          <p className="text-sm text-red-500">{current.error}</p>
+          <p className="text-sm text-red-600 dark:text-red-500">{current.error}</p>
         ) : state && !state.canManage && !state.isPublic ? (
           <p className="text-sm text-muted-foreground">Only the person who ran this scan, or an admin, can share it.</p>
         ) : state?.isPublic && shareUrl ? (
@@ -140,7 +140,7 @@ export function ShareDialog({
           <p className="text-sm text-muted-foreground">This scan is private.</p>
         )}
 
-        {actionError && <p className="text-sm text-red-500">{actionError}</p>}
+        {actionError && <p className="text-sm text-red-600 dark:text-red-500">{actionError}</p>}
 
         {state?.canManage && (
           <DialogFooter>

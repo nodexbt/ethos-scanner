@@ -45,6 +45,6 @@ export function SegmentedCount({ value, size = "md" }: { value: number; size?: "
   return size === "md" ? (
     <span className="text-xs bg-background/70 border border-border px-1.5 py-0.5 rounded-full tabular-nums">{value.toLocaleString()}</span>
   ) : (
-    <span className="tabular-nums text-[10px] text-muted-foreground">{value.toLocaleString()}</span>
+    <span className="tabular-nums text-[11px] text-muted-foreground">{value.toLocaleString()}</span>
   );
 }

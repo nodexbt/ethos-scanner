@@ -244,7 +244,7 @@ export default function AdminUsersPage() {
                           </span>
                         )}
                         {isSelf && (
-                          <span className="text-[10px] uppercase tracking-wide bg-muted px-1.5 py-0.5 rounded">
+                          <span className="text-[11px] uppercase tracking-wide bg-muted px-1.5 py-0.5 rounded">
                             you
                           </span>
                         )}

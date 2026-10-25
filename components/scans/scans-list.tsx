@@ -6,9 +6,11 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { SegmentedTab, SegmentedCount } from "@/components/ui/segmented";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
+import { Search, Loader2, AlertTriangle, Wallet, FolderOpen, Trash2, Share2, History, ShieldCheck } from "lucide-react";
 import { EthosScoreIcon } from "@/components/ui/ethos-score-icon";
 import { AvatarImg } from "@/components/ui/avatar-img";
+import { Plate } from "@/components/ui/plate";
+import { LinkCounts } from "./link-counts";
 
 export interface InvestigationSummary {
   id: string;
@@ -209,7 +211,7 @@ export function ScansList({
           onClick={() => onFlaggedChange(!flaggedOnly)}
           className={`h-9 rounded-md border px-2.5 text-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors ${
             flaggedOnly
-              ? "border-red-500/50 bg-red-500/10 text-red-500"
+              ? "border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-500"
               : "border-border bg-card text-muted-foreground hover:text-foreground"
           }`}
           title="Show only scans with at least one strong or possible cluster"
@@ -217,30 +219,32 @@ export function ScansList({
           <AlertTriangle className="h-3.5 w-3.5" />
           Flagged only
         </button>
-        <span className="text-sm text-muted-foreground ml-auto">
+        <Plate className="ml-auto px-2.5 py-1 text-sm text-muted-foreground">
           {displayedTotal.toLocaleString()} {filtersActive ? "match" : "scan"}
           {displayedTotal === 1 ? "" : filtersActive ? "es" : "s"}
-        </span>
+        </Plate>
       </div>
 
       {investigations.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
-          <FolderOpen className="h-8 w-8" />
-          <p>{filtersActive ? "No scans match these filters." : emptyLabel}</p>
+        <div className="flex h-64 items-center justify-center">
+          <Plate className="flex flex-col items-center gap-2 px-6 py-5 text-sm text-muted-foreground">
+            <FolderOpen className="h-8 w-8" />
+            <p>{filtersActive ? "No scans match these filters." : emptyLabel}</p>
+          </Plate>
         </div>
       ) : (
         <div className="grid gap-2 min-w-0">
-          <div className="hidden md:flex items-center gap-4 px-4 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+          <Plate className="hidden md:flex items-center gap-4 px-4 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
             <span className="w-10 shrink-0" />
             <span className="flex-1">Profile</span>
-            <div className="grid grid-cols-[4.5rem_8.5rem_10rem_5.5rem] gap-3 shrink-0">
+            <div className="grid grid-cols-[4.5rem_10.5rem_9rem_5.5rem] gap-3 shrink-0">
               <span>Ethos</span>
               <span>Links</span>
               <span>Scanned by</span>
               <span>Date</span>
             </div>
             <span className="w-7 shrink-0" />
-          </div>
+          </Plate>
           {investigations.map((inv) => (
             <div
               key={inv.id}
@@ -265,9 +269,19 @@ export function ScansList({
                 <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
                   {inv.target}
                 </div>
+                {/* Phones hide the columns; keep the essentials on a second line. */}
+                <div className="md:hidden mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  {inv.score != null && (
+                    <span className="inline-flex items-center gap-0.5 tabular-nums">
+                      {inv.score}
+                      <EthosScoreIcon size={9} className="ml-0.5" />
+                    </span>
+                  )}
+                  <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} />
+                </div>
               </button>
               {/* Fixed-width columns so values line up down the list. */}
-              <div className="hidden md:grid md:grid-cols-[4.5rem_8.5rem_10rem_5.5rem] items-center gap-3 text-xs text-muted-foreground shrink-0">
+              <div className="hidden md:grid md:grid-cols-[4.5rem_10.5rem_9rem_5.5rem] items-center gap-3 text-xs text-muted-foreground shrink-0">
                 <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
                   {inv.score != null ? (
                     <>
@@ -278,26 +292,7 @@ export function ScansList({
                     "—"
                   )}
                 </span>
-                <span className="flex items-center gap-2 whitespace-nowrap">
-                  {inv.strongCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3 text-red-500" />
-                      {inv.strongCount}
-                    </span>
-                  )}
-                  {inv.possibleCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3 text-amber-500" />
-                      {inv.possibleCount}
-                    </span>
-                  )}
-                  {inv.strongCount === 0 && inv.possibleCount === 0 && (
-                    <span className="flex items-center gap-1" title="The scan found no on-chain links. That is not proof of innocence.">
-                      <Shield className="h-3 w-3" />
-                      No links
-                    </span>
-                  )}
-                </span>
+                <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} />
                 <span className="flex items-center gap-1.5 min-w-0">
                   {inv.lastScannedBy ? (
                     <>

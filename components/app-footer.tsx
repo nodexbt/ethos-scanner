@@ -10,7 +10,8 @@ export function AppFooter({ className }: { className?: string }) {
   return (
     <footer
       className={cn(
-        "mt-8 pt-6 border-t border-border flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-[11px] text-muted-foreground",
+        // Backed like a Plate: footers sit straight on the dithered background.
+        "mt-8 rounded-lg bg-background/80 backdrop-blur-md px-4 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-[11px] text-muted-foreground",
         className
       )}
     >

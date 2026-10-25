@@ -62,7 +62,7 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-500">{error}</p>}
         <DialogFooter className="gap-2">
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onOpenChange(false)}>
             Cancel

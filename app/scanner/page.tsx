@@ -2,13 +2,15 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Loader2, AlertTriangle, Shield, Wallet, FolderOpen, History, Users, Activity, Network, ArrowRight } from "lucide-react";
+import { Search, Loader2, AlertTriangle, Wallet, FolderOpen, History, Users, Activity, Network, ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { ClusterScanResult, LogEntry, ScanProgress } from "@/lib/cluster-scanner";
 import type { ResolvedScanTarget } from "@/lib/scan-target";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { ShareDialog } from "@/components/results/share-dialog";
 import { ResultView } from "@/components/results/result-view";
+import { LinkCounts } from "@/components/scans/link-counts";
+import { describeSignal, scoringSignals } from "@/lib/scan-utils";
 import { AppFooter } from "@/components/app-footer";
 import { ScanInput } from "@/components/scanner/scan-input";
 import { ScanLog } from "@/components/scanner/scan-log";
@@ -77,6 +79,8 @@ export default function ScannerPage() {
   /** Bumped after each scan so the header refetches the daily quota. */
   const [quotaKey, setQuotaKey] = useState(0);
   const [shareOpen, setShareOpen] = useState(false);
+  /** null = follow the default: open until the user has scans of their own. */
+  const [howItWorksChoice, setHowItWorksChoice] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("scanner");
   /** Which saved scans the Scans tab lists. Survives switching tabs. */
     const [scope, setScope] = useState<ScanScope>("all");
@@ -681,28 +685,28 @@ export default function ScannerPage() {
     prompt += `## On-Chain Evidence\n`;
     prompt += `- Networks scanned: ${Object.keys(clusterResult.networkStats).join(", ")}\n`;
     prompt += `- Total transactions analyzed: ${Object.values(clusterResult.networkStats).reduce((s, n) => s + n.txCount, 0)}\n`;
-    prompt += `- Strong cluster wallets identified: ${clusterResult.strongCluster.length}\n`;
-    prompt += `- Possible cluster candidates: ${clusterResult.possibleCluster.length}\n\n`;
+    prompt += `- Strong links: ${clusterResult.strongCluster.length}\n`;
+    prompt += `- Possible links: ${clusterResult.possibleCluster.length}\n\n`;
 
     if (allCandidates.length > 0) {
-      prompt += `### Linked Wallets\n`;
+      prompt += `### Linked Profiles\n`;
       for (const c of allCandidates) {
         const name = c.ethosProfile
           ? `${c.ethosProfile.displayName}${c.ethosProfile.username ? ` (@${c.ethosProfile.username})` : ""}`
           : c.address;
         prompt += `\n${name}\n`;
         prompt += `- Address: ${c.address}\n`;
-        prompt += `- Cluster confidence: ${c.confidence} (score: ${c.score})\n`;
+        prompt += `- Link: ${c.confidence === "high" ? "strong" : "possible"} (link strength ${c.score})\n`;
         if (c.ethosProfile) {
           prompt += `- Ethos Profile URL: ${c.ethosProfile.profileUrl}\n`;
           prompt += `- Credibility Score: ${c.ethosProfile.score}\n`;
         }
         prompt += `- Active on: ${c.networks.join(", ")}\n`;
-        prompt += `- Signals detected: ${c.signals.map((s) => `${s.type} (${s.score > 0 ? "+" : ""}${s.score})`).join(", ")}\n`;
+        const scored = scoringSignals(c);
+        if (scored.length > 0) prompt += `- Why linked: ${scored.map((s) => `${describeSignal(s, c, clusterResult).title} (+${s.score})`).join("; ")}\n`;
         if (c.directCount > 0) {
-          prompt += `- Direct transfers with subject: ${c.directCount} (in: ${c.incomingCount}, out: ${c.outgoingCount})`;
-          if (c.bidirectional) prompt += ` -- bidirectional`;
-          if (c.repeatTransfer) prompt += ` -- repeated`;
+          // Counts are from the subject's side: outgoing = the subject sent.
+          prompt += `- Direct transfers with subject (context, not scored): ${c.directCount} (subject sent ${c.outgoingCount}, received ${c.incomingCount})`;
           prompt += `\n`;
         }
         if (c.sharedFundingSources.length > 0) prompt += `- Shared incoming senders (not first funders): ${c.sharedFundingSources.length}\n`;
@@ -766,6 +770,8 @@ export default function ScannerPage() {
   // Render a wallet address with its Ethos profile name if available
 
   const hasResults = clusterResult !== null && !scanning;
+  const howItWorksOpen = howItWorksChoice ?? (!scansLoading && yourTotal === 0);
+  const setHowItWorksOpen = (open: boolean) => setHowItWorksChoice(open);
   const scanActive = scanning || hasResults || loadingCached;
 
   // @ts-expect-error - ethos field added in session callback
@@ -819,54 +825,9 @@ export default function ScannerPage() {
 
       {/* Scanner Tab */}
       {activeTab === "scanner" && (
-      <div
-        className={
-          scanActive
-            ? // Once a scan is running or results are showing, the input is a
-              // slim bar above full-width results instead of an empty column.
-              "flex flex-col gap-4"
-            : "flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6 gap-4"
-        }
-      >
-        {/* Left column (empty state) / top bar (active): How it works + Input + Log */}
+      <div className="flex flex-col gap-4">
+        {/* Input first, then the scan log, then results or the empty state. */}
         <div className="space-y-4">
-          {/* "How it works" lives above the scan input as the explainer
-              for the tool. Hidden once a scan starts or results exist —
-              past that point it's just noise. */}
-          {!scanning && !hasResults && !loadingCached && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Network className="h-4 w-4" />
-                  How it works
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <div className="flex gap-3">
-                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">1</div>
-                  <div>
-                    <div className="font-medium text-foreground">Multi-chain transaction scan</div>
-                    <div className="text-xs">Pulls transfer history across Ethereum, Base, Arbitrum, Optimism, and Polygon.</div>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">2</div>
-                  <div>
-                    <div className="font-medium text-foreground">Signal correlation</div>
-                    <div className="text-xs">Direct transfers surface candidates; first funders, shared funding sources and exchange deposit patterns score them.</div>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">3</div>
-                  <div>
-                    <div className="font-medium text-foreground">Link strength</div>
-                    <div className="text-xs">Strong when first funded by the target or its cluster, or 15+ points across two or more signal types. Possible from 8 points.</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           <ScanInput
             walletInput={walletInput}
             setWalletInput={setWalletInput}
@@ -888,7 +849,7 @@ export default function ScannerPage() {
           />
         </div>
 
-        {/* Right column: Results */}
+        {/* Results, or the empty state */}
         <div className="space-y-4">
           {/* Queued: the job is accepted but hasn't reported yet */}
           {scanning && clusterLogs.length === 0 && (
@@ -903,7 +864,7 @@ export default function ScannerPage() {
           {/* Errors that end a scan, shown where the results would be */}
           {!scanning && !hasResults && error && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+              <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-500 mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
           )}
@@ -985,111 +946,108 @@ export default function ScannerPage() {
           {/* Empty state */}
           {!scanning && !hasResults && !loadingCached && (
             <div className="space-y-4">
-              {/* Stats */}
               <div className="grid grid-cols-3 gap-3">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Activity className="h-3.5 w-3.5" />
-                      Total Scans
-                    </div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {allTotal}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                      Strong Clusters
-                    </div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {scanStats?.strongSum ?? allInvestigations.reduce((sum, inv) => sum + inv.strongCount, 0)}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Users className="h-3.5 w-3.5 text-amber-500" />
-                      Possible Matches
-                    </div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums">
-                      {scanStats?.possibleSum ?? allInvestigations.reduce((sum, inv) => sum + inv.possibleCount, 0)}
-                    </div>
-                  </CardContent>
-                </Card>
+                {[
+                  { icon: Activity, label: "Profiles scanned", value: allTotal, iconClass: "" },
+                  { icon: AlertTriangle, label: "Strong links", value: scanStats?.strongSum ?? allInvestigations.reduce((sum, inv) => sum + inv.strongCount, 0), iconClass: "text-red-600 dark:text-red-500" },
+                  { icon: Users, label: "Possible links", value: scanStats?.possibleSum ?? allInvestigations.reduce((sum, inv) => sum + inv.possibleCount, 0), iconClass: "text-amber-600 dark:text-amber-500" },
+                ].map((stat) => (
+                  <Card key={stat.label}>
+                    <CardContent className="p-3 sm:p-4">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <stat.icon className={`h-3.5 w-3.5 shrink-0 ${stat.iconClass}`} />
+                        {stat.label}
+                      </div>
+                      <div className="mt-1 text-xl sm:text-2xl font-bold tabular-nums">{stat.value.toLocaleString()}</div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
 
-              {/* Recent scans */}
-              {allInvestigations.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <History className="h-4 w-4" />
-                      Recent Scans
-                    </CardTitle>
-                    <button
-                      onClick={() => selectTab("scans", "all")}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      View all
-                      <ArrowRight className="h-3 w-3" />
-                    </button>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {allInvestigations.slice(0, 5).map((inv) => (
+              <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                {allInvestigations.length > 0 ? (
+                  <Card>
+                    <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <History className="h-4 w-4" />
+                        Recent scans
+                      </CardTitle>
                       <button
-                        key={inv.id}
-                        onClick={() => handleLoadInvestigation(inv)}
-                        className="w-full group flex items-center gap-3 rounded-lg border border-border bg-card/40 hover:bg-card/80 px-3 py-2.5 transition-colors text-left cursor-pointer"
+                        onClick={() => selectTab("scans", "all")}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
                       >
-                        {inv.targetAvatar ? (
-                          <AvatarImg src={inv.targetAvatar} name={inv.targetName} className="h-8 w-8 rounded-full shrink-0" />
-                        ) : (
-                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                            <Wallet className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">
-                            {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground font-mono truncate">
-                            {inv.target}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-                          {inv.strongCount > 0 && (
-                            <span className="flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 text-red-500" />
-                              {inv.strongCount}
-                            </span>
+                        View all
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {allInvestigations.slice(0, 5).map((inv) => (
+                        <button
+                          key={inv.id}
+                          onClick={() => handleLoadInvestigation(inv)}
+                          className="w-full flex items-center gap-3 rounded-lg border border-border bg-card/40 hover:bg-card/80 px-3 py-2.5 transition-colors text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {inv.targetAvatar ? (
+                            <AvatarImg src={inv.targetAvatar} name={inv.targetName} className="h-8 w-8 rounded-full shrink-0" />
+                          ) : (
+                            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                              <Wallet className="h-4 w-4 text-muted-foreground" />
+                            </div>
                           )}
-                          {inv.possibleCount > 0 && (
-                            <span className="flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 text-amber-500" />
-                              {inv.possibleCount}
-                            </span>
-                          )}
-                          {inv.strongCount === 0 && inv.possibleCount === 0 && (
-                            <Shield className="h-3 w-3 text-green-500" />
-                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">
+                              {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground font-mono truncate">{inv.target}</div>
+                          </div>
+                          <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} className="shrink-0" />
                           {inv.lastScannedBy && (
                             <AvatarImg
                               src={inv.lastScannedBy.avatarUrl}
                               title={`Scanned by ${inv.lastScannedBy.displayName}`}
-                              className="h-4 w-4 rounded-full"
+                              className="hidden sm:inline-flex h-4 w-4 rounded-full shrink-0"
                             />
                           )}
-                        </div>
-                      </button>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+                        </button>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div />
+                )}
 
+                {/* Open for new users; collapsed once you have scans of your own. */}
+                <Card>
+                  <CardHeader className={howItWorksOpen ? "pb-3" : undefined}>
+                    <button
+                      type="button"
+                      onClick={() => setHowItWorksOpen(!howItWorksOpen)}
+                      aria-expanded={howItWorksOpen}
+                      className="flex w-full items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors"
+                    >
+                      {howItWorksOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      How it works
+                    </button>
+                  </CardHeader>
+                  {howItWorksOpen && (
+                    <CardContent className="space-y-3 text-sm text-muted-foreground">
+                      {[
+                        ["Multi-chain transaction scan", "Pulls transfer history across Ethereum, Base, Arbitrum, Optimism and Polygon for every wallet attested to the profile."],
+                        ["Signal correlation", "Direct transfers find possible links; first funders, shared funding sources and exchange deposits score them."],
+                        ["Link strength", "Strong when first funded by the profile or a linked wallet, or 15+ points across two signal types. Possible from 8 points."],
+                      ].map(([title, body], n) => (
+                        <div key={title} className="flex gap-3">
+                          <div className="shrink-0 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-foreground">{n + 1}</div>
+                          <div>
+                            <div className="font-medium text-foreground">{title}</div>
+                            <div className="text-xs">{body}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  )}
+                </Card>
+              </div>
             </div>
           )}
         </div>

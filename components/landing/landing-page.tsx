@@ -46,24 +46,24 @@ const DEMO_LOG: { text: string; dim?: boolean }[] = [
   { text: "[base]      1,204 transfers fetched", dim: true },
   { text: "[ethereum]    356 transfers fetched", dim: true },
   { text: "[arbitrum]     89 transfers fetched", dim: true },
-  { text: "→ 41 counterparties · 12 promising candidates", dim: true },
+  { text: "→ 41 counterparties · 12 worth a closer look", dim: true },
   { text: "→ correlation: first funders, CEX deposits, funding chains", dim: true },
   { text: "✓ scan complete — 2 linked profiles found" },
 ];
 
 const DEMO_SIGNALS: { name: string; weight: number; detail: string }[] = [
   {
-    name: "funded_by_target",
+    name: "First funded by the target",
     weight: 10,
-    detail: "wallet's first-ever transaction came from the target",
+    detail: "this wallet's first-ever transaction came from the target",
   },
   {
-    name: "shared_cex_deposit",
+    name: "Same exchange account",
     weight: 8,
     detail: "both wallets consolidate to the same exchange deposit address",
   },
   {
-    name: "multi_hop_funding",
+    name: "Found through a funding chain",
     weight: 6,
     detail: "one of the target's funders also funded this wallet",
   },
@@ -77,7 +77,7 @@ function DemoScanPanel() {
         <span className="h-2.5 w-2.5 rounded-full border border-border" />
         <span className="h-2.5 w-2.5 rounded-full border border-border" />
         <span className="h-2.5 w-2.5 rounded-full border border-border" />
-        <span className="ml-2 text-[10px] text-muted-foreground font-mono truncate">
+        <span className="ml-2 text-[11px] text-muted-foreground font-mono truncate">
           ethos-scanner — example result
         </span>
       </div>
@@ -96,18 +96,18 @@ function DemoScanPanel() {
         <div className="mt-3 rounded-md border border-border bg-background/50 p-3 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs font-semibold">@an•••••us</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-foreground text-background font-semibold uppercase tracking-wide">
-              high confidence
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-red-500/15 text-red-600 ring-1 ring-inset ring-red-500/40 dark:text-red-400">
+              strong · 24
             </span>
           </div>
           {DEMO_SIGNALS.map((s) => (
             <div key={s.name} className="flex items-start gap-2">
-              <span className="shrink-0 text-[10px] px-1 rounded bg-muted font-semibold tabular-nums">
+              <span className="shrink-0 text-[11px] px-1 rounded bg-muted font-semibold tabular-nums">
                 +{s.weight}
               </span>
               <div className="min-w-0">
                 <div className="text-[11px] font-medium">{s.name}</div>
-                <div className="text-[10px] text-muted-foreground">{s.detail}</div>
+                <div className="text-[11px] text-muted-foreground">{s.detail}</div>
               </div>
             </div>
           ))}
@@ -204,7 +204,7 @@ export function LandingPage() {
 
           <div className="mt-8 flex flex-col items-center gap-3">
             <OpenScannerButton />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Open to Ethos validators and human-verified profiles with a score
               of {MIN_SCORE}+.
             </p>
@@ -238,7 +238,7 @@ export function LandingPage() {
                     <div className="h-8 w-8 rounded-md border border-border bg-background/60 flex items-center justify-center">
                       <Icon className="h-4 w-4" />
                     </div>
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <span className="font-mono text-[11px] text-muted-foreground">
                       0{i + 1}
                     </span>
                   </div>
@@ -296,8 +296,8 @@ export function LandingPage() {
             </ul>
             <p className="text-[11px] text-muted-foreground border-t border-border pt-4 leading-relaxed">
               The scanner surfaces evidence, not verdicts. Every signal can
-              have an innocent explanation, and confidence tiers reflect the
-              strength of the on-chain evidence — the final call is always
+              have an innocent explanation, and “strong” and “possible” reflect
+              the strength of the on-chain evidence — the final call is always
               yours.
             </p>
           </div>
@@ -311,7 +311,7 @@ export function LandingPage() {
           <OpenScannerButton />
         </section>
 
-        <AppFooter className="mt-0 pt-8" />
+        <AppFooter className="mt-0" />
       </div>
     </div>
   );

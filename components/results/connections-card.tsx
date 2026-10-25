@@ -130,7 +130,7 @@ export function ConnectionsCard({ investigationId, onScanProfile, scanning }: Co
                 {renderProfile(e.candidateProfileId)}
                 <span
                   className={
-                    e.confidence === "high" ? "text-red-500" : "text-amber-500"
+                    e.confidence === "high" ? "text-red-600 dark:text-red-500" : "text-amber-600 dark:text-amber-500"
                   }
                 >
                   {e.confidence === "high" ? "strong" : "possible"}

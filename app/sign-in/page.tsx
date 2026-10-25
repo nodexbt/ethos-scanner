@@ -60,10 +60,13 @@ function SignInCard() {
           <XIcon className="h-4 w-4" />
           Sign in with X
         </Button>
-        {error && <p className="text-xs text-red-500 text-center">{error}</p>}
-        <p className="text-[11px] text-muted-foreground text-center">
-          Open to Ethos validators and human-verified profiles with a score of {MIN_SCORE}+.
-        </p>
+        {error && <p className="text-xs text-red-600 dark:text-red-500 text-center">{error}</p>}
+        {/* The NotEligible error already states the rule. */}
+        {params.get("error") !== "NotEligible" && (
+          <p className="text-xs text-muted-foreground text-center">
+            Open to Ethos validators and human-verified profiles with a score of {MIN_SCORE}+.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

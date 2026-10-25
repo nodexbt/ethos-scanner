@@ -26,7 +26,7 @@ export function AddressDisplay({ address, chain, result }: AddressDisplayProps) 
         </a>
       )}
       {isResolved && !funderProfile && knownLabel && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{knownLabel}</span>
+        <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-border bg-muted/30 font-medium">{knownLabel}</span>
       )}
       {isResolved && !funderProfile && !knownLabel && (
         <span className="font-medium">{name}</span>
