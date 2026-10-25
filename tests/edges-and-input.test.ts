@@ -18,11 +18,15 @@ describe("edgesFromClusterResult", () => {
 
 describe("parseScanInput", () => {
   it("accepts addresses, handles and profile URLs", () => {
-    expect(parseScanInput("0xAbC0000000000000000000000000000000000001")).toBe("0xabc0000000000000000000000000000000000001");
-    expect(parseScanInput("@g3rmxyz")).toBe("g3rmxyz");
-    expect(parseScanInput("https://x.com/g3rmxyz")).toBe("g3rmxyz");
-    expect(parseScanInput("https://app.ethos.network/profile/x/g3rmxyz")).toBe("g3rmxyz");
-    expect(parseScanInput("https://app.ethos.network/profile/3708")).toBe("3708");
+    expect(parseScanInput("0xAbC0000000000000000000000000000000000001")).toEqual({ kind: "address", value: "0xabc0000000000000000000000000000000000001" });
+    expect(parseScanInput("@g3rmxyz")).toEqual({ kind: "handle", value: "g3rmxyz" });
+    expect(parseScanInput("https://x.com/g3rmxyz")).toEqual({ kind: "handle", value: "g3rmxyz" });
+    expect(parseScanInput("https://app.ethos.network/profile/x/g3rmxyz")).toEqual({ kind: "handle", value: "g3rmxyz" });
+    expect(parseScanInput("https://app.ethos.network/profile/3708")).toEqual({ kind: "profileId", value: "3708" });
+  });
+  it("keeps an all-digit X handle a handle, not a profile id", () => {
+    expect(parseScanInput("@12345")).toEqual({ kind: "handle", value: "12345" });
+    expect(parseScanInput("https://x.com/12345")).toEqual({ kind: "handle", value: "12345" });
   });
   it("rejects junk", () => {
     expect(parseScanInput("")).toBeNull();

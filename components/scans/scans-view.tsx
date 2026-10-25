@@ -14,6 +14,8 @@ import {
   type ScanScope,
 } from "@/components/scans/scans-list";
 import { useScan } from "@/components/scan/scan-provider";
+import { Button } from "@/components/ui/button";
+import { Plate } from "@/components/ui/plate";
 
 const PAGE_SIZE = 25;
 const EMPTY_LABEL: Record<ScanScope, string> = {
@@ -75,43 +77,66 @@ export function ScansView() {
     [debouncedSearch, sortValue, flaggedOnly, scoreBand]
   );
 
-  // First page of the active scope (or as many rows as were loaded, after a
-  // delete or share), plus the other scopes' counts for the chips.
+  // First page of the active scope (or as many rows as were loaded, after
+  // a delete or share). The active scope's count comes from that page; the
+  // other two are refetched only when the filters or saved data change.
+  const queryKey = `${scope}|${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}`;
+  const filtersKey = `${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}|${scan.savedVersion}`;
+  const currentQuery = useRef(queryKey);
+  useEffect(() => {
+    currentQuery.current = queryKey;
+  }, [queryKey]);
   const lastQuery = useRef("");
+  const lastCountsKey = useRef("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
-    const query = `${scope}|${debouncedSearch}|${sortValue}|${flaggedOnly}|${scoreBand}`;
-    const sameQuery = query === lastQuery.current;
-    lastQuery.current = query;
+    const sameQuery = queryKey === lastQuery.current;
+    lastQuery.current = queryKey;
     const limit = sameQuery ? Math.min(200, Math.max(PAGE_SIZE, Math.ceil(loadedCount.current / PAGE_SIZE) * PAGE_SIZE)) : PAGE_SIZE;
     // Keep the current rows on screen while a new query loads, so the
     // search box (and its focus) stays mounted.
-    fetchPage(scope, 0, limit).then((page) => {
-      if (cancelled || !page) return;
-      setRows(page.rows);
-      setTotal(page.total);
-      loadedCount.current = page.rows.length;
-    });
-    (["all", "yours", "verified"] as const).forEach((sc) => {
-      fetchPage(sc, 0, 1).then((page) => {
-        if (!cancelled && page) setCounts((c) => ({ ...c, [sc]: page.total }));
+    fetchPage(scope, 0, limit)
+      .then((page) => {
+        if (cancelled) return;
+        if (!page) throw new Error("load failed");
+        setRows(page.rows);
+        setTotal(page.total);
+        setCounts((c) => ({ ...c, [scope]: page.total }));
+        setLoadError(null);
+        loadedCount.current = page.rows.length;
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError("Couldn't load scans. Check your connection and try again.");
       });
-    });
+    if (filtersKey !== lastCountsKey.current) {
+      lastCountsKey.current = filtersKey;
+      (["all", "yours", "verified"] as const)
+        .filter((sc) => sc !== scope)
+        .forEach((sc) => {
+          fetchPage(sc, 0, 1).then((page) => {
+            if (!cancelled && page) setCounts((c) => ({ ...c, [sc]: page.total }));
+          });
+        });
+    }
     return () => {
       cancelled = true;
     };
-  }, [scope, debouncedSearch, sortValue, flaggedOnly, scoreBand, scan.savedVersion, fetchPage]);
+  }, [queryKey, filtersKey, scope, fetchPage, retry]);
 
   const loadMore = async () => {
     if (loadingMore || !rows) return;
+    const startedFor = queryKey;
     setLoadingMore(true);
     const page = await fetchPage(scope, rows.length, PAGE_SIZE);
-    if (page) {
-      setRows((prev) => [...(prev ?? []), ...page.rows]);
-      setTotal(page.total);
-      loadedCount.current += page.rows.length;
-    }
     setLoadingMore(false);
+    // Drop a page that belongs to a query the user has since changed.
+    if (!page || currentQuery.current !== startedFor) return;
+    setRows((prev) => [...(prev ?? []), ...page.rows]);
+    setTotal(page.total);
+    loadedCount.current += page.rows.length;
   };
 
   const deleteScan = async (id: string) => {
@@ -123,6 +148,19 @@ export function ScansView() {
     toast.success("Scan deleted");
     scan.notifySavedChanged(id);
   };
+
+  if (!rows && loadError) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Plate className="flex flex-col items-center gap-3 px-6 py-5 text-sm text-muted-foreground" role="alert">
+          <p>{loadError}</p>
+          <Button size="sm" variant="outline" onClick={() => setRetry((n) => n + 1)}>
+            Try again
+          </Button>
+        </Plate>
+      </div>
+    );
+  }
 
   if (!rows) return <ScansListSkeleton />;
 

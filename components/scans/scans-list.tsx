@@ -32,7 +32,7 @@ export interface InvestigationSummary {
     to the handle), raw-wallet scans by address. */
 export function investigationHref(inv: { id: string; target: string }): string {
   const profileId = inv.id.match(/^scan-p(\d+)$/)?.[1];
-  return profileId ? `/scan/x/${profileId}` : `/scan/${inv.target.toLowerCase()}`;
+  return profileId ? `/scan/p/${profileId}` : `/scan/${inv.target.toLowerCase()}`;
 }
 
 export const DEFAULT_SORT = "default";

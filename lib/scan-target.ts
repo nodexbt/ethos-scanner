@@ -1,5 +1,7 @@
 import {
   fetchProfile,
+  fetchProfileByX,
+  fetchProfilesByIds,
   getWalletAddresses,
   isEthereumAddress,
   type EthosProfile,
@@ -48,10 +50,17 @@ export function investigationIdFor(
  * - "@handle" or bare handle → handle
  * Returns null for input that can't be an address, handle, or known URL.
  */
-export function parseScanInput(input: string): string | null {
+/** What the user typed, classified. A handle is never a profile id, even
+    when it is all digits; only an Ethos profile URL yields a profile id. */
+export type ScanIdentifier =
+  | { kind: "address"; value: string }
+  | { kind: "handle"; value: string }
+  | { kind: "profileId"; value: string };
+
+export function parseScanInput(input: string): ScanIdentifier | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  if (isEthereumAddress(trimmed)) return trimmed.toLowerCase();
+  if (isEthereumAddress(trimmed)) return { kind: "address", value: trimmed.toLowerCase() };
 
   // URL forms. Try URL parsing for anything with a slash or dot-domain.
   const urlMatch = trimmed.match(/^(?:https?:\/\/)?([^/\s]+)(\/[^\s]*)?$/);
@@ -60,13 +69,13 @@ export function parseScanInput(input: string): string | null {
     const path = urlMatch[2].split(/[?#]/)[0];
     if (host === "x.com" || host === "twitter.com" || host === "www.x.com" || host === "www.twitter.com") {
       const m = path.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
-      return m ? m[1] : null;
+      return m ? { kind: "handle", value: m[1] } : null;
     }
     if (host === "app.ethos.network" || host === "ethos.network" || host === "www.ethos.network") {
       const byX = path.match(/^\/profile\/x\/([A-Za-z0-9_]{1,15})\/?$/);
-      if (byX) return byX[1];
-      const byId = path.match(/^\/profile\/(\d+)\/?$/);
-      if (byId) return byId[1];
+      if (byX) return { kind: "handle", value: byX[1] };
+      const byId = path.match(/^\/profile\/(\d{1,12})\/?$/);
+      if (byId) return { kind: "profileId", value: byId[1] };
       return null;
     }
     return null;
@@ -74,7 +83,7 @@ export function parseScanInput(input: string): string | null {
 
   // "@handle" or bare handle
   const handle = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
-  if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) return handle;
+  if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) return { kind: "handle", value: handle };
   return null;
 }
 
@@ -191,12 +200,16 @@ export async function resolveScanTarget(
   const identifier = parseScanInput(input);
   if (!identifier) return null;
 
-  const isAddress = isEthereumAddress(identifier);
   let profile: EthosProfile | null = null;
   try {
-    profile = await fetchProfile(identifier);
+    profile =
+      identifier.kind === "handle"
+        ? await fetchProfileByX(identifier.value)
+        : identifier.kind === "profileId"
+          ? ((await fetchProfilesByIds([Number(identifier.value)]))[0] ?? null)
+          : await fetchProfile(identifier.value);
   } catch {
     profile = null;
   }
-  return await toResolvedTarget(profile, isAddress ? identifier : null);
+  return await toResolvedTarget(profile, identifier.kind === "address" ? identifier.value : null);
 }

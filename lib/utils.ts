@@ -52,8 +52,10 @@ export function formatRelativeTime(input: string | number | Date): string {
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
-/** In-app scan page for a profile: by X handle when known, else by id. */
+/** In-app scan page for a profile: /scan/x/<handle> when known, else
+    /scan/p/<profileId>. Ids never go on the handle route, where an
+    all-digit X handle would be ambiguous. */
 export function scanHref(p: { username: string | null; profileId: number } | null | undefined): string {
-  if (!p) return "/";
-  return `/scan/x/${p.username ?? p.profileId}`;
+  if (!p) return "/scanner";
+  return p.username ? `/scan/x/${p.username}` : `/scan/p/${p.profileId}`;
 }

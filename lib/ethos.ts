@@ -116,6 +116,16 @@ export async function fetchProfile(
   return response.json();
 }
 
+/**
+ * The profile attested to an X handle. Unlike fetchProfile it never reads
+ * an all-digit handle (X allows "12345") as an Ethos profile id.
+ */
+export async function fetchProfileByX(handle: string): Promise<EthosProfile | null> {
+  const response = await fetch(`${ETHOS_API}/user/by/x/${encodeURIComponent(handle)}`, { headers: HEADERS });
+  if (!response.ok) return null;
+  return response.json();
+}
+
 /** Bulk lookup Ethos profiles by wallet addresses (up to 500 at a time) */
 export async function fetchProfilesByAddresses(
   addresses: string[],

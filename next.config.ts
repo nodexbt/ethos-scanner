@@ -18,13 +18,22 @@ const nextConfig: NextConfig = {
       },
       {
         source,
-        has: [{ type: "query" as const, key: "tab", value: "scans|all" }],
+        // Next anchors this as ^…$; the group keeps the alternation anchored.
+        has: [{ type: "query" as const, key: "tab", value: "(scans|all)" }],
         destination: "/scans",
         permanent: true,
       },
     ]);
     return [
       ...legacyTabs,
+      // Any other old tab value (e.g. /?tab=scanner) lands on the scanner,
+      // as the old single page did.
+      {
+        source: "/",
+        has: [{ type: "query" as const, key: "tab" }],
+        destination: "/scanner",
+        permanent: true,
+      },
       // Follow Check needs the X search provider; until it is funded the
       // address leads to the scanner instead of a "disabled" notice.
       ...(process.env.NEXT_PUBLIC_TWITTER_SEARCH_ENABLED === "true"

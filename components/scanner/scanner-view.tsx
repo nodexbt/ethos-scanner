@@ -35,18 +35,21 @@ export function ScannerView({ target }: { target?: string }) {
   const [shareOpen, setShareOpen] = useState(false);
 
   // Open a deep link unless it is already the result on screen. The ref
-  // keeps re-renders during the load from requesting it again.
-  const { openFromUrl, resultPath, scanning } = scan;
+  // keeps re-renders during the load from requesting it again. A running
+  // scan doesn't block this: it continues in the background.
+  const { openFromUrl, resultPath } = scan;
   const requestedPath = useRef<string | null>(null);
   useEffect(() => {
-    if (!target || scanning || pathname === resultPath || requestedPath.current === pathname) return;
+    if (!target || pathname === resultPath || requestedPath.current === pathname) return;
     requestedPath.current = pathname;
     void openFromUrl(target);
-  }, [target, pathname, resultPath, scanning, openFromUrl]);
+  }, [target, pathname, resultPath, openFromUrl]);
 
+  // The running scan is shown only while it owns the screen.
+  const scanOnScreen = scan.scanning && scan.screenIsScan;
   const result = scan.result;
-  const hasResults = result !== null && !scan.scanning;
-  const active = scan.scanning || hasResults || scan.loadingCached;
+  const hasResults = result !== null && !scanOnScreen;
+  const active = scanOnScreen || hasResults || scan.loadingCached;
 
   return (
     <div className="flex flex-col gap-4">
@@ -54,7 +57,7 @@ export function ScannerView({ target }: { target?: string }) {
         <ScanInput
           walletInput={scan.input}
           setWalletInput={scan.setInput}
-          scanning={scan.scanning}
+          scanning={scanOnScreen}
           error={scan.error}
           onSubmit={(e) => {
             e.preventDefault();
@@ -65,16 +68,16 @@ export function ScannerView({ target }: { target?: string }) {
         {/* Expanded while running; collapses once the scan completes so
             results sit directly under the input. */}
         <ScanLog
-          key={scan.scanning ? "live" : "done"}
-          logs={scan.logs}
-          scanning={scan.scanning}
+          key={scanOnScreen ? "live" : "done"}
+          logs={scan.screenIsScan ? scan.logs : []}
+          scanning={scanOnScreen}
           progress={scan.progress}
-          defaultExpanded={scan.scanning}
+          defaultExpanded={scanOnScreen}
         />
       </div>
 
       <div className="space-y-4">
-        {scan.scanning && scan.logs.length === 0 && (
+        {scanOnScreen && scan.logs.length === 0 && (
           <Card>
             <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground" role="status">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -83,7 +86,7 @@ export function ScannerView({ target }: { target?: string }) {
           </Card>
         )}
 
-        {!scan.scanning && !hasResults && scan.error && (
+        {!scanOnScreen && !hasResults && scan.error && (
           <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-500" />
             <span>{scan.error}</span>
@@ -97,14 +100,14 @@ export function ScannerView({ target }: { target?: string }) {
             <ResultView
               result={result}
               scannedAt={scan.scannedAt}
-              scanning={scan.scanning}
+              scanning={scanOnScreen}
               isAdmin={isAdmin}
               saveNotice={scan.saveNotice}
               investigationId={scan.investigationId}
               actions={{
                 onRescan: () => void scan.rescan(result.target),
                 onShare: () => setShareOpen(true),
-                onExport: scan.exportEvidence,
+                onExport: () => void scan.exportEvidence(),
               }}
               onScanProfile={(input) => void scan.scanInput(input)}
             />

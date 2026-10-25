@@ -1,6 +1,6 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import TwitterProvider from "next-auth/providers/twitter";
-import { fetchProfile } from "@/lib/ethos";
+import { fetchProfileByX } from "@/lib/ethos";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed, seedFromEnvIfMissing } from "@/lib/db/allowed-users";
 import { meetsOpenAccessBar } from "@/lib/access";
@@ -14,7 +14,7 @@ import { meetsOpenAccessBar } from "@/lib/access";
 // are recyclable: if an allowlisted user renames or abandons theirs, whoever
 // registers the freed handle must not inherit their Ethos identity.
 async function fetchAttestedProfile(username: string, twitterId: string) {
-  const ethos = await fetchProfile(username);
+  const ethos = await fetchProfileByX(username);
   if (!ethos) return null;
   if (!ethos.userkeys?.includes(`service:x.com:${twitterId}`)) {
     console.error(

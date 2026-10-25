@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { FolderOpen, Loader2, Network, Search } from "lucide-react";
@@ -105,14 +104,16 @@ function NavTabs() {
           Network
         </SegmentedLink>
       </div>
-      {scan.scanning && !onScanner && (
-        <Link
-          href="/scanner"
-          className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card/70 px-3 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
+      {/* A scan running off-screen: elsewhere in the app, or behind another result. */}
+      {scan.scanning && !(onScanner && scan.screenIsScan) && (
+        <button
+          type="button"
+          onClick={scan.showRunningScan}
+          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-border bg-card/70 px-3 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span className="max-w-[12rem] truncate">Scanning {scan.input || "…"}</span>
-        </Link>
+          <span className="max-w-[12rem] truncate">Scanning {scan.jobLabel || "…"}</span>
+        </button>
       )}
     </nav>
   );
