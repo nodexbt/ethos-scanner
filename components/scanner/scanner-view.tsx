@@ -40,7 +40,15 @@ export function ScannerView({ target }: { target?: string }) {
   const { openFromUrl, resultPath } = scan;
   const requestedPath = useRef<string | null>(null);
   useEffect(() => {
-    if (!target || pathname === resultPath || requestedPath.current === pathname) return;
+    if (!target) return;
+    // Already on screen (e.g. reached by typing the handle): remember that,
+    // so clearing the result (logo click) doesn't read as a fresh visit
+    // and reload the scan while the app navigates away.
+    if (pathname === resultPath) {
+      requestedPath.current = pathname;
+      return;
+    }
+    if (requestedPath.current === pathname) return;
     requestedPath.current = pathname;
     void openFromUrl(target);
   }, [target, pathname, resultPath, openFromUrl]);
