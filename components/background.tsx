@@ -21,6 +21,12 @@ function getCoarsePointerSnapshot(): boolean {
 function getCoarsePointerServerSnapshot(): boolean {
   return false;
 }
+function subscribeToReducedMotion(callback: () => void): () => void {
+  const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+  mql.addEventListener("change", callback);
+  return () => mql.removeEventListener("change", callback);
+}
+const getReducedMotionSnapshot = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function Background() {
   const { data: session, status } = useSession();
@@ -30,6 +36,7 @@ export function Background() {
     getCoarsePointerSnapshot,
     getCoarsePointerServerSnapshot
   );
+  const reducedMotion = useSyncExternalStore(subscribeToReducedMotion, getReducedMotionSnapshot, getCoarsePointerServerSnapshot);
 
   if (status === "loading") {
     return null;
@@ -59,8 +66,8 @@ export function Background() {
         waveColor={waveColor}
         // Login screen on desktop: animated + interactive.
         // Mobile/tablet or logged in: static, no mouse interaction.
-        disableAnimation={loggedIn}
-        enableMouseInteraction={interactive}
+        disableAnimation={loggedIn || reducedMotion}
+        enableMouseInteraction={interactive && !reducedMotion}
         mouseRadius={0.2}
         colorNum={4.8}
         waveAmplitude={0.24}

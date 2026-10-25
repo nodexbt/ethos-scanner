@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Copy, Globe, Loader2, Lock } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +75,7 @@ export function ShareDialog({
       const d = await r.json().catch(() => null);
       if (!r.ok) throw new Error(d?.error ?? "Something went wrong");
       setLoaded({ id: investigationId, state: { isPublic: d.isPublic, shareId: d.shareId, canManage: true }, error: null });
+      toast.success(makePublic ? "Public link created" : "Stopped sharing. The link no longer works.");
       setCopied(false);
       onChanged?.();
     } catch (e) {

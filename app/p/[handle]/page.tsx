@@ -22,7 +22,7 @@ type Params = { params: Promise<{ handle: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle } = await params;
   const data = await getPublicProfileSummary(handle);
-  if (!data) return { title: "Profile not found" };
+  if (!data) return { title: "Profile not found", robots: { index: false, follow: false } };
   const name = data.profile.displayName;
   const description = data.scan
     ? `${data.scan.strongCount} strong and ${data.scan.possibleCount} possible on-chain links · scanned ${
@@ -32,6 +32,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return {
     title: name,
     description,
+    // These pages name real people next to "strong" links. Shareable, but
+    // kept out of search engines so a name search doesn't surface them.
+    robots: { index: false, follow: false },
     openGraph: { title: `${name} · ethos.tools`, description, type: "profile" },
     twitter: { card: "summary", title: `${name} · ethos.tools`, description },
   };

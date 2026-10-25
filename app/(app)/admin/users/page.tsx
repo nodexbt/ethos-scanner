@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppFooter } from "@/components/app-footer";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AppHeader } from "@/components/app-header";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface AllowedUser {
   profileId: number;
@@ -51,6 +51,8 @@ export default function AdminUsersPage() {
   const [addError, setAddError] = useState<string | null>(null);
 
   const [removingId, setRemovingId] = useState<number | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<{ profileId: number; label: string } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Redirect non-admins (and unauthenticated users) to the scanner
   useEffect(() => {
@@ -109,9 +111,8 @@ export default function AdminUsersPage() {
     }
   }
 
-  async function handleRemove(profileId: number, displayName: string | null) {
-    const label = displayName || `profile #${profileId}`;
-    if (!confirm(`Remove ${label} from the allowlist?`)) return;
+  // Throws on failure so the confirmation dialog shows the error.
+  async function removeUser(profileId: number, label: string) {
     setRemovingId(profileId);
     try {
       const res = await fetch(`/api/admin/users/${profileId}`, {
@@ -121,9 +122,8 @@ export default function AdminUsersPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Failed: ${res.status}`);
       }
+      toast.success(`Removed ${label} from the allowlist`);
       await loadUsers();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to remove");
     } finally {
       setRemovingId(null);
     }
@@ -131,15 +131,14 @@ export default function AdminUsersPage() {
 
   if (status === "loading" || !session || !isAdmin) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex items-center justify-center py-24">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
-      <AppHeader />
+    <div>
 
       <Card className="mb-6">
         <CardHeader>
@@ -254,7 +253,11 @@ export default function AdminUsersPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleRemove(u.profileId, u.displayName)}
+                      onClick={() => {
+                        setPendingRemove({ profileId: u.profileId, label: u.displayName || `profile #${u.profileId}` });
+                        setConfirmOpen(true);
+                      }}
+                      aria-label={isSelf ? "You can't remove yourself" : `Remove ${u.displayName || `profile #${u.profileId}`}`}
                       disabled={isSelf || removingId === u.profileId}
                       title={isSelf ? "Cannot remove yourself" : "Remove"}
                       className="h-8 w-8 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -273,7 +276,21 @@ export default function AdminUsersPage() {
         </CardContent>
       </Card>
 
-      <AppFooter />
+      {pendingRemove && (
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="Remove from the allowlist?"
+          description={
+            <>
+              <span className="font-medium text-foreground">{pendingRemove.label}</span> loses access unless they
+              meet the open access bar on their own.
+            </>
+          }
+          confirmLabel="Remove"
+          onConfirm={() => removeUser(pendingRemove.profileId, pendingRemove.label)}
+        />
+      )}
     </div>
   );
 }

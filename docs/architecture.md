@@ -75,14 +75,16 @@ The schema is in [`scripts/migrations/`](../scripts/migrations), applied in name
 ```text
 app/
   page.tsx                 landing page (ethos.tools)
-  scanner/                 Scanner / Scans / Network tabs (/scanner, client)
+  (app)/                   signed-in pages sharing one shell (components/app-shell.tsx):
+    scanner/, scan/…         the scanner and its /scan/x/<handle> deep links
+    scans/                   saved scans (?scope=mine|verified)
+    network/, admin/         network overview, allowlist admin
   sign-in/                 X sign-in card; NextAuth sends its errors here
   api/scan/                POST starts a scan; jobs/ polls it; quota/
   api/investigations/      list scans, attach X evidence
   api/network, watchlist, notifications, share, admin/
-  p/[handle]/              public, summary-only profile page (server-rendered)
-  s/[shareId]/             shared full result
-  scan/[address], scan/x/  deep links that open the scanner on a target
+  p/[handle]/              public, summary-only profile page (server-rendered, noindex)
+  s/[shareId]/             shared full result (noindex)
 lib/
   cluster-scanner.ts       the pipeline: discovery, correlation, scoring (~1.7k lines)
   alchemy.ts               transfer paging, retries, compute-unit accounting
@@ -93,7 +95,8 @@ lib/
   access.ts, auth.ts       who may sign in and call the API
   db/                      one module per table
 components/
-  results/                 overview, candidate cards and modal, degraded banner
+  scan/scan-provider.tsx   the running scan and the result on screen, shared by every page
+  results/                 result header, link list, evidence dialog, share dialog
   scans/, network/, ui/    lists, network view, shadcn-based primitives
 scripts/
   migrations/              SQL, applied by hand in the Supabase editor

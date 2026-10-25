@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Copy, Download, Globe, MoreHorizontal, Search, Share2, Wallet, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AvatarImg } from "@/components/ui/avatar-img";
@@ -39,7 +40,6 @@ export function ResultHeader({
 }) {
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [coverageOpen, setCoverageOpen] = useState(false);
-  const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
 
   const ethos = result.targetEthos;
   const wallets = result.targetWallets ?? [result.target];
@@ -56,13 +56,13 @@ export function ResultHeader({
       ...result.strongCluster.flatMap((c) => c.wallets || [c.address]),
       ...result.possibleCluster.flatMap((c) => c.wallets || [c.address]),
     ];
+    const unique = [...new Set(all)];
     try {
-      await navigator.clipboard.writeText([...new Set(all)].join("\n"));
-      setCopied("ok");
+      await navigator.clipboard.writeText(unique.join("\n"));
+      toast.success(`Copied ${unique.length} wallet addresses`);
     } catch {
-      setCopied("failed");
+      toast.error("Couldn't copy to the clipboard");
     }
-    setTimeout(() => setCopied(null), 2000);
   };
 
   const actionClass = "h-8 px-2.5 text-xs";
@@ -164,9 +164,6 @@ export function ResultHeader({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <span aria-live="polite" className="text-xs text-muted-foreground">
-            {copied === "ok" ? "Wallets copied" : copied === "failed" ? "Couldn't copy" : ""}
-          </span>
         </div>
       </div>
 

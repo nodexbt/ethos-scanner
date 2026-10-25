@@ -7,6 +7,9 @@ import type { Metadata } from "next";
 // undermining the "unguessable link" protection. no-referrer strips it.
 export const metadata: Metadata = {
   referrer: "no-referrer",
+  // Shared results name real people next to "strong" links: keep them
+  // out of search results. The link itself still works for anyone.
+  robots: { index: false, follow: false },
 };
 
 export default function ShareLayout({

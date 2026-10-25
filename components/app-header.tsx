@@ -147,6 +147,8 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
               <Link
                 href="/admin/users"
                 title="Admin: manage allowlist"
+                aria-label="Admin: manage allowlist"
+                aria-current={pathname?.startsWith("/admin") ? "page" : undefined}
                 className={`h-7 w-7 flex items-center justify-center rounded transition-colors ${
                   pathname?.startsWith("/admin")
                     ? "bg-muted text-foreground"
@@ -159,6 +161,7 @@ export function AppHeader({ onLogoClick, nav, quotaKey = 0 }: AppHeaderProps) {
             <button
               onClick={() => signOut()}
               title="Sign out"
+              aria-label="Sign out"
               className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <LogOut className="h-3.5 w-3.5" />

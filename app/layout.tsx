@@ -8,6 +8,7 @@ import { SessionProvider } from "@/components/session-provider";
 import { SmoothScroll } from "@/components/smooth-scroll";
 import { Background } from "@/components/background";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster, ReducedMotion } from "@/components/toaster";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -80,9 +81,12 @@ export default function RootLayout({
         <SessionProvider>
           <TooltipProvider delayDuration={200}>
             <ThemeProvider>
-              <Background />
-              <SmoothScroll />
-              <main className="min-h-screen">{children}</main>
+              <ReducedMotion>
+                <Background />
+                <SmoothScroll />
+                <main className="min-h-screen">{children}</main>
+                <Toaster />
+              </ReducedMotion>
             </ThemeProvider>
           </TooltipProvider>
         </SessionProvider>

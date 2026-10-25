@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
 import { formatRelativeTime, scanHref } from "@/lib/utils";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface Item {
   id: number;
@@ -32,12 +33,15 @@ function describe(n: Item): string {
   return `${l} has a ${strength} link in a scan of ${t}`;
 }
 
-/** Header bell: unread badge, dropdown of recent in-app alerts. */
+/**
+ * Header bell: unread badge and a menu of recent in-app alerts. Built on
+ * the dropdown primitive, so it closes on Escape, keeps focus inside and
+ * is announced. Alerts are marked read when the menu closes, after the
+ * user has had a chance to see which ones were new.
+ */
 export function NotificationsBell() {
   const [items, setItems] = useState<Item[]>([]);
   const [unread, setUnread] = useState(0);
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -60,61 +64,49 @@ export function NotificationsBell() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && unread > 0) {
-      fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
-      setUnread(0);
-      setItems((prev) => prev.map((i) => ({ ...i, read: true })));
-    }
+  const onOpenChange = (open: boolean) => {
+    if (open || unread === 0) return;
+    fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+    setUnread(0);
+    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
   };
 
   return (
-    <div ref={wrap} className="relative">
-      <button
-        onClick={toggle}
-        title="Alerts for profiles you watch"
-        className="h-7 w-7 relative flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-      >
-        <Bell className="h-3.5 w-3.5" />
-        {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center">
-            {unread > 9 ? "9+" : unread}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="absolute right-0 top-9 z-50 w-80 max-h-96 overflow-y-auto rounded-lg border border-border bg-background shadow-xl p-1">
-          <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground/70">Alerts</div>
-          {items.length === 0 ? (
-            <div className="px-2 pb-2 text-xs text-muted-foreground">
-              Nothing yet. Watch a profile from its scan overview to get alerted when it gains a new link.
-            </div>
-          ) : (
-            items.map((n) => (
-              <Link
-                key={n.id}
-                href={scanHref(n.payload.target)}
-                onClick={() => setOpen(false)}
-                className={`block rounded-md px-2 py-1.5 text-xs hover:bg-muted ${n.read ? "text-muted-foreground" : "text-foreground"}`}
-              >
-                <div>{describe(n)}</div>
-                <div className="text-[11px] text-muted-foreground/70 mt-0.5">{formatRelativeTime(n.createdAt)}</div>
-              </Link>
-            ))
+    <DropdownMenu onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={unread > 0 ? `Alerts, ${unread} unread` : "Alerts"}
+          className="relative flex h-7 w-7 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Bell className="h-3.5 w-3.5" />
+          {unread > 0 && (
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-semibold text-white">
+              {unread > 9 ? "9+" : unread}
+            </span>
           )}
-        </div>
-      )}
-    </div>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="max-h-96 w-80 overflow-y-auto">
+        <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">Alerts</div>
+        {items.length === 0 ? (
+          <p className="px-2 pb-2 text-xs text-muted-foreground">
+            Nothing yet. Watch a profile from its scan to get an alert when it gains a new link.
+          </p>
+        ) : (
+          items.map((n) => (
+            <DropdownMenuItem key={n.id} asChild className="block">
+              <Link href={scanHref(n.payload.target)} className={n.read ? "text-muted-foreground" : "text-foreground"}>
+                <span className="block">
+                  {!n.read && <span className="sr-only">New: </span>}
+                  {describe(n)}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">{formatRelativeTime(n.createdAt)}</span>
+              </Link>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

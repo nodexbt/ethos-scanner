@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -25,6 +26,13 @@ export interface InvestigationSummary {
   isPublic: boolean;
   ownerProfileId: number | null;
   lastScannedBy: { displayName: string; avatarUrl: string; profileUrl: string } | null;
+}
+
+/** Address of a saved scan: profile scans by id (the scanner then switches
+    to the handle), raw-wallet scans by address. */
+export function investigationHref(inv: { id: string; target: string }): string {
+  const profileId = inv.id.match(/^scan-p(\d+)$/)?.[1];
+  return profileId ? `/scan/x/${profileId}` : `/scan/${inv.target.toLowerCase()}`;
 }
 
 export const DEFAULT_SORT = "default";
@@ -137,7 +145,6 @@ interface ScansListProps {
   onScoreBandChange: (value: string) => void;
   currentInvestigationId: string | null;
   canDelete: (inv: InvestigationSummary) => boolean;
-  onLoad: (inv: InvestigationSummary) => void;
   /** Deletes the scan; throws on failure so the dialog can show it. */
   onDelete: (id: string) => Promise<void>;
   /** Optional server-side pagination knobs — when provided, the list
@@ -165,7 +172,6 @@ export function ScansList({
   onScoreBandChange,
   currentInvestigationId,
   canDelete,
-  onLoad,
   onDelete,
   totalCount,
   onLoadMore,
@@ -248,7 +254,7 @@ export function ScansList({
           {investigations.map((inv) => (
             <div
               key={inv.id}
-              className={`group flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
+              className={`group relative flex items-center gap-3 sm:gap-4 min-w-0 rounded-lg border border-border bg-card/60 backdrop-blur-sm px-3 sm:px-4 py-3 transition-colors ${
                 currentInvestigationId === inv.id ? "border-primary bg-primary/10" : "hover:bg-card/80"
               }`}
             >
@@ -259,9 +265,10 @@ export function ScansList({
                   <Wallet className="h-5 w-5 text-muted-foreground" />
                 </div>
               )}
-              <button
-                onClick={() => onLoad(inv)}
-                className="flex-1 min-w-0 text-left cursor-pointer"
+              {/* The whole row opens the scan (stretched link); delete sits above it. */}
+              <Link
+                href={investigationHref(inv)}
+                className="flex-1 min-w-0 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
               >
                 <div className="font-medium truncate">
                   {inv.targetName || `${inv.target.slice(0, 10)}...${inv.target.slice(-6)}`}
@@ -279,7 +286,7 @@ export function ScansList({
                   )}
                   <LinkCounts strong={inv.strongCount} possible={inv.possibleCount} />
                 </div>
-              </button>
+              </Link>
               {/* Fixed-width columns so values line up down the list. */}
               <div className="hidden md:grid md:grid-cols-[4.5rem_10.5rem_9rem_5.5rem] items-center gap-3 text-xs text-muted-foreground shrink-0">
                 <span className="flex items-center gap-0.5 tabular-nums" title="Ethos score">
@@ -321,7 +328,7 @@ export function ScansList({
                       setPendingDelete(inv);
                       setConfirmOpen(true);
                     }}
-                    className="h-7 w-7 flex items-center justify-center rounded md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
+                    className="relative z-10 h-7 w-7 flex items-center justify-center rounded md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
                     title="Delete scan"
                     aria-label={`Delete scan of ${nameOf(inv)}`}
                   >

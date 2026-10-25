@@ -2,15 +2,34 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   async redirects() {
-    return [
-      // Legacy routes from before the scanner moved under /scanner.
-      { source: "/network", destination: "/scanner?tab=network", permanent: true },
+    // Old in-page tab addresses (/?tab=… and /scanner?tab=…) now have pages.
+    const legacyTabs = ["/", "/scanner"].flatMap((source) => [
       {
-        source: "/",
-        has: [{ type: "query", key: "tab" }],
-        destination: "/scanner",
+        source,
+        has: [{ type: "query" as const, key: "tab", value: "network" }],
+        destination: "/network",
         permanent: true,
       },
+      {
+        source,
+        has: [{ type: "query" as const, key: "tab", value: "(?<scope>yours|verified)" }],
+        destination: "/scans?scope=:scope",
+        permanent: true,
+      },
+      {
+        source,
+        has: [{ type: "query" as const, key: "tab", value: "scans|all" }],
+        destination: "/scans",
+        permanent: true,
+      },
+    ]);
+    return [
+      ...legacyTabs,
+      // Follow Check needs the X search provider; until it is funded the
+      // address leads to the scanner instead of a "disabled" notice.
+      ...(process.env.NEXT_PUBLIC_TWITTER_SEARCH_ENABLED === "true"
+        ? []
+        : [{ source: "/follows", destination: "/scanner", permanent: false }]),
     ];
   },
   async headers() {

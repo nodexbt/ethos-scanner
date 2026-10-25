@@ -89,6 +89,7 @@ export function ScanLog({ logs, scanning, progress, defaultExpanded = true }: Sc
       <CardHeader className={expanded ? "pb-2" : ""}>
         <button
           onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
           className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight cursor-pointer hover:text-foreground/80 transition-colors w-full"
         >
           {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : (expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
@@ -105,7 +106,14 @@ export function ScanLog({ logs, scanning, progress, defaultExpanded = true }: Sc
           )}
         </button>
         {scanning && countdown && (
-          <div className="w-full bg-muted rounded-full h-1.5 mt-1">
+          <div
+            role="progressbar"
+            aria-label="Scan progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={countdown.percent}
+            className="w-full bg-muted rounded-full h-1.5 mt-1"
+          >
             <div
               className="bg-primary h-1.5 rounded-full transition-[width] duration-200 ease-linear"
               style={{ width: `${countdown.percent}%` }}
@@ -117,6 +125,9 @@ export function ScanLog({ logs, scanning, progress, defaultExpanded = true }: Sc
         <CardContent>
           <div
             ref={logContainerRef}
+            role="log"
+            aria-label="Scan log"
+            aria-live={scanning ? "polite" : "off"}
             className="bg-muted/50 rounded-lg p-3 max-h-[60vh] overflow-y-auto font-mono text-xs space-y-0.5"
           >
             {logs.map((entry, i) => (
