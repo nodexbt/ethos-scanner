@@ -25,6 +25,26 @@ async function fetchAttestedProfile(username: string, twitterId: string) {
   return ethos;
 }
 
+/** How long the Ethos fields in a session token are trusted before they
+    are re-read from the Ethos API. Access depends on score and human
+    verification, which change; without this a 30-day session kept whatever
+    the user had at sign-in. */
+const ETHOS_REFRESH_MS = 60 * 60 * 1000;
+
+function applyEthosToToken(
+  token: Record<string, unknown>,
+  ethos: NonNullable<Awaited<ReturnType<typeof fetchAttestedProfile>>>
+) {
+  token.ethosProfileId = ethos.profileId;
+  token.ethosDisplayName = ethos.displayName;
+  token.ethosAvatarUrl = ethos.avatarUrl;
+  token.ethosScore = ethos.score;
+  token.ethosHumanVerification = ethos.humanVerificationStatus;
+  token.ethosValidatorNftCount = ethos.validatorNftCount;
+  token.ethosProfileUrl = ethos.links?.profile;
+  token.ethosCheckedAt = Date.now();
+}
+
 let seededThisProcess = false;
 async function ensureSeeded() {
   if (seededThisProcess) return;
@@ -113,14 +133,32 @@ export const authOptions: NextAuthOptions = {
 
         // Fetch and attach Ethos profile (attested to the immutable Twitter ID)
         const ethos = await fetchAttestedProfile(data.username, data.id);
-        if (ethos) {
-          token.ethosProfileId = ethos.profileId;
-          token.ethosDisplayName = ethos.displayName;
-          token.ethosAvatarUrl = ethos.avatarUrl;
-          token.ethosScore = ethos.score;
-          token.ethosHumanVerification = ethos.humanVerificationStatus;
-          token.ethosValidatorNftCount = ethos.validatorNftCount;
-          token.ethosProfileUrl = ethos.links?.profile;
+        if (ethos) applyEthosToToken(token, ethos);
+      } else if (
+        token.ethosProfileId !== undefined &&
+        typeof token.twitterUsername === "string" &&
+        typeof token.twitterId === "string" &&
+        Date.now() - (typeof token.ethosCheckedAt === "number" ? token.ethosCheckedAt : 0) > ETHOS_REFRESH_MS
+      ) {
+        // Refresh the score / verification / validator fields the access
+        // rule below reads, at most hourly per session. An Ethos API error
+        // keeps the previous values (and retries next request) rather than
+        // signing everyone out during an outage; a profile that is no
+        // longer attested to this X account is revoked below.
+        try {
+          const ethos = await fetchAttestedProfile(token.twitterUsername, token.twitterId);
+          if (ethos) {
+            applyEthosToToken(token, ethos);
+          } else {
+            // Profile gone or no longer attested: drop the open-bar fields so
+            // only the allowlist can keep this session alive.
+            token.ethosScore = undefined;
+            token.ethosHumanVerification = undefined;
+            token.ethosValidatorNftCount = undefined;
+            token.ethosCheckedAt = Date.now();
+          }
+        } catch (err) {
+          console.error("Ethos refresh failed, keeping cached eligibility:", err);
         }
       }
 
@@ -149,6 +187,7 @@ export const authOptions: NextAuthOptions = {
           delete token.ethosHumanVerification;
           delete token.ethosValidatorNftCount;
           delete token.ethosProfileUrl;
+          delete token.ethosCheckedAt;
           delete token.twitterId;
           delete token.twitterUsername;
           token.name = undefined;

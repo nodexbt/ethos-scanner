@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInvestigationByShareId } from "@/lib/db/investigations";
+import { publicSharePayload } from "@/lib/share-payload";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(
@@ -27,8 +28,9 @@ export async function GET(
   }
   // Public-by-design payload behind an unguessable token; let browsers/CDN
   // reuse it briefly so repeat opens of a shared link skip the DB read.
-  // 60s bounds how long a just-unshared link can linger in caches.
-  return NextResponse.json(investigation, {
+  // 60s bounds how long a just-unshared link can linger in caches. Only
+  // what the share page renders goes out (no scan log, usage or notes).
+  return NextResponse.json(publicSharePayload(investigation), {
     headers: { "Cache-Control": "public, max-age=60" },
   });
 }
