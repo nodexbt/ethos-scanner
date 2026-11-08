@@ -21,6 +21,13 @@ interface AllowedUser {
   avatarUrl: string | null;
 }
 
+/** The allowlist from the API; throws on a non-OK response. */
+async function requestUsers(): Promise<AllowedUser[]> {
+  const res = await fetch("/api/admin/users");
+  if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+  return res.json();
+}
+
 function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
   const sec = Math.floor(diff / 1000);
@@ -62,16 +69,12 @@ export default function AdminUsersPage() {
     }
   }, [session, isAdmin, status, router]);
 
+  // Reload after an add or remove: show the spinner, then fetch.
   async function loadUsers() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/users");
-      if (!res.ok) {
-        throw new Error(`Failed to load: ${res.status}`);
-      }
-      const data = await res.json();
-      setUsers(data);
+      setUsers(await requestUsers());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load users");
     } finally {
@@ -79,8 +82,24 @@ export default function AdminUsersPage() {
     }
   }
 
+  // Initial load. State is set only in the promise callbacks, and a result
+  // that arrives after unmount (or after isAdmin changes) is dropped.
   useEffect(() => {
-    if (isAdmin) loadUsers();
+    if (!isAdmin) return;
+    let cancelled = false;
+    requestUsers()
+      .then((data) => {
+        if (!cancelled) setUsers(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load users");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isAdmin]);
 
   async function handleAdd(e: React.FormEvent) {
