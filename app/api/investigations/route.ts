@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth";
-import { listInvestigations, getInvestigationStats, mergeTwitterEvidence } from "@/lib/db/investigations";
+import { listInvestigations, getInvestigationStats } from "@/lib/db/investigations";
 import { parseListParams } from "@/lib/list-params";
-
-// Cap on the serialized evidence payload (4 MB) to prevent runaway writes.
-const MAX_TWITTER_EVIDENCE_BYTES = 4 * 1024 * 1024;
 
 interface ResolvedProfile {
   displayName: string;
@@ -144,51 +141,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ rows: enriched, total, ...(stats && { stats }) });
 }
 
-// POST /api/investigations — save/update
-// POST /api/investigations — attach X/Twitter evidence to a saved scan.
-// Scan results themselves are written server-side by /api/scan when a scan
-// completes; clients can no longer submit a cluster result.
-export async function POST(req: NextRequest) {
-  const auth = await requireAuth();
-  if (isAuthError(auth)) return auth;
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  }
-  const data = body as Record<string, unknown>;
-
-  if (typeof data.id !== "string" || !/^scan-(0x[a-f0-9]{40}|p\d{1,12})$/i.test(data.id)) {
-    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  }
-  const id = data.id.toLowerCase().startsWith("scan-p")
-    ? `scan-p${Number(data.id.slice(6))}`
-    : data.id.toLowerCase();
-
-  if (data.clusterResult !== undefined) {
-    return NextResponse.json(
-      { error: "Scan results are saved by the server; this endpoint only accepts twitterEvidence" },
-      { status: 400 }
-    );
-  }
-  if (!data.twitterEvidence || typeof data.twitterEvidence !== "object" || Array.isArray(data.twitterEvidence)) {
-    return NextResponse.json({ error: "twitterEvidence required" }, { status: 400 });
-  }
-  if (JSON.stringify(data.twitterEvidence).length > MAX_TWITTER_EVIDENCE_BYTES) {
-    return NextResponse.json({ error: "twitterEvidence too large" }, { status: 413 });
-  }
-
-  try {
-    const ok = await mergeTwitterEvidence(id, data.twitterEvidence as Record<string, unknown>);
-    if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  } catch (err) {
-    console.error("mergeTwitterEvidence failed:", err);
-    return NextResponse.json({ error: "Failed to save" }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true });
-}
+// There is no POST. Scan results are written server-side by /api/scan, and
+// X evidence is attached only by the operator-run backfill script
+// (scripts/backfill/scan-verified.ts --twitter) through saveInvestigation.
+// The old client POST let any signed-in user write arbitrary JSON into any
+// investigation's twitter_evidence, which ends up verbatim in the evidence
+// export; nothing in the UI called it any more, so it was removed.
