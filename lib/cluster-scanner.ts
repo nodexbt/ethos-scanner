@@ -325,6 +325,10 @@ export function findSharedFundingSources(
       const to = normalizeAddress(tx.to);
       if (to !== wallet || !from || from === wallet || from === ZERO_ADDRESS) continue;
       if (contractCache.get(from)) continue;
+      // A Binance hot wallet that withdrew to both wallets says nothing
+      // about them being one person; the same goes for any labelled
+      // service. Only an unknown EOA counts as a shared sender.
+      if (getAddressLabel(from)) continue;
       sources.add(from);
     }
     return sources;
@@ -413,8 +417,15 @@ export function scoreCandidate(
     }
   }
 
-  if (sharedFunders.length > 0) {
-    addSignal("shared_incoming_sender", W_SHARED_FUNDER, `senders=${sharedFunders.length}`);
+  // The first funder is already scored above (shared_first_funder /
+  // shared_exchange_funder). The same wallet must not also count as a
+  // shared incoming sender, or one funding event earns two signals.
+  const firstFunderAddrs = new Set(candidateFirstFunders.map((f) => f.funder));
+  const otherSharedSenders = sharedFirstFunder
+    ? sharedFunders.filter((s) => !firstFunderAddrs.has(s))
+    : sharedFunders;
+  if (otherSharedSenders.length > 0) {
+    addSignal("shared_incoming_sender", W_SHARED_FUNDER, `senders=${otherSharedSenders.length}`);
   }
 
   const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
@@ -432,7 +443,7 @@ export function scoreCandidate(
     outgoingCount: directInfo?.outgoingCount ?? 0,
     bidirectional: directInfo?.bidirectional ?? false,
     repeatTransfer: directInfo?.repeatTransfer ?? false,
-    sharedFundingSources: sharedFunders,
+    sharedFundingSources: otherSharedSenders,
     sharedFirstFunder,
     firstFunders: candidateFirstFunders,
     sharedCexDeposits: [],
@@ -682,9 +693,8 @@ async function scanNetwork(
   for (const sources of sharedFundingRaw.values()) {
     for (const src of sources) sharedFunderUnion.add(src);
   }
-  // Skip addresses already labeled in known-addresses (CEX hot wallets,
-  // labeled services) — those are intentional shared-funder candidates
-  // and already get the correct shared_exchange_funder downgrade.
+  // Labelled addresses (CEX hot wallets, bridges) never reach this list;
+  // findSharedFundingSources drops them, so only unknown EOAs are checked.
   const unknownFunders = [...sharedFunderUnion].filter((addr) => !getAddressLabel(addr));
   if (unknownFunders.length > 0) {
     log(
@@ -765,38 +775,56 @@ async function scanNetwork(
   log("info", `[${network}] Scoring candidates...`);
   const candidates = new Map<string, ClusterCandidate>();
 
-  const allCandFirstFunderAddrs = new Map<string, string>();
-  for (const [addr, ff] of candidateFirstFunders) {
-    allCandFirstFunderAddrs.set(ff.funder, addr);
-  }
-
-  for (const addr of allCandidateAddrs) {
+  // funded_by_cluster means "first funded by another wallet in the
+  // results", so it can only be decided once we know who is in the
+  // results. Pass one scores everyone without it; then any candidate
+  // whose first funder passed the threshold is rescored with it, and the
+  // loop repeats until no new wallet joins (a wallet pulled in this way
+  // can pull in the wallets it funded in turn).
+  function scoreOne(addr: string, fundedByCluster: boolean): ClusterCandidate {
     const directInfo = directWallets.get(addr);
     const sharedFunders = sharedFunding.get(addr) ?? [];
-    const hasSharedFirstFunder = sharedFirstFunderAddrs.has(addr);
     const candFF = candidateFirstFunders.get(addr);
-    const candFirstFunders: FirstFunderInfo[] = candFF ? [candFF] : [];
-
     const isFundedByTarget = candFF ? targetSet.has(candFF.funder) : false;
-    const isFundedByCluster = !isFundedByTarget && candFF
-      ? allCandidateAddrs.some((other) => other !== addr && other === candFF.funder)
-      : false;
-
-    const candidate = scoreCandidate(
+    return scoreCandidate(
       addr,
       directInfo,
       sharedFunders,
-      hasSharedFirstFunder,
+      sharedFirstFunderAddrs.has(addr),
       isFundedByTarget,
-      isFundedByCluster,
-      candFirstFunders,
+      !isFundedByTarget && fundedByCluster,
+      candFF ? [candFF] : [],
       network
     );
+  }
 
-    if (candidate.score >= POSSIBLE_SCORE_THRESHOLD) {
-      candidates.set(addr, candidate);
+  const scored = new Map<string, ClusterCandidate>();
+  const inResults = new Set<string>();
+  for (const addr of allCandidateAddrs) {
+    const candidate = scoreOne(addr, false);
+    scored.set(addr, candidate);
+    if (candidate.score >= POSSIBLE_SCORE_THRESHOLD) inResults.add(addr);
+  }
+
+  const fundedByClusterAddrs = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const addr of allCandidateAddrs) {
+      if (fundedByClusterAddrs.has(addr)) continue;
+      const funder = candidateFirstFunders.get(addr)?.funder;
+      if (!funder || funder === addr || !inResults.has(funder)) continue;
+      fundedByClusterAddrs.add(addr);
+      const candidate = scoreOne(addr, true);
+      scored.set(addr, candidate);
+      if (!inResults.has(addr)) {
+        inResults.add(addr);
+        changed = true;
+      }
     }
   }
+
+  for (const addr of inResults) candidates.set(addr, scored.get(addr)!);
 
   const strong = [...candidates.values()].filter((c) => c.confidence === "high").length;
   const possible = [...candidates.values()].filter((c) => c.confidence === "medium").length;
@@ -865,6 +893,44 @@ function findSharedEoaDestinations(
 
 const MAX_SHARED_DESTS_TO_VERIFY = 60;
 
+/**
+ * Fill the per-network contract caches for these destinations. The cache
+ * only holds the handful of addresses the funder step looked up, so
+ * without this a shared Stargate router or token contract would reach the
+ * exchange-forwarding check as if it were a personal deposit address.
+ * Labelled addresses are skipped (isExchangeAddress decides those). An
+ * RPC failure leaves the addresses unknown, which the callers treat as
+ * EOAs, the same as before this check existed.
+ */
+async function cacheContractStatus(
+  dests: Iterable<{ address: string; network: string }>,
+  contractCacheByNetwork: Map<string, Map<string, boolean>>,
+  log: (level: LogLevel, message: string) => void,
+): Promise<void> {
+  const byNetwork = new Map<string, string[]>();
+  for (const { address, network } of dests) {
+    if (contractCacheByNetwork.get(network)?.has(address) || getAddressLabel(address)) continue;
+    let list = byNetwork.get(network);
+    if (!list) byNetwork.set(network, (list = []));
+    list.push(address);
+  }
+  await parallel(
+    [...byNetwork],
+    async ([network, addrs]) => {
+      const chain = CHAINS.find((c) => c.name === network);
+      if (!chain) return;
+      let cache = contractCacheByNetwork.get(network);
+      if (!cache) contractCacheByNetwork.set(network, (cache = new Map()));
+      try {
+        for (const [addr, isContract] of await batchIsContract(addrs, chain)) cache.set(addr, isContract);
+      } catch (err) {
+        log("warn", `[${network}] Contract check of ${addrs.length} destination(s) failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    5
+  );
+}
+
 async function verifyCexDepositAddresses(
   sharedDests: Map<string, { wallets: Set<string>; network: string }>,
   log: (level: LogLevel, message: string) => void,
@@ -880,8 +946,10 @@ async function verifyCexDepositAddresses(
     destsToCheck,
     async ([destAddr, { wallets, network }]) => {
       // First check if the dest itself is a known exchange address
-      const directLabel = getAddressLabel(destAddr);
-      if (directLabel && !directLabel.includes("Bridge")) {
+      // Bridges and Stargate/Across routers are infrastructure, not
+      // exchanges; isExchangeAddress is the one place that rule lives.
+      const directLabel = isExchangeAddress(destAddr) ? getAddressLabel(destAddr) : null;
+      if (directLabel) {
         results.push({
           depositAddress: destAddr,
           exchange: directLabel,
@@ -897,8 +965,8 @@ async function verifyCexDepositAddresses(
       try {
         const outgoing = await getOutgoingTransfers(destAddr, chain, 20);
         for (const tx of outgoing) {
-          const label = getAddressLabel(tx.to);
-          if (label && !label.includes("Bridge")) {
+          const label = isExchangeAddress(tx.to) ? getAddressLabel(tx.to) : null;
+          if (label) {
             results.push({
               depositAddress: destAddr,
               exchange: label,
@@ -1494,7 +1562,15 @@ async function runClusterScanInner(
     ...possibleWithEthos.flatMap((c) => c.wallets || [c.address]),
   ];
   log("info", `Checking for shared CEX deposit addresses...`);
-  const sharedEoaDests = findSharedEoaDestinations(allClusterWallets, txsByNetwork, contractCacheByNetwork);
+  const sharedDestsRaw = findSharedEoaDestinations(allClusterWallets, txsByNetwork, contractCacheByNetwork);
+  await cacheContractStatus(
+    [...sharedDestsRaw].map(([address, { network }]) => ({ address, network })),
+    contractCacheByNetwork,
+    log
+  );
+  const sharedEoaDests = new Map(
+    [...sharedDestsRaw].filter(([address, { network }]) => !contractCacheByNetwork.get(network)?.get(address))
+  );
   let sharedCexDeposits: SharedCexDeposit[] = [];
 
   if (sharedEoaDests.size > 0) {
@@ -1566,10 +1642,18 @@ async function runClusterScanInner(
       }
     }
     const alreadyVerified = new Set(sharedCexDeposits.map((d) => `${d.network}:${d.depositAddress}`));
-    const toVerify = [...targetDests.entries()]
+    const toVerifyRaw = [...targetDests.entries()]
       .filter(([key]) => !alreadyVerified.has(key))
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 40);
+    await cacheContractStatus(
+      toVerifyRaw.map(([key, { network }]) => ({ address: key.slice(network.length + 1), network })),
+      contractCacheByNetwork,
+      log
+    );
+    const toVerify = toVerifyRaw.filter(
+      ([key, { network }]) => !contractCacheByNetwork.get(network)?.get(key.slice(network.length + 1))
+    );
     const deposits: SharedCexDeposit[] = [...sharedCexDeposits];
     if (toVerify.length > 0) {
       log("info", `Exchange deposits: verifying ${toVerify.length} destination(s) of the target...`);
@@ -1579,7 +1663,7 @@ async function runClusterScanInner(
           const dest = key.slice(network.length + 1);
           const chain = CHAINS.find((c) => c.name === network) ?? CHAINS[0];
           const outgoing = await getOutgoingTransfers(dest, chain, 20);
-          const hit = outgoing.map((t) => getAddressLabel(t.to)).find((l) => l && !l.includes("Bridge"));
+          const hit = outgoing.map((t) => (isExchangeAddress(t.to) ? getAddressLabel(t.to) : null)).find((l) => l);
           if (hit) deposits.push({ depositAddress: dest, exchange: hit, wallets: [...targetWallets], network });
         },
         5
