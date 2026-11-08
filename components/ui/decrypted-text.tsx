@@ -341,6 +341,11 @@ export default function DecryptedText({
     };
   }, [animateOn, hasAnimated, triggerDecrypt]);
 
+  // Reset the animation when the text or trigger changes. This is the
+  // "reset state on prop change" pattern; the component animates through
+  // intervals, so the compiler-friendly alternative (adjusting during
+  // render) would not cover encryptInstantly. One extra render is fine.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (animateOn === "click") {
       encryptInstantly();
@@ -351,6 +356,7 @@ export default function DecryptedText({
     setRevealedIndices(new Set());
     setDirection("forward");
   }, [animateOn, text, encryptInstantly]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Periodic replay: re-runs the decrypt animation on a timer.
   useEffect(() => {
