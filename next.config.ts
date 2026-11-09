@@ -12,11 +12,12 @@ import type { Redirect } from "next/dist/lib/load-custom-routes";
  *
  * What it does not buy yet: `script-src` keeps 'unsafe-inline'. Next.js
  * renders its React Server Components payload as inline <script> tags and
- * only nonces them when the page is rendered per request; the public
- * /p and /s pages are cached (ISR), so a nonce would either break them or
- * force them dynamic. Hashes don't help: the payload differs per page.
+ * only nonces them when the page is rendered per request. The landing
+ * page and the app shell (/scanner, /scans, /network) are prerendered at
+ * build time, so a nonce would either break them or force every page to
+ * render dynamically. Hashes don't help: the payload differs per page.
  * The upgrade path is a proxy.ts that sets a per-request nonce and
- * `'strict-dynamic'` once those pages can afford dynamic rendering.
+ * `'strict-dynamic'`, accepting dynamic rendering for those pages.
  *
  * `img-src https:` because Ethos avatars are hosted on many CDNs.
  * `'unsafe-eval'` is dev-only (Next's hot reloading needs it).
