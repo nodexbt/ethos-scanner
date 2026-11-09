@@ -52,6 +52,7 @@ async function resolveProfiles(
           "X-Ethos-Client": "ethos-scanner@0.1.0",
         },
         body: JSON.stringify({ profileIds: toFetch }),
+        signal: AbortSignal.timeout(10_000),
       }
     );
 

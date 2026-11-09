@@ -242,13 +242,23 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
       return (e as Error).message;
     }
     const req = requestFor(target);
-    // Saved already? Open it; its page loads the result. Otherwise scan.
-    const exists = await fetch(`/api/investigations/${target.investigationId}?fields=share`).then((r) => r.ok).catch(() => false);
-    if (exists) {
+    // Saved already? Open it; its page loads the result. Only a 404 means
+    // "not scanned yet": a 401/500/network error used to start (and charge
+    // for) a scan of something that was already saved.
+    let status: number;
+    try {
+      status = (await fetch(`/api/investigations/${target.investigationId}?fields=share`)).status;
+    } catch {
+      return "Could not reach the server to check for a saved scan. Try again.";
+    }
+    if (status === 404) return startScan(req);
+    if (status >= 200 && status < 300) {
       router.push(req.path);
       return null;
     }
-    return startScan(req);
+    return status === 401 || status === 403
+      ? "Your session has expired. Reload and sign in again."
+      : `Could not check for a saved scan (HTTP ${status}). Try again.`;
   }, [router, startScan]);
 
   // A scan started earlier (another tab, or before a reload) keeps running

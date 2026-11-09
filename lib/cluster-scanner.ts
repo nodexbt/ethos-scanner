@@ -527,6 +527,8 @@ async function scanNetwork(
   truncated: { analyzed: number; total: number } | null;
   /** Candidate wallets whose history exceeded the per-candidate cap. */
   cappedCandidates: number;
+  /** Target wallets whose history exceeded the MAX_PAGES cap. */
+  cappedTargets: number;
 }> {
   const network = chain.name;
   // Exclude every attested wallet from becoming a candidate, but only fetch
@@ -540,16 +542,25 @@ async function scanNetwork(
     `[${network}] Fetching target transactions (${targetWallets.length} wallet${targetWallets.length === 1 ? "" : "s"})...`
   );
   const txsByTargetWallet = new Map<string, AssetTransfer[]>();
+  const cappedTargets = new Set<string>();
   await parallel(
     targetWallets,
     async (wallet) => {
       txsByTargetWallet.set(
         wallet,
-        await getAllTransactions(wallet, chain, { maxPages: MAX_PAGES, onFailure: onPartial, scope: "all" })
+        await getAllTransactions(wallet, chain, {
+          maxPages: MAX_PAGES,
+          onFailure: onPartial,
+          scope: "all",
+          onCapped: () => cappedTargets.add(wallet),
+        })
       );
     },
     CONCURRENCY
   );
+  if (cappedTargets.size > 0) {
+    log("info", `[${network}] ${cappedTargets.size} target wallet(s) had more history than the ${MAX_PAGES * 1000}-transfer cap`);
+  }
   const txs = [...txsByTargetWallet.values()].flat();
   log("info", `[${network}] ${txs.length} transactions fetched`);
   stepDone?.(`${network}: Fetched transactions`);
@@ -567,6 +578,7 @@ async function scanNetwork(
       targetFirstFunders: [],
       truncated: null,
       cappedCandidates: 0,
+      cappedTargets: cappedTargets.size,
     };
   }
 
@@ -664,6 +676,8 @@ async function scanNetwork(
         maxTxs: CANDIDATE_MAX_TXS,
         scope: "all",
         onCapped: () => cappedCandidates.add(addr),
+        // A candidate with missing history has missing signals.
+        onFailure: onPartial,
       });
       candidateTxsMap.set(addr, candTxs);
     },
@@ -725,7 +739,13 @@ async function scanNetwork(
   await parallel(
     targetWallets,
     async (wallet) => {
-      const ff = await getFirstFunder(wallet, chain);
+      let ff: Awaited<ReturnType<typeof getFirstFunder>>;
+      try {
+        ff = await getFirstFunder(wallet, chain);
+      } catch (err) {
+        onPartial?.(`${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
       if (ff) {
         targetFirstFunders.push({
           chain: network,
@@ -746,7 +766,13 @@ async function scanNetwork(
   await parallel(
     allCandidateAddrs,
     async (addr) => {
-      const ff = await getFirstFunder(addr, chain);
+      let ff: Awaited<ReturnType<typeof getFirstFunder>>;
+      try {
+        ff = await getFirstFunder(addr, chain);
+      } catch (err) {
+        onPartial?.(`${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
       if (ff) {
         candidateFirstFunders.set(addr, {
           chain: network,
@@ -831,7 +857,7 @@ async function scanNetwork(
   log("success", `[${network}] Scoring complete: ${strong} strong, ${possible} possible`);
   stepDone?.(`${network}: Scoring complete`);
 
-  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders, truncated, cappedCandidates: cappedCandidates.size };
+  return { directWallets, candidates, candidateTxs: candidateTxsMap, contractCache, txCount: txs.length, targetFirstFunders, truncated, cappedCandidates: cappedCandidates.size, cappedTargets: cappedTargets.size };
 }
 
 // --- Shared CEX deposit address detection ---
@@ -933,7 +959,7 @@ async function cacheContractStatus(
 
 async function verifyCexDepositAddresses(
   sharedDests: Map<string, { wallets: Set<string>; network: string }>,
-  log: (level: LogLevel, message: string) => void,
+  onFailure: (network: string, reason: string) => void,
 ): Promise<{ results: SharedCexDeposit[]; checked: number; total: number }> {
   const results: SharedCexDeposit[] = [];
   // Destinations shared by the most cluster wallets are the most telling;
@@ -976,7 +1002,11 @@ async function verifyCexDepositAddresses(
             return; // found exchange, done with this address
           }
         }
-      } catch {}
+      } catch (err) {
+        // Unknown whether this is a deposit address: say so rather than
+        // report "no shared exchange deposits" as a finding.
+        onFailure(network, `exchange check of ${destAddr.slice(0, 10)}… failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     },
     5
   );
@@ -1151,6 +1181,11 @@ async function runClusterScanInner(
     if (result.truncated) {
       coverageNotes.push(
         `${chain.name}: ${result.truncated.total} Ethos-profile counterparties found; the ${result.truncated.analyzed} strongest were analyzed`
+      );
+    }
+    if (result.cappedTargets > 0) {
+      coverageNotes.push(
+        `${chain.name}: ${result.cappedTargets} target wallet${result.cappedTargets === 1 ? "" : "s"} had more than ${(MAX_PAGES * 1000).toLocaleString()} transfers per direction; only the oldest were analyzed`
       );
     }
     if (result.cappedCandidates > 0) {
@@ -1462,7 +1497,9 @@ async function runClusterScanInner(
               discoveredWallets.set(dest, { funderAddress: funder, chain: chainName });
             }
           }
-        } catch {}
+        } catch (err) {
+          markDegraded(chainName, `multi-hop trace of ${funder.slice(0, 10)}… failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       },
       5
     );
@@ -1507,7 +1544,13 @@ async function runClusterScanInner(
           if (candidateProfileIds.has(profile.profileId)) return;
 
           const chain = CHAINS.find((c) => c.name === meta.chain) ?? CHAINS[0];
-          const ownFirst = await getFirstFunder(addr, chain);
+          let ownFirst: Awaited<ReturnType<typeof getFirstFunder>> = null;
+          try {
+            ownFirst = await getFirstFunder(addr, chain);
+          } catch (err) {
+            // Falls back to the weaker multi_hop_funding signal below.
+            markDegraded(meta.chain, `${err instanceof Error ? err.message : String(err)}`);
+          }
           const sameFirstFunder = ownFirst?.funder === meta.funderAddress;
           const funderIsTargets = targetFunderSet.has(meta.funderAddress);
           const label = getAddressLabel(meta.funderAddress) ?? `${meta.funderAddress.slice(0, 10)}…`;
@@ -1575,7 +1618,7 @@ async function runClusterScanInner(
 
   if (sharedEoaDests.size > 0) {
     log("info", `Found ${sharedEoaDests.size} shared EOA destination(s), verifying CEX connections...`);
-    const verified = await verifyCexDepositAddresses(sharedEoaDests, log);
+    const verified = await verifyCexDepositAddresses(sharedEoaDests, markDegraded);
     sharedCexDeposits = verified.results;
     if (verified.checked < verified.total) {
       coverageNotes.push(
@@ -1662,7 +1705,13 @@ async function runClusterScanInner(
         async ([key, { network }]) => {
           const dest = key.slice(network.length + 1);
           const chain = CHAINS.find((c) => c.name === network) ?? CHAINS[0];
-          const outgoing = await getOutgoingTransfers(dest, chain, 20);
+          let outgoing: Awaited<ReturnType<typeof getOutgoingTransfers>>;
+          try {
+            outgoing = await getOutgoingTransfers(dest, chain, 20);
+          } catch (err) {
+            markDegraded(network, `exchange check of ${dest.slice(0, 10)}… failed: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+          }
           const hit = outgoing.map((t) => (isExchangeAddress(t.to) ? getAddressLabel(t.to) : null)).find((l) => l);
           if (hit) deposits.push({ depositAddress: dest, exchange: hit, wallets: [...targetWallets], network });
         },
@@ -1680,7 +1729,13 @@ async function runClusterScanInner(
         targetDeposits,
         async (dep) => {
           const chain = CHAINS.find((c) => c.name === dep.network) ?? CHAINS[0];
-          const incoming = await getIncomingTransfers(dep.depositAddress, chain, 1000);
+          let incoming: Awaited<ReturnType<typeof getIncomingTransfers>>;
+          try {
+            incoming = await getIncomingTransfers(dep.depositAddress, chain, 1000);
+          } catch (err) {
+            markDegraded(dep.network, `sender lookup for deposit address ${dep.depositAddress.slice(0, 10)}… failed: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+          }
           const senders = new Set(incoming.map((t) => t.from).filter((f) => !knownAddresses.has(f) && f !== ZERO_ADDRESS));
           if (senders.size > MAX_SENDERS) {
             log("info", `Exchange deposits: ${dep.depositAddress.slice(0, 10)}… has ${senders.size} senders — treating as a shared service, skipped`);

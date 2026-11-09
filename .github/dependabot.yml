@@ -1,0 +1,21 @@
+# Keeps the lockfile and the CI actions current. Security advisories open
+# a PR as soon as they are published; everything else is batched weekly so
+# the PR list stays readable.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
