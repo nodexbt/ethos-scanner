@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# The workflow token only needs to read the repository. Nothing here
+# writes to GitHub, so nothing in it can if a step is compromised.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
