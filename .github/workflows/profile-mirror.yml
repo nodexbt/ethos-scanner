@@ -6,6 +6,11 @@ on:
     - cron: "0 3 * * *"
   workflow_dispatch:
 
+# The workflow token only needs to read the repository. Nothing here
+# writes to GitHub, so nothing in it can if a step is compromised.
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
