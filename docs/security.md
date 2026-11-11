@@ -98,7 +98,7 @@ A scan that silently loses data is worse than one that fails, because the saved 
 
 Settings on the GitHub repository itself, so the controls above cannot be skipped by whoever holds the keys. Applied 2026-11-11.
 
-- **`main` is protected by a ruleset with no bypass actors, the owner included.** Every change arrives through a pull request, the `check` CI job must pass on a branch that is up to date with `main`, review threads must be resolved, and the branch can neither be deleted nor force-pushed.
+- **`main` is protected by a ruleset with no bypass actors, the owner included.** Every change arrives through a pull request, the `check` CI job and the CodeQL analysis must pass on a branch that is up to date with `main`, review threads must be resolved, and the branch can neither be deleted nor force-pushed.
 - **Secret scanning with push protection** rejects a push that contains a recognised provider credential before it reaches the repository.
 - **CodeQL default setup** runs static analysis on every pull request and on a schedule, for the TypeScript and the workflow files.
 - **Dependabot alerts and security updates** are on, in addition to the version-update schedule in `.github/dependabot.yml`.
