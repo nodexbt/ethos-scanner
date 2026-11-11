@@ -75,6 +75,7 @@ export const authOptions: NextAuthOptions = {
               Authorization: `Bearer ${tokens.access_token}`,
               "User-Agent": "ethos-scanner",
             },
+            signal: AbortSignal.timeout(15_000),
           });
           if (!res.ok) {
             const body = await res.text();

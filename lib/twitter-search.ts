@@ -74,6 +74,7 @@ async function callUpstream(url: string, key: string): Promise<Response> {
       const resp = await fetch(url, {
         headers: { "x-api-key": key },
         cache: "no-store",
+        signal: AbortSignal.timeout(20_000),
       });
       if (resp.ok) return resp;
       const retriable = resp.status === 429 || resp.status >= 500;

@@ -85,6 +85,19 @@ interface AssetTransfersResponse {
 
 const MAX_RETRIES = 4;
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+/** A hung socket must not stall a chain forever while the job heartbeat
+    keeps saying "running". A timed-out request is retried like a 5xx. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/** An Alchemy request that failed after retries. Lookups that can't tell
+    "nothing there" from "couldn't check" throw this instead of returning
+    an empty result, so the scan can mark itself degraded. */
+export class AlchemyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AlchemyError";
+  }
+}
 
 async function alchemyRequest(
   chainRpcBase: string,
@@ -103,6 +116,7 @@ async function alchemyRequest(
           method,
           params,
         }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
 
       if (response.ok) {
@@ -132,8 +146,7 @@ export async function getFirstFunder(
   wallet: string,
   chain: (typeof CHAINS)[number]
 ): Promise<{ funder: string; txHash: string; value: number; asset: string | null } | null> {
-  try {
-    const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
+  const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
       {
         fromBlock: "0x0",
         toAddress: wallet.toLowerCase(),
@@ -145,22 +158,21 @@ export async function getFirstFunder(
         withMetadata: false,
         excludeZeroValue: true,
       },
-    ])) as AssetTransfersResponse | null;
+  ])) as (AssetTransfersResponse & { error?: { message?: string } }) | null;
 
-    if (!data) return null;
-    const transfers = data.result?.transfers;
-    if (!transfers || transfers.length === 0) return null;
+  // null here means the request failed after retries, not "no funder".
+  if (!data) throw new AlchemyError(`first funder lookup for ${wallet.slice(0, 10)}… failed on ${chain.name}`);
+  if (data.error) throw new AlchemyError(`first funder lookup for ${wallet.slice(0, 10)}… rejected on ${chain.name}: ${data.error.message ?? "RPC error"}`);
+  const transfers = data.result?.transfers;
+  if (!transfers || transfers.length === 0) return null;
 
-    const first = transfers[0];
-    return {
-      funder: first.from.toLowerCase(),
-      txHash: first.hash,
-      value: first.value || 0,
-      asset: first.asset ?? null,
-    };
-  } catch {
-    return null;
-  }
+  const first = transfers[0];
+  return {
+    funder: first.from.toLowerCase(),
+    txHash: first.hash,
+    value: first.value || 0,
+    asset: first.asset ?? null,
+  };
 }
 
 /** Get outgoing ETH transfers from a wallet on a given chain */
@@ -169,8 +181,7 @@ export async function getOutgoingTransfers(
   chain: (typeof CHAINS)[number],
   maxCount: number = 100
 ): Promise<{ to: string; value: number; txHash: string }[]> {
-  try {
-    const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
+  const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
       {
         fromBlock: "0x0",
         fromAddress: wallet.toLowerCase(),
@@ -181,20 +192,20 @@ export async function getOutgoingTransfers(
         withMetadata: false,
         excludeZeroValue: true,
       },
-    ])) as AssetTransfersResponse;
+  ])) as AssetTransfersResponse | null;
 
-    const transfers = data.result?.transfers;
-    if (!transfers) return [];
+  if (!data) throw new AlchemyError(`outgoing transfers for ${wallet.slice(0, 10)}… failed on ${chain.name}`);
+  const transfers = data.result?.transfers;
+  if (!transfers) return [];
 
-    return transfers.map((t) => ({
+  // `to` is null on contract-creation rows.
+  return transfers
+    .filter((t) => t.to)
+    .map((t) => ({
       to: t.to.toLowerCase(),
       value: t.value || 0,
       txHash: t.hash,
     }));
-  } catch (err) {
-    // Silently return empty on failure
-    return [];
-  }
 }
 
 /** Fetch all transactions for a wallet (paginated, both directions) */
@@ -301,8 +312,7 @@ export async function getIncomingTransfers(
   chain: (typeof CHAINS)[number],
   maxCount: number = 1000
 ): Promise<{ from: string; value: number; txHash: string }[]> {
-  try {
-    const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
+  const data = (await alchemyRequest(chain.rpcBase, "alchemy_getAssetTransfers", [
       {
         fromBlock: "0x0",
         toAddress: wallet.toLowerCase(),
@@ -312,15 +322,13 @@ export async function getIncomingTransfers(
         withMetadata: false,
         excludeZeroValue: true,
       },
-    ])) as AssetTransfersResponse | null;
-    const transfers = data?.result?.transfers;
-    if (!transfers) return [];
-    return transfers
-      .filter((t) => t.from)
-      .map((t) => ({ from: t.from.toLowerCase(), value: t.value || 0, txHash: t.hash }));
-  } catch {
-    return [];
-  }
+  ])) as AssetTransfersResponse | null;
+  if (!data) throw new AlchemyError(`incoming transfers for ${wallet.slice(0, 10)}… failed on ${chain.name}`);
+  const transfers = data.result?.transfers;
+  if (!transfers) return [];
+  return transfers
+    .filter((t) => t.from)
+    .map((t) => ({ from: t.from.toLowerCase(), value: t.value || 0, txHash: t.hash }));
 }
 
 /**
@@ -356,6 +364,7 @@ export async function batchGetCode(
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(batchPayload),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           });
           if (resp.ok || !RETRYABLE_STATUSES.has(resp.status)) break;
         } catch {

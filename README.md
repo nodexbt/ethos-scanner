@@ -34,6 +34,7 @@ Next.js 16 · React 19 · TypeScript · Tailwind 4 + shadcn · Supabase (Postgre
 | Persistence rules (degraded guard, edge graph diff) | [`lib/db/investigations.ts`](lib/db/investigations.ts) with [`tests/degraded-guard.test.ts`](tests/degraded-guard.test.ts) |
 | Why things are the way they are | [docs/decisions.md](docs/decisions.md) |
 | How it fits together | [docs/architecture.md](docs/architecture.md) |
+| How it is defended, and against what | [docs/security.md](docs/security.md) |
 
 ## Run it locally
 

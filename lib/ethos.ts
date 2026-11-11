@@ -2,6 +2,17 @@ const ETHOS_API = "https://api.ethos.network/api/v2";
 const HEADERS = {
   "X-Ethos-Client": "ethos-scanner@0.1.0",
 };
+/** Every Ethos call gives up after this long; a hung socket must not stall
+    a scan while its heartbeat keeps saying "running". */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+function ethosFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    headers: { ...HEADERS, ...(init.headers as Record<string, string> | undefined) },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+}
 
 export interface EthosProfile {
   id: number;
@@ -111,7 +122,7 @@ export async function fetchProfile(
     return fetchProfileByX(identifier);
   }
 
-  const response = await fetch(url, { headers: HEADERS });
+  const response = await ethosFetch(url);
   if (!response.ok) return null;
   return response.json();
 }
@@ -121,7 +132,7 @@ export async function fetchProfile(
  * an all-digit handle (X allows "12345") as an Ethos profile id.
  */
 export async function fetchProfileByX(handle: string): Promise<EthosProfile | null> {
-  const response = await fetch(`${ETHOS_API}/user/by/x/${encodeURIComponent(handle)}`, { headers: HEADERS });
+  const response = await ethosFetch(`${ETHOS_API}/user/by/x/${encodeURIComponent(handle)}`);
   if (!response.ok) return null;
   return response.json();
 }
@@ -140,52 +151,59 @@ export async function fetchProfilesByAddresses(
   const BATCH_SIZE = 500;
   for (let i = 0; i < unique.length; i += BATCH_SIZE) {
     const chunk = unique.slice(i, i + BATCH_SIZE);
-    try {
-      const response = await fetch(`${ETHOS_API}/users/by/address`, {
-        method: "POST",
-        headers: { ...HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({ addresses: chunk }),
-      });
-
-      if (!response.ok) {
-        onBatchError?.(`Ethos bulk lookup returned ${response.status} for ${chunk.length} addresses`);
-        // Fallback: try individual lookups for this chunk
-        for (const addr of chunk) {
-          try {
-            const profile = await fetchProfile(addr);
-            if (profile && profile.profileId) {
-              // Find which address this profile belongs to
-              const wallets = getWalletAddresses(profile);
-              for (const w of wallets) {
-                if (chunk.includes(w)) result.set(w, profile);
-              }
-              // Also map by the queried address
-              result.set(addr, profile);
-            }
-          } catch {
-            // Skip
-          }
-        }
-        continue;
-      }
-
-      const data = await response.json();
-      const profiles: EthosProfile[] = Array.isArray(data) ? data : (data.values || []);
-
-      for (const profile of profiles) {
-        if (!profile || !profile.profileId) continue;
-        // Map by all wallet addresses in userkeys
-        const wallets = getWalletAddresses(profile);
-        for (const w of wallets) {
-          result.set(w, profile);
-        }
-      }
-    } catch (err) {
-      onBatchError?.(`Ethos bulk lookup threw for ${chunk.length} addresses: ${err instanceof Error ? err.message : String(err)}`);
+    const profiles = await fetchAddressBatch(chunk, onBatchError);
+    for (const profile of profiles) {
+      if (!profile || !profile.profileId) continue;
+      // Map by all wallet addresses in userkeys
+      for (const w of getWalletAddresses(profile)) result.set(w, profile);
     }
   }
 
   return result;
+}
+
+const BULK_ATTEMPTS = 3;
+
+/**
+ * One bulk address batch, retried with backoff on 429/5xx. On a rate limit
+ * the old code fell back to one request per address: up to 500 sequential
+ * calls against an API that had just asked us to slow down. Now the batch
+ * is retried a few times and, if it still fails, reported through
+ * onBatchError so the scan is marked degraded instead of quietly losing
+ * every candidate in the chunk.
+ */
+async function fetchAddressBatch(
+  chunk: string[],
+  onBatchError?: (reason: string) => void
+): Promise<EthosProfile[]> {
+  let reason = "";
+  for (let attempt = 1; attempt <= BULK_ATTEMPTS; attempt++) {
+    try {
+      const response = await ethosFetch(`${ETHOS_API}/users/by/address`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addresses: chunk }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const profiles = Array.isArray(data) ? data : data?.values;
+        if (!Array.isArray(profiles)) {
+          // A 200 with an unexpected body is a failure, not "no profiles".
+          reason = `Ethos bulk lookup returned an unexpected body for ${chunk.length} addresses`;
+          break;
+        }
+        return profiles as EthosProfile[];
+      }
+      reason = `Ethos bulk lookup returned ${response.status} for ${chunk.length} addresses`;
+      const retriable = response.status === 429 || response.status >= 500;
+      if (!retriable) break;
+    } catch (err) {
+      reason = `Ethos bulk lookup threw for ${chunk.length} addresses: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (attempt < BULK_ATTEMPTS) await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+  }
+  onBatchError?.(reason);
+  return [];
 }
 
 /**
@@ -201,9 +219,9 @@ export async function fetchProfilesByIds(profileIds: number[]): Promise<EthosPro
   if (profileIds.length > PROFILE_ID_BATCH_SIZE) {
     throw new Error(`fetchProfilesByIds: max ${PROFILE_ID_BATCH_SIZE} ids per call`);
   }
-  const response = await fetch(`${ETHOS_API}/users/by/profile-id`, {
+  const response = await ethosFetch(`${ETHOS_API}/users/by/profile-id`, {
     method: "POST",
-    headers: { ...HEADERS, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ profileIds }),
   });
   if (!response.ok) {
@@ -216,10 +234,7 @@ export async function fetchProfilesByIds(profileIds: number[]): Promise<EthosPro
 export async function fetchInvitationTree(
   profileId: number
 ): Promise<Invitation[]> {
-  const response = await fetch(
-    `${ETHOS_API}/invitations/accepted/${profileId}/tree`,
-    { headers: HEADERS }
-  );
+  const response = await ethosFetch(`${ETHOS_API}/invitations/accepted/${profileId}/tree`);
   if (!response.ok) return [];
   const data = await response.json();
   return data.values || data || [];
@@ -231,14 +246,11 @@ export async function fetchActivities(
   filter: string[] = ["review"],
   limit: number = 100
 ): Promise<ReviewActivity[]> {
-  const response = await fetch(
+  const response = await ethosFetch(
     `${ETHOS_API}/activities/profile/${direction}`,
     {
       method: "POST",
-      headers: {
-        ...HEADERS,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userkey: `profileId:${profileId}`,
         filter,

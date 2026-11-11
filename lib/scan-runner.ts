@@ -82,10 +82,27 @@ export async function runScanJob(
       logs: [...logs],
       progress,
       heartbeat_at: new Date().toISOString(),
-    }).finally(() => {
-      flushing = null;
-    });
+    })
+      .catch((err: unknown) => {
+        // A missed heartbeat is recoverable (the next tick retries); an
+        // unhandled rejection inside the after() worker is not.
+        console.error(`scan job ${jobId}: progress flush failed:`, err);
+        dirty = true;
+      })
+      .finally(() => {
+        flushing = null;
+      });
     await flushing;
+  };
+
+  /** The final status write must not throw past the runner: the job row
+      would stay "running" with no heartbeat until the stale sweep. */
+  const finish = async (patch: Parameters<typeof updateScanJob>[1]) => {
+    try {
+      await updateScanJob(jobId, patch);
+    } catch (err) {
+      console.error(`scan job ${jobId}: final status write failed:`, err);
+    }
   };
 
   await updateScanJob(jobId, { status: "running", started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString() });
@@ -104,7 +121,7 @@ export async function runScanJob(
     });
     clearInterval(ticker);
     if (flushing) await flushing;
-    await updateScanJob(jobId, {
+    await finish({
       status: "done",
       logs,
       progress,
@@ -116,7 +133,7 @@ export async function runScanJob(
   } catch (err) {
     clearInterval(ticker);
     if (flushing) await flushing;
-    await updateScanJob(jobId, {
+    await finish({
       status: "failed",
       logs,
       progress,

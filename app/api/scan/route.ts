@@ -8,6 +8,9 @@ import { executeScan, runScanJob } from "@/lib/scan-runner";
 
 export const maxDuration = 300; // 5 min: covers the job that runs after the response
 
+/** Longest thing resolveScanTarget accepts is a profile URL; 200 is generous. */
+const MAX_TARGET_LENGTH = 200;
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
@@ -28,8 +31,14 @@ export async function POST(req: NextRequest) {
 
   // Accept an address, @handle, or profile URL; resolve server-side to the
   // profile's full attested-wallet set (don't trust a client wallet list).
-  const { target } = await req.json();
-  const resolved = typeof target === "string" ? await resolveScanTarget(target) : null;
+  // Malformed JSON is a 400, not a 500 with a stack trace in the logs, and
+  // the input is length-capped before anything looks at it.
+  const body = (await req.json().catch(() => null)) as { target?: unknown } | null;
+  const target = body?.target;
+  if (typeof target !== "string" || target.length === 0 || target.length > MAX_TARGET_LENGTH) {
+    return json({ error: "Expected { target: string } with an address, @handle or profile URL" }, 400);
+  }
+  const resolved = await resolveScanTarget(target);
   if (!resolved) {
     return json({ error: "No Ethos profile or valid address found for that input" }, 400);
   }

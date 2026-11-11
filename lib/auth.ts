@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
+import { isTrustedOrigin } from "@/lib/origin";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { isAdminProfileId } from "@/lib/admin";
 import { isAllowed } from "@/lib/db/allowed-users";
@@ -21,6 +23,12 @@ export interface AuthedUser {
  * within ~10 seconds, even if their JWT is still valid.
  */
 export async function requireAuth(): Promise<AuthedUser | NextResponse> {
+  // Refuse requests another site made the browser send (see lib/origin.ts)
+  // before touching the session at all.
+  if (!isTrustedOrigin(await headers())) {
+    return NextResponse.json({ error: "Cross-site request refused" }, { status: 403 });
+  }
+
   const session = await getServerSession(authOptions);
   if (!session || !session.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
