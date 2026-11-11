@@ -94,6 +94,18 @@ A scan that silently loses data is worse than one that fails, because the saved 
 - **Lockfile committed; `npm ci` in CI**, so the build is reproducible and a tampered registry version cannot slip in unnoticed.
 - **Vercel preview deployments per pull request** give a running copy to check before merge.
 
+### Repository protections (ASVS V1.14, V14.1; Top 10 A05, A08)
+
+Settings on the GitHub repository itself, so the controls above cannot be skipped by whoever holds the keys. Applied 2026-11-11.
+
+- **`main` is protected by a ruleset with no bypass actors, the owner included.** Every change arrives through a pull request, the `check` CI job must pass on a branch that is up to date with `main`, review threads must be resolved, and the branch can neither be deleted nor force-pushed.
+- **Secret scanning with push protection** rejects a push that contains a recognised provider credential before it reaches the repository.
+- **CodeQL default setup** runs static analysis on every pull request and on a schedule, for the TypeScript and the workflow files.
+- **Dependabot alerts and security updates** are on, in addition to the version-update schedule in `.github/dependabot.yml`.
+- **GitHub Actions run with a read-only default token** and cannot approve pull requests, so a compromised action cannot push or self-approve.
+- **Private vulnerability reporting** is enabled, matching the policy in `SECURITY.md`.
+- **Merged branches are deleted automatically**, keeping stale heads from being pushed to by mistake.
+
 ## Accepted risks and open decisions
 
 Written down so they are decisions, not omissions.
